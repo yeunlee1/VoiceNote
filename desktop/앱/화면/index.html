@@ -29,7 +29,7 @@
 <a class="skip-link" href="#main">본문으로 이동</a>
 <header class="topbar">
   <div class="wordmark"><svg class="app-symbol" aria-hidden="true" focusable="false"><use href="#app-symbol"/></svg><strong>VoiceNote</strong></div>
-  <button id="open-ai-settings" class="ai-chip" type="button" aria-haspopup="dialog" aria-controls="ai-settings"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-sliders"/></svg><span>AI 설정</span><span id="ai-status-label" class="ai-chip-state">확인 중</span></button>
+  <button id="open-settings" class="ai-chip" type="button" aria-haspopup="dialog" aria-controls="settings"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-sliders"/></svg><span>설정</span><span id="ai-status-label" class="ai-chip-state">확인 중</span></button>
 </header>
 
 <div class="workbench">
@@ -40,7 +40,6 @@
     <div id="meeting-history" class="history-list"></div>
   </section>
   <section class="rail-section rail-tools" aria-label="작업 도구">
-    <button id="open-data-folder" type="button" class="tool-button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg>회의자료 폴더 열기</button>
     <button id="clear" class="tool-button" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-eraser"/></svg>현재 화면 비우기</button>
     <button id="shutdown" class="tool-button" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-power"/></svg>도구 종료</button>
     <p class="rail-meta">화면을 비워도 보관된 회의와 원음은 지워지지 않습니다.</p>
@@ -75,22 +74,13 @@
             <button id="format-help" class="button button-quiet" type="button" aria-expanded="false" aria-controls="format-example">예시 보기</button>
           </div>
         </div>
+        <div id="custom-missing" class="notice notice-action field-wide" hidden>
+          <p>설정 › 출력 형식에서 내 형식을 먼저 만드세요.</p>
+          <button id="open-format-settings" class="button button-outline" type="button" aria-haspopup="dialog" aria-controls="settings">내 형식 만들기</button>
+        </div>
         <section id="format-example" class="format-example field-wide" aria-labelledby="format-example-title" hidden>
           <h3 id="format-example-title" class="format-example-title">회의록 예시</h3>
           <p id="format-example-text" class="fine-print"></p>
-          <div id="custom-editor" class="custom-editor" hidden>
-            <label class="field">형식 이름<input id="custom-name" maxlength="30" placeholder="예. 주간 보고" autocomplete="off" /></label>
-            <fieldset class="custom-sections">
-              <legend>들어갈 항목과 순서 <span class="field-note">체크한 항목만 위에서부터 이 순서로 나옵니다</span></legend>
-              <ol id="custom-section-list"></ol>
-            </fieldset>
-            <label class="field">AI에게 줄 추가 지시 <span class="field-note">선택 · 1,000자 이내</span><textarea id="custom-instruction" rows="3" maxlength="1000" placeholder="예. 할 일은 부서별로 묶고, 숫자는 표처럼 정리해 주세요."></textarea></label>
-            <div class="button-row">
-              <button id="custom-save" class="button button-outline" type="button">내 형식 저장</button>
-              <button id="custom-delete" class="button button-quiet" type="button">내 형식 삭제</button>
-            </div>
-            <p id="custom-status" class="fine-print" role="status"></p>
-          </div>
           <div id="format-example-body" class="minutes-content format-example-body" aria-label="예시 결과"></div>
         </section>
         <label class="field field-wide">참석자<input id="participants" maxlength="1000" placeholder="이름 또는 팀" autocomplete="off" /></label>
@@ -196,23 +186,82 @@
   </div>
 </dialog>
 
-<dialog id="ai-settings" class="modal" aria-labelledby="ai-settings-title">
+<dialog id="settings" class="modal modal-settings" aria-labelledby="settings-title">
   <div class="modal-head">
-    <h2 id="ai-settings-title" class="modal-title">AI 설정</h2>
-    <button class="icon-button" type="button" data-close aria-label="AI 설정 닫기"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
+    <h2 id="settings-title" class="modal-title">설정</h2>
+    <button class="icon-button" type="button" data-close aria-label="설정 닫기"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
+  </div>
+  <div class="modal-body settings-body">
+    <p id="settings-lock" class="notice" hidden>녹음이나 분석 중에는 설정을 바꿀 수 없습니다.</p>
+    <section id="settings-ai" class="settings-section" aria-labelledby="settings-ai-title">
+      <h3 id="settings-ai-title" class="settings-heading" tabindex="-1">AI 연결</h3>
+      <p id="key-state" class="key-state" role="status">연결 확인 중</p>
+      <form id="key-form" class="key-form" autocomplete="off">
+        <label class="field">API 키<input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="새 키를 붙여넣으세요" /></label>
+        <label class="check-row"><input id="persist-key" type="checkbox" checked /><span>이 PC에 키 저장 (사용자 폴더에 평문 저장, 회의 자료를 전달할 때 키 파일은 제외하세요)</span></label>
+        <div class="button-row"><button id="save-key" class="button button-primary" type="submit">키 등록·변경</button><button id="remove-key" class="button button-danger-quiet" type="button">키 삭제</button></div>
+      </form>
+      <div class="model-block">
+        <label class="field">요약 모델<select id="summary-model" aria-describedby="model-help"></select></label>
+        <p id="model-help" class="fine-print">서버가 제공하는 모델 목록을 불러오는 중입니다.</p>
+      </div>
+    </section>
+    <section id="settings-format" class="settings-section" aria-labelledby="settings-format-title">
+      <h3 id="settings-format-title" class="settings-heading" tabindex="-1">출력 형식</h3>
+      <label class="field">기본 출력 형식 <span class="field-note">새 회의는 이 형식으로 시작하고, 회의 준비에서 회의마다 바꿀 수 있습니다</span><select id="default-format"><option value="meeting">회의록</option><option value="summary">핵심 요약</option><option value="tasks">업무 정리</option><option value="custom">내 형식</option></select></label>
+      <div id="custom-editor" class="custom-editor">
+        <h4 class="settings-subheading">내 형식</h4>
+        <label class="field">형식 이름<input id="custom-name" maxlength="30" placeholder="예. 주간 보고" autocomplete="off" /></label>
+        <fieldset id="custom-sections" class="custom-sections">
+          <legend>들어갈 항목과 순서 <span class="field-note">체크한 항목만 위에서부터 이 순서로 나옵니다</span></legend>
+          <ol id="custom-section-list"></ol>
+        </fieldset>
+        <label class="field">AI에게 줄 추가 지시 <span class="field-note">선택 · 1,000자 이내</span><textarea id="custom-instruction" rows="3" maxlength="1000" placeholder="예. 할 일은 부서별로 묶고, 숫자는 표처럼 정리해 주세요."></textarea></label>
+        <div class="button-row">
+          <button id="custom-save" class="button button-outline" type="button">내 형식 저장</button>
+          <button id="custom-delete" class="button button-quiet" type="button">내 형식 삭제</button>
+        </div>
+        <p id="custom-status" class="fine-print" role="status"></p>
+        <details class="custom-preview"><summary>예시 미리보기</summary><div id="custom-preview" class="minutes-content format-example-body" aria-label="내 형식 예시 결과"></div></details>
+      </div>
+    </section>
+    <section id="settings-storage" class="settings-section" aria-labelledby="settings-storage-title">
+      <h3 id="settings-storage-title" class="settings-heading" tabindex="-1">저장 위치</h3>
+      <p class="fine-print">앱 안 기록은 그대로 두고, 분석이 끝나면 고른 폴더에 사본을 씁니다. 요약본은 .md와 .txt 두 파일로 저장합니다.</p>
+      <div class="storage-list">
+        <div class="storage-row"><span class="storage-label">오디오</span><span id="storage-audio" class="storage-path">사용 안 함</span><span class="storage-actions"><button id="pick-audio" class="button button-outline" type="button" aria-label="오디오 폴더 고르기">폴더 고르기</button><button id="clear-audio" class="button button-quiet" type="button" aria-label="오디오 사본 사용 안 함">사용 안 함</button></span></div>
+        <div class="storage-row"><span class="storage-label">전사문</span><span id="storage-transcript" class="storage-path">사용 안 함</span><span class="storage-actions"><button id="pick-transcript" class="button button-outline" type="button" aria-label="전사문 폴더 고르기">폴더 고르기</button><button id="clear-transcript" class="button button-quiet" type="button" aria-label="전사문 사본 사용 안 함">사용 안 함</button></span></div>
+        <div class="storage-row"><span class="storage-label">요약본</span><span id="storage-summary" class="storage-path">사용 안 함</span><span class="storage-actions"><button id="pick-summary" class="button button-outline" type="button" aria-label="요약본 폴더 고르기">폴더 고르기</button><button id="clear-summary" class="button button-quiet" type="button" aria-label="요약본 사본 사용 안 함">사용 안 함</button></span></div>
+      </div>
+      <p id="storage-status" class="fine-print" role="status"></p>
+    </section>
+    <section id="settings-file" class="settings-section" aria-labelledby="settings-file-title">
+      <h3 id="settings-file-title" class="settings-heading" tabindex="-1">설정 파일</h3>
+      <p class="fine-print">요약 모델·기본 출력 형식·내 형식·저장 위치를 파일로 내보내거나 불러옵니다. API 키는 파일에 담지 않습니다.</p>
+      <div class="button-row">
+        <button id="export-settings" class="button button-outline" type="button">설정 내보내기</button>
+        <button id="import-settings" class="button button-outline" type="button">설정 불러오기</button>
+      </div>
+      <input id="settings-file-input" type="file" accept=".json,application/json" hidden />
+      <p id="settings-file-status" class="fine-print" role="status"></p>
+    </section>
+    <section id="settings-data" class="settings-section" aria-labelledby="settings-data-title" hidden>
+      <h3 id="settings-data-title" class="settings-heading" tabindex="-1">회의자료 폴더</h3>
+      <p class="fine-print">앱이 보관한 회의 기록과 원음이 든 폴더를 엽니다.</p>
+      <div class="button-row"><button id="open-data-folder" class="button button-outline" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg>회의자료 폴더 열기</button></div>
+    </section>
+  </div>
+</dialog>
+
+<dialog id="settings-import" class="modal" aria-labelledby="settings-import-title">
+  <div class="modal-head">
+    <h2 id="settings-import-title" class="modal-title">설정 불러오기</h2>
+    <button class="icon-button" type="button" data-close aria-label="설정 불러오기 닫기"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
   </div>
   <div class="modal-body">
-    <p id="key-state" class="key-state" role="status">연결 확인 중</p>
-    <form id="key-form" class="key-form" autocomplete="off">
-      <label class="field">API 키<input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="새 키를 붙여넣으세요" /></label>
-      <label class="check-row"><input id="persist-key" type="checkbox" checked /><span>이 PC에 키 저장 (사용자 폴더에 평문 저장, 회의 자료를 전달할 때 키 파일은 제외하세요)</span></label>
-      <div class="button-row"><button id="save-key" class="button button-primary" type="submit">키 등록·변경</button><button id="remove-key" class="button button-danger-quiet" type="button">키 삭제</button></div>
-    </form>
-    <div class="model-block">
-      <label class="field">요약 모델<select id="summary-model" aria-describedby="model-help"></select></label>
-      <p id="model-help" class="fine-print">서버가 제공하는 모델 목록을 불러오는 중입니다.</p>
-    </div>
-    <p id="settings-lock" class="notice" hidden>녹음이나 분석 중에는 AI 설정을 바꿀 수 없습니다.</p>
+    <p class="fine-print">확인을 누르면 아래 값으로 바꿉니다. 적용하지 않는 줄은 지금 값을 그대로 둡니다.</p>
+    <dl id="settings-preview" class="settings-preview"></dl>
+    <div class="button-row"><button id="confirm-import" class="button button-primary" type="button">이 값으로 바꾸기</button><button class="button button-quiet" type="button" data-close>취소</button></div>
   </div>
 </dialog>
 

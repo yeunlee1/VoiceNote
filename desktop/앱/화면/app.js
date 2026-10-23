@@ -3,6 +3,8 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
+  // 사본을 쓸 폴더 종류. 설정의 storage 칸과 화면의 storage-·pick-·clear- 이름에 같이 쓴다.
+  const STORAGE_KINDS = ["audio", "transcript", "summary"];
   const ui = Object.fromEntries(
     [
       "title",
@@ -41,12 +43,15 @@
       "clear",
       "shutdown",
       "status",
-      "meeting-notes", "start-hint", "stage", "open-ai-settings", "ai-status-label",
-      "summary-model", "model-help", "settings-lock", "meeting-detail", "ai-settings", "detail-title",
+      "meeting-notes", "start-hint", "stage", "open-settings", "ai-status-label",
+      "summary-model", "model-help", "settings-lock", "meeting-detail", "settings", "detail-title",
       "detail-meta", "usage", "open-result", "open-result-label", "setup-close", "meeting-heading", "key-form",
-      "output-format",
-      "format-help", "format-example", "format-example-title", "format-example-text", "format-example-body", "custom-editor", "custom-name",
-      "custom-section-list", "custom-instruction", "custom-save", "custom-delete", "custom-status",
+      "output-format", "custom-missing", "open-format-settings",
+      "format-help", "format-example", "format-example-title", "format-example-text", "format-example-body", "custom-name",
+      "custom-sections", "custom-section-list", "custom-instruction", "custom-save", "custom-delete", "custom-status", "custom-preview",
+      "settings-ai", "settings-format", "settings-storage", "settings-file", "settings-data", "default-format", "storage-status",
+      ...STORAGE_KINDS.flatMap((kind) => [`storage-${kind}`, `pick-${kind}`, `clear-${kind}`]),
+      "export-settings", "import-settings", "settings-file-input", "settings-file-status", "settings-import", "settings-preview", "confirm-import", "open-data-folder",
       "tab-minutes", "tab-transcript", "panel-minutes", "panel-transcript", "transcript-view", "transcript-meta", "copy-result", "share-result", "save-result", "result-status",
     ].map((id) => [id, $(id)]),
   );
@@ -114,14 +119,14 @@
     return state.keyConfigured || ["trial", "unlimited"].includes(state.access.accessMode);
   }
 
-  // 체험을 모두 쓴 뒤에도 분석 버튼은 눌리게 두고, 누르면 새 키 등록 안내와 AI 설정을 연다.
+  // 체험을 모두 쓴 뒤에도 분석 버튼은 눌리게 두고, 누르면 새 키 등록 안내와 설정 창을 연다.
   function needsNewKey() {
     return !state.keyConfigured && state.access.accessMode === "exhausted";
   }
 
   function promptNewKey() {
     announce("새로운 API키를 등록하세요.");
-    if (!ui["ai-settings"].open) openDialog(ui["ai-settings"], ui["open-ai-settings"]);
+    openSettings("settings-ai");
   }
 
   function withTrialWarning(message) {
@@ -314,24 +319,32 @@
   }
 
   function updateCustomOption() {
-    const option = ui["output-format"].querySelector('option[value="custom"]');
-    option.textContent = state.customFormat ? `내 형식 · ${state.customFormat.name}` : "내 형식 (새로 만들기)";
+    // 회의 준비와 설정 창의 출력 형식 선택지 모두 저장된 내 형식 이름을 보여 준다.
+    const label = state.customFormat ? `내 형식 · ${state.customFormat.name}` : "내 형식 (아직 없음)";
+    for (const id of ["output-format", "default-format"]) ui[id].querySelector('option[value="custom"]').textContent = label;
   }
 
   function renderFormatExample() {
-    // 고른 형식으로 가상의 회의를 정리한 모습을 같은 화면 그리기 함수로 보여 준다.
+    // 회의 준비의 예시는 보기만 한다. 고른 형식으로 가상의 회의를 정리한 모습을 같은 화면 그리기 함수로 보여 준다.
     const open = !ui["format-example"].hidden;
     ui["format-help"].setAttribute("aria-expanded", String(open));
     ui["format-help"].textContent = open ? "예시 닫기" : "예시 보기";
     if (!open) return;
     const format = outputFormat(ui["output-format"].value);
-    const preview = format === "custom" ? editorValue(false) : null;
-    ui["format-example-title"].textContent = `${format === "custom" ? preview?.name || "내 형식" : formatLabels[format]} 예시`;
+    const custom = format === "custom" ? currentCustom() : null;
+    ui["format-example-title"].textContent = `${format === "custom" ? custom?.name || "내 형식" : formatLabels[format]} 예시`;
     ui["format-example-text"].textContent = `${Formats.DESCRIPTIONS[format]} 아래는 가상의 회의로 만든 예시입니다.`;
-    ui["custom-editor"].hidden = format !== "custom";
     ui["format-example-body"].replaceChildren();
-    if (format === "custom" && !preview) ui["format-example-body"].append(element("p", "항목을 하나 이상 고르면 예시가 보입니다.", "muted"));
-    else renderMinutesInto(ui["format-example-body"], Formats.SAMPLE.minutes, format, preview);
+    if (format === "custom" && !custom) ui["format-example-body"].append(element("p", "저장된 내 형식이 없습니다. 설정 › 출력 형식에서 먼저 만드세요.", "muted"));
+    else renderMinutesInto(ui["format-example-body"], Formats.SAMPLE.minutes, format, custom);
+  }
+
+  function renderCustomPreview() {
+    // 설정 창에서 편집 중인 내 형식으로 가상의 회의를 정리한 모습을 바로 보여 준다.
+    const preview = editorValue(false);
+    ui["custom-preview"].replaceChildren();
+    if (!preview) ui["custom-preview"].append(element("p", "항목을 하나 이상 고르면 예시가 보입니다.", "muted"));
+    else renderMinutesInto(ui["custom-preview"], Formats.SAMPLE.minutes, "custom", preview);
   }
 
   function loadEditor() {
@@ -344,6 +357,7 @@
     ui["custom-delete"].hidden = !state.customFormat;
     ui["custom-status"].textContent = state.customFormat ? "" : "아직 저장한 내 형식이 없습니다. 이름과 항목을 정하고 저장하세요.";
     renderEditorRows();
+    renderCustomPreview();
   }
 
   function renderEditorRows() {
@@ -355,12 +369,12 @@
       check.type = "checkbox";
       check.checked = row.on;
       check.setAttribute("aria-label", `${Formats.KEY_LABELS[row.key]} 넣기`);
-      check.addEventListener("change", () => { row.on = check.checked; renderFormatExample(); });
+      check.addEventListener("change", () => { row.on = check.checked; renderCustomPreview(); });
       const title = document.createElement("input");
       title.value = row.title;
       title.maxLength = Formats.LIMITS.title;
       title.setAttribute("aria-label", `${Formats.KEY_LABELS[row.key]} 항목 이름`);
-      title.addEventListener("input", () => { row.title = title.value; renderFormatExample(); });
+      title.addEventListener("input", () => { row.title = title.value; renderCustomPreview(); });
       const move = (label, delta, disabled) => {
         const button = element("button", label, "button button-quiet custom-move");
         button.type = "button";
@@ -369,7 +383,7 @@
         button.addEventListener("click", () => {
           [state.customRows[index], state.customRows[index + delta]] = [state.customRows[index + delta], state.customRows[index]];
           renderEditorRows();
-          renderFormatExample();
+          renderCustomPreview();
         });
         return button;
       };
@@ -405,7 +419,7 @@
     await api("/api/custom-format", { method: "DELETE" });
     state.customFormat = null;
     updateCustomOption();
-    if (ui["output-format"].value === "custom" && !state.meetingCustom) { ui["output-format"].value = "meeting"; }
+    if (ui["output-format"].value === "custom" && !state.meetingCustom) { ui["output-format"].value = defaultFormat(); }
     loadEditor();
     ui["custom-status"].textContent = "내 형식을 삭제했습니다.";
     renderFormatExample();
@@ -419,12 +433,16 @@
   function startBlockers() {
     const blockers = [];
     if (hasMeetingRecord()) blockers.push("지난 회의 기록이 열려 있습니다. ‘회의 준비’를 눌러 새 회의를 준비하세요.");
-    if (!canAnalyze()) blockers.push(state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요. 상단 ‘AI 설정’에서 등록합니다." : "상단 ‘AI 설정’에서 API 키를 등록하세요.");
-    if (state.modelError) blockers.push(`상단 ‘AI 설정’에서 요약 모델을 다시 선택하세요. ${state.modelError}`);
+    if (!canAnalyze()) blockers.push(state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요. 상단 ‘설정’에서 등록합니다." : "상단 ‘설정’에서 API 키를 등록하세요.");
+    if (state.modelError) blockers.push(`상단 ‘설정’에서 요약 모델을 다시 선택하세요. ${state.modelError}`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(ui.date.value)) blockers.push("‘회의 준비’에서 회의 날짜를 확인하세요.");
     if (ui["meeting-notes"].value.length > 4000) blockers.push("‘회의 준비’의 상세 회의내용을 4,000자 이하로 줄이세요.");
-    if (ui["output-format"].value === "custom" && !currentCustom()) blockers.push("‘회의 준비’의 예시 보기에서 내 형식을 먼저 저장하세요.");
+    if (customMissing()) blockers.push("설정 › 출력 형식에서 내 형식을 먼저 만드세요.");
     return blockers;
+  }
+
+  function customMissing() {
+    return outputFormat(ui["output-format"].value) === "custom" && !currentCustom();
   }
 
   function settingsLocked() {
@@ -521,6 +539,15 @@
     ui["remove-key"].disabled ||= !state.keyConfigured;
     ui["summary-model"].disabled = lockedSettings || state.settingsBusy || !state.models.length;
     ui["settings-lock"].hidden = !lockedSettings;
+    // 설정 창의 출력 형식·저장 위치·설정 파일도 녹음·분석·저장 중이거나 설정을 저장하는 동안 잠근다.
+    const settingsBusy = lockedSettings || state.settingsBusy;
+    for (const id of ["default-format", "custom-name", "custom-sections", "custom-instruction", "custom-save", "custom-delete", "export-settings", "import-settings", "settings-file-input", "confirm-import"])
+      ui[id].disabled = settingsBusy;
+    for (const kind of STORAGE_KINDS) {
+      ui[`pick-${kind}`].disabled = settingsBusy;
+      ui[`clear-${kind}`].disabled = settingsBusy || !state.settings?.storage?.[kind];
+    }
+    ui["custom-missing"].hidden = !customMissing();
     const { accessMode, trialRemaining, trialLimit } = state.access;
     ui["key-state"].textContent =
       state.keyStorageError ||
@@ -536,7 +563,7 @@
     const model = modelInfo();
     ui["ai-status-label"].textContent = !canAnalyze() ? "키 필요" : state.modelError ? "모델 선택 필요"
       : !state.keyConfigured && accessMode === "trial" ? `체험 ${trialRemaining}/${trialLimit}` : model?.label || "연결됨";
-    ui["open-ai-settings"].dataset.state = canAnalyze() && !state.modelError ? "ready" : "missing";
+    ui["open-settings"].dataset.state = canAnalyze() && !state.modelError ? "ready" : "missing";
     ui["model-help"].textContent = state.modelError ? state.modelError : !state.models.length
       ? "이 서버는 모델 목록을 제공하지 않아 서버 기본 모델로 요약합니다."
       : model
@@ -978,7 +1005,7 @@
       if (error.mustRegister) {
         announce(withTrialWarning(error.message));
         api("/api/config").then((config) => { applyAccess(config); refresh(); }).catch(() => {});
-        if (!ui["ai-settings"].open) openDialog(ui["ai-settings"], ui["open-ai-settings"]);
+        openSettings("settings-ai");
       } else if (error.name === "AbortError") announce("요청을 취소했습니다. 원음과 전사는 유지됩니다.");
       else announce(withTrialWarning(`${error.message} 명시적으로 다시 요청하면 비용이 다시 발생할 수 있습니다.`));
       workflow(`${state.audioStored ? "음성은 저장되어 있습니다. " : ""}${error.name === "AbortError" ? "분석을 취소했습니다." : error.message}`);
@@ -1716,7 +1743,7 @@
         promptNewKey();
         throw new Error("새로운 API키를 등록하세요.");
       }
-      if (!canAnalyze()) throw new Error("음성은 저장했습니다. 상단 ‘AI 설정’에서 API 키를 확인한 뒤 다시 분석하세요.");
+      if (!canAnalyze()) throw new Error("음성은 저장했습니다. 상단 ‘설정’에서 API 키를 확인한 뒤 다시 분석하세요.");
       workflow("음성 저장 완료. 전사와 회의록을 분석하고 있습니다…");
       await summarize();
     } catch (error) {
@@ -1736,7 +1763,7 @@
     if (dialog === ui["meeting-detail"]) { renderMinutes(); showResultTab(state.minutes || !ui.transcript.value.trim() ? "minutes" : "transcript"); }
     refresh();
     dialog.showModal();
-    const first = dialog === ui["ai-settings"] && !state.keyConfigured && !ui["api-key"].disabled ? ui["api-key"] : dialog.querySelector("[data-close]");
+    const first = dialog === ui.settings && !state.keyConfigured && !ui["api-key"].disabled ? ui["api-key"] : dialog.querySelector("[data-close]");
     first?.focus();
   }
 
@@ -1813,6 +1840,162 @@
     }
   }
 
+  const STORAGE_LABELS = { audio: "오디오", transcript: "전사문", summary: "요약본" };
+  const SETTINGS_FILE_LIMIT = 128 * 1024;
+
+  function renderSettings() {
+    // 설정 창의 기본 출력 형식과 저장 위치를 서버에 저장된 값으로 다시 그린다.
+    ui["default-format"].value = outputFormat(state.settings?.defaultOutputFormat || "meeting");
+    for (const kind of STORAGE_KINDS) {
+      const folder = state.settings?.storage?.[kind] || "";
+      ui[`storage-${kind}`].textContent = folder || "사용 안 함";
+      ui[`storage-${kind}`].dataset.empty = String(!folder);
+    }
+  }
+
+  function openSettings(section, opener = ui["open-settings"]) {
+    // 설정 창을 열고, 구역을 지정하면 그 구역으로 옮겨 제목에 초점을 둔다. AI 연결은 키 입력칸에 초점을 두는 기본 동작을 따른다.
+    if (!ui.settings.open) {
+      renderSettings();
+      loadEditor();
+      openDialog(ui.settings, opener);
+    }
+    if (!section || section === "settings-ai") return;
+    ui[section].scrollIntoView?.({ block: "start" });
+    $(`${section}-title`)?.focus?.();
+  }
+
+  function followDefaultFormat(before) {
+    // 비어 있는 새 회의 양식이 아직 이전 기본 형식이면 새 기본 형식으로 바꾼다. 회의마다 고른 형식은 그대로 두되, 없어진 내 형식은 기본 형식으로 돌린다.
+    const blank = !hasMeetingRecord() && !state.meetingCustom;
+    if ((blank && ui["output-format"].value === before) || customMissing()) ui["output-format"].value = defaultFormat();
+    renderFormatExample();
+  }
+
+  async function saveSettingsChange(change, report, success) {
+    // 설정 한 가지를 서버에 저장하고 저장된 값으로 창을 다시 그린다. 녹음·분석·저장 중에는 바꾸지 않는다.
+    if (settingsLocked() || state.settingsBusy) {
+      renderSettings();
+      return report("녹음이나 분석 중에는 설정을 바꿀 수 없습니다.");
+    }
+    state.settingsBusy = true;
+    refresh();
+    try {
+      const result = await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(change) });
+      state.settings = result.settings;
+      report(success());
+    } catch (error) {
+      report(`설정을 저장하지 못했습니다. ${error.message}`);
+    } finally {
+      state.settingsBusy = false;
+      renderSettings();
+      refresh();
+    }
+  }
+
+  function saveDefaultFormat() {
+    const before = defaultFormat();
+    const format = outputFormat(ui["default-format"].value);
+    return saveSettingsChange({ defaultOutputFormat: format }, announce, () => {
+      followDefaultFormat(before);
+      return format === "custom" && !state.customFormat
+        ? "기본 출력 형식을 내 형식으로 저장했습니다. 내 형식을 저장하기 전까지 새 회의는 회의록으로 시작합니다."
+        : `기본 출력 형식을 ${formatLabels[format]}(으)로 저장했습니다. 새 회의부터 이 형식으로 시작합니다.`;
+    });
+  }
+
+  function saveStorage(kind, folder) {
+    const report = (message) => { ui["storage-status"].textContent = message; };
+    return saveSettingsChange({ storage: { [kind]: folder } }, report,
+      () => (folder ? `${STORAGE_LABELS[kind]} 사본을 고른 폴더에 씁니다.` : `${STORAGE_LABELS[kind]} 사본을 쓰지 않습니다.`));
+  }
+
+  function onHostMessage(data) {
+    // Windows 창이 폴더 선택 결과를 돌려준다. 고르지 않고 닫았거나(path가 null) 모르는 메시지는 무시한다.
+    if (data?.type !== "folder-picked" || !STORAGE_KINDS.includes(data.kind) || typeof data.path !== "string" || !data.path) return;
+    saveStorage(data.kind, data.path);
+  }
+
+  async function exportSettings() {
+    const { file } = await api("/api/settings/export");
+    download(new Blob([`${JSON.stringify(file, null, 2)}\n`], { type: "application/json;charset=utf-8" }), `${today()}-VoiceNote-설정.json`);
+    ui["settings-file-status"].textContent = "설정 파일 내려받기를 시작했습니다. 저장된 파일을 확인하세요.";
+  }
+
+  async function previewSettings(event) {
+    // 고른 파일의 크기와 UTF-8을 이 화면에서 먼저 확인하고, 통과한 글만 서버에 보내 바뀔 내용을 받아 보여 준다.
+    const input = event.target;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    const report = (message) => { ui["settings-file-status"].textContent = message; };
+    if (file.size > SETTINGS_FILE_LIMIT) return report("설정 파일이 128KiB보다 커서 불러올 수 없습니다.");
+    let bytes, text;
+    try { bytes = await file.arrayBuffer(); } catch { return report("설정 파일을 읽지 못했습니다. 파일을 다시 골라 주세요."); }
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { return report("설정 파일이 UTF-8로 저장되어 있지 않아 불러올 수 없습니다."); }
+    try {
+      const { preview } = await api("/api/settings/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: text }) });
+      renderSettingsPreview(preview);
+      report("");
+      openDialog(ui["settings-import"], ui["import-settings"]);
+      state.pendingSettings = text;
+    } catch (error) { report(error.message); }
+  }
+
+  function renderSettingsPreview(preview) {
+    // 파일을 적용하면 바뀔 값을 항목마다 한 줄로 보이고, 적용하지 않는 줄에는 그 이유를 붙인다.
+    const rows = [
+      ["요약 모델", modelInfo(preview.summaryModel.value)?.label || preview.summaryModel.value, preview.summaryModel],
+      ["기본 출력 형식", formatLabels[preview.defaultOutputFormat.value] || preview.defaultOutputFormat.value, preview.defaultOutputFormat],
+      ["내 형식", preview.customFormat.name || (state.customFormat ? "없음 · 지금 저장된 내 형식을 지웁니다" : "없음"), preview.customFormat],
+      ...(preview.storage
+        ? STORAGE_KINDS.map((kind) => [`${STORAGE_LABELS[kind]} 저장 위치`, preview.storage[kind]?.value || "사용 안 함", preview.storage[kind] || { apply: true }])
+        : [["저장 위치", "파일에 없어 지금 값을 그대로 둡니다", { apply: true }]]),
+    ];
+    ui["settings-preview"].replaceChildren(...rows.map(([label, value, item]) => {
+      const row = element("div", "", "preview-row");
+      row.append(element("dt", label), element("dd", value));
+      if (!item.apply) {
+        row.dataset.skip = "true";
+        row.append(element("dd", item.reason || "적용하지 않습니다.", "preview-skip"));
+      }
+      return row;
+    }));
+  }
+
+  async function applyImportedSettings() {
+    // 미리보기에서 확인한 파일을 서버가 같은 규칙으로 다시 검사해 적용한다. 적용하지 않은 항목은 이유와 함께 알린다.
+    const file = state.pendingSettings;
+    if (!file) return;
+    const report = (message) => { ui["settings-file-status"].textContent = message; };
+    if (settingsLocked() || state.settingsBusy) return report("녹음이나 분석 중에는 설정을 바꿀 수 없습니다.");
+    const before = defaultFormat();
+    state.settingsBusy = true;
+    refresh();
+    try {
+      const result = await api("/api/settings/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file }) });
+      state.settings = result.settings;
+      state.customFormat = result.customFormat || null;
+      if (result.settings?.summaryModel) {
+        state.summaryModel = result.settings.summaryModel;
+        state.modelError = "";
+      }
+      updateCustomOption();
+      loadEditor();
+      followDefaultFormat(before);
+      ui["settings-import"].close();
+      report(result.skipped?.length ? `설정을 불러왔습니다. 적용하지 않은 항목: ${result.skipped.join(" · ")}` : "설정을 불러왔습니다.");
+    } catch (error) {
+      ui["settings-import"].close();
+      report(`설정을 불러오지 못했습니다. ${error.message}`);
+    } finally {
+      state.settingsBusy = false;
+      ui["summary-model"].value = state.summaryModel;
+      renderSettings();
+      refresh();
+    }
+  }
+
   function bind() {
     ui.prepare.addEventListener("click", prepareMeeting);
     ui["retry-analysis"].addEventListener("click", finishMeeting);
@@ -1850,7 +2033,8 @@
       if (confirm("등록된 API 키와 이 PC에 저장된 키 파일을 삭제할까요?")) setKey("");
     });
     ui["summary-model"].addEventListener("change", saveModel);
-    ui["open-ai-settings"].addEventListener("click", () => openDialog(ui["ai-settings"], ui["open-ai-settings"]));
+    ui["open-settings"].addEventListener("click", () => openSettings());
+    ui["open-format-settings"].addEventListener("click", () => openSettings("settings-format", ui["open-format-settings"]));
     ui["open-result"].addEventListener("click", () => openDialog(ui["meeting-detail"], ui["open-result"]));
     ui["tab-minutes"].addEventListener("click", () => showResultTab("minutes"));
     ui["tab-transcript"].addEventListener("click", () => showResultTab("transcript"));
@@ -1868,24 +2052,38 @@
       refresh();
       ui.prepare.focus();
     });
-    for (const dialog of [ui["meeting-detail"], ui["ai-settings"]]) bindDialog(dialog);
+    for (const dialog of [ui["meeting-detail"], ui.settings, ui["settings-import"]]) bindDialog(dialog);
     ui["output-format"].addEventListener("change", () => {
       state.resultStored = false;
       state.notesSaved = false;
-      if (ui["output-format"].value === "custom" && !currentCustom()) { ui["format-example"].hidden = false; loadEditor(); }
       renderFormatExample();
       refresh();
     });
     ui["format-help"].addEventListener("click", () => {
       ui["format-example"].hidden = !ui["format-example"].hidden;
-      if (!ui["format-example"].hidden) loadEditor();
       renderFormatExample();
     });
-    ui["custom-name"].addEventListener("input", renderFormatExample);
-    ui["custom-instruction"].addEventListener("input", renderFormatExample);
+    ui["custom-name"].addEventListener("input", renderCustomPreview);
+    ui["custom-instruction"].addEventListener("input", renderCustomPreview);
     ui["custom-save"].addEventListener("click", () => saveCustom().catch((error) => { ui["custom-status"].textContent = error.message; }));
     ui["custom-delete"].addEventListener("click", () => deleteCustom().catch((error) => { ui["custom-status"].textContent = error.message; }));
-    ui["ai-settings"].addEventListener("close", () => { ui["api-key"].value = ""; });
+    ui.settings.addEventListener("close", () => { ui["api-key"].value = ""; });
+    ui["default-format"].addEventListener("change", saveDefaultFormat);
+    for (const kind of STORAGE_KINDS) {
+      ui[`pick-${kind}`].addEventListener("click", () => window.chrome?.webview?.postMessage({ type: "pick-folder", kind }));
+      ui[`clear-${kind}`].addEventListener("click", () => saveStorage(kind, ""));
+    }
+    ui["export-settings"].addEventListener("click", () => exportSettings().catch((error) => { ui["settings-file-status"].textContent = `설정을 내보내지 못했습니다. ${error.message}`; }));
+    ui["import-settings"].addEventListener("click", () => ui["settings-file-input"].click());
+    ui["settings-file-input"].addEventListener("change", previewSettings);
+    ui["confirm-import"].addEventListener("click", applyImportedSettings);
+    ui["settings-import"].addEventListener("close", () => { state.pendingSettings = null; });
+    // 폴더 고르기와 회의자료 폴더 열기는 Windows 창 안에서만 쓸 수 있다. 창은 폴더 선택 결과를 메시지로 돌려준다.
+    const webview = window.chrome?.webview;
+    ui["settings-data"].hidden = !webview;
+    for (const kind of STORAGE_KINDS) ui[`pick-${kind}`].hidden = !webview;
+    ui["open-data-folder"].addEventListener("click", () => webview?.postMessage("open-data-folder"));
+    webview?.addEventListener("message", (event) => onHostMessage(event.data));
     ui.clear.addEventListener("click", () => { if (clearLocal()) resetMeetingForm(); });
     ui.shutdown.addEventListener("click", shutdown);
     for (const format of ["md", "txt", "json"])
@@ -1919,17 +2117,12 @@
       resetMeetingForm();
       await loadHistory();
       refresh();
-      announce(canAnalyze() ? "‘회의 시작’을 누르면 바로 녹음합니다." : state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요." : "처음이면 상단 ‘AI 설정’에서 API 키를 등록하세요.");
+      announce(canAnalyze() ? "‘회의 시작’을 누르면 바로 녹음합니다." : state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요." : "처음이면 상단 ‘설정’에서 API 키를 등록하세요.");
     } catch (error) {
       announce(`서버 연결을 확인하지 못했습니다. ${error.message}`);
     }
   }
 
   window.meetingDesktopStatus = () => ({ unsaved: hasUnsavedWork() });
-  const openData = document.getElementById("open-data-folder");
-  if (openData) {
-    openData.hidden = !window.chrome?.webview;
-    openData.addEventListener("click", () => window.chrome?.webview?.postMessage("open-data-folder"));
-  }
   init();
 })();

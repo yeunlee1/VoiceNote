@@ -19950,7 +19950,7 @@ async function summaryProviderError(response, signal, stop, model = "") {
   if (response.status === 401 || response.status === 403)
     return new MeetingError("AI_KEY_INVALID", "API 키 또는 요약 모델 사용 권한을 확인하세요." + suffix, 401);
   if (code === "model_not_found")
-    return new MeetingError("AI_MODEL_UNAVAILABLE", `현재 API 계정에서 요약 모델${model ? `(${model})` : ""}을 사용할 수 없습니다. AI 설정에서 다른 모델을 선택하거나 계정 권한을 확인하세요.` + suffix, 503);
+    return new MeetingError("AI_MODEL_UNAVAILABLE", `현재 API 계정에서 요약 모델${model ? `(${model})` : ""}을 사용할 수 없습니다. 설정의 AI 연결에서 다른 모델을 선택하거나 계정 권한을 확인하세요.` + suffix, 503);
   return new MeetingError("AI_UNAVAILABLE", `AI 요약 요청이 실패했습니다. HTTP ${response.status}.` + suffix, 503);
 }
 var FEEDBACK_INSTRUCTION = "feedback은 사용자가 앞선 정리본을 읽고 남긴 검토 의견입니다. 의견이 가리키는 내용을 전사에서 다시 확인해 고쳐 정리하세요. 의견에 있더라도 전사에 없는 발언·결정·담당자·기한은 만들지 마세요. 의견이 전사와 맞지 않으면 전사를 따르고 '확인 필요'로 남기세요.";
@@ -20197,7 +20197,7 @@ function summaryInput(data) {
   if (typeof notes !== "string" || notes.length > 4000)
     throw fail("INVALID_INPUT", "회의별 상세 내용은 4,000자 이하의 글로 입력하세요.", 400);
   if (data.model !== void 0 && data.model !== null && !aiModels.findSummaryModel(data.model))
-    throw fail("INVALID_MODEL", "지원하지 않는 요약 모델입니다. AI 설정에서 목록의 모델을 선택하세요.", 400);
+    throw fail("INVALID_MODEL", "지원하지 않는 요약 모델입니다. 설정의 AI 연결에서 목록의 모델을 선택하세요.", 400);
   const outputFormat = meetingFormats.format(data.outputFormat ?? "meeting");
   if (!outputFormat) throw fail("INVALID_INPUT", "출력 형식은 회의록·핵심 요약·업무 정리·내 형식 중에서 고르세요.", 400);
   let customFormat = null;
@@ -20280,7 +20280,7 @@ function createMeetingServer(options = {}) {
       const stored = object3(JSON.parse((0, import_node_fs.readFileSync)(settingsFile, "utf8")));
       if (stored?.summaryModel !== void 0 && !aiModels.findSummaryModel(stored.summaryModel)) {
         summaryModel = null;
-        summaryModelError = "저장된 요약 모델은 지원 목록에 없습니다. AI 설정에서 요약 모델을 다시 선택하세요.";
+        summaryModelError = "저장된 요약 모델은 지원 목록에 없습니다. 설정의 AI 연결에서 요약 모델을 다시 선택하세요.";
       } else if (stored?.summaryModel !== void 0) summaryModel = stored.summaryModel;
       storedSummaryModel = stored?.summaryModel;
       // 기본 출력 형식과 저장 위치가 없는 옛 파일은 회의록 형식, 저장 위치 없음으로 읽는다.
@@ -20292,7 +20292,7 @@ function createMeetingServer(options = {}) {
     } catch (error62) {
       if (error62.code !== "ENOENT") {
         summaryModel = null;
-        summaryModelError = "AI 설정 파일을 읽지 못했습니다. AI 설정에서 요약 모델을 다시 선택하세요.";
+        summaryModelError = "AI 설정 파일을 읽지 못했습니다. 설정의 AI 연결에서 요약 모델을 다시 선택하세요.";
       }
     }
   }
@@ -20666,7 +20666,7 @@ function createMeetingServer(options = {}) {
             if (!data) throw fail("INVALID_INPUT", "JSON \uC785\uB825\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", 400);
             input2 = summaryInput(data);
             if (!input2.model) {
-              if (!summaryModel) throw fail("INVALID_MODEL", summaryModelError || "AI 설정에서 요약 모델을 선택하세요.", 400);
+              if (!summaryModel) throw fail("INVALID_MODEL", summaryModelError || "설정의 AI 연결에서 요약 모델을 선택하세요.", 400);
               input2.model = summaryModel;
             }
           }
