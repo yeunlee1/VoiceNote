@@ -35,7 +35,9 @@ DefaultKeyFile은 apiKey 속성이 있는 JSON 파일입니다. 기본값은 빈
 검증
 
 - node --test tests/*.test.cjs : 시작 조건, 화면 흐름, 출력 형식 화면 구성, 체험 표시, 모델 목록, 내 형식 판정, Windows 설정 파일 모듈(desktop\앱\설정파일.cjs)과의 판정·왕복 비교(JDK 필요)
-- tests/SettingsFileTest.java, tests/CustomFormatTest.java, tests/TextChunksTest.java, tests/TrialAccessTest.java, tests/AiUsageTest.java, tests/AiResponseModelTest.java : java.*만 쓰는 클래스를 해당 소스와 함께 하나씩 javac로 컴파일해 실행합니다. tests/*.java를 한꺼번에 컴파일하지 않습니다. android.jar의 org.json은 JVM에서 동작하지 않으므로 JSONObject·Context를 쓰는 Store·Ai 등은 AndroidChecks가 기기에서 확인합니다.
+- tests/SettingsFileTest.java, tests/CustomFormatTest.java, tests/TextChunksTest.java, tests/TrialAccessTest.java, tests/AiUsageTest.java : java.*만 쓰는 클래스를 해당 소스와 함께 하나씩 javac로 컴파일해 실행합니다. tests/*.java를 한꺼번에 컴파일하지 않습니다.
+- tests/AiResponseModelTest.java : Ai의 정적 함수만 실행하지만 Ai.java가 org.json·Android 타입에 연결되어 있어, 컴파일과 실행 classpath에 android.jar와 컴파일된 앱 클래스를 함께 둡니다. org.json 객체를 만들지 않으므로 JVM에서도 통과합니다.
+- android.jar의 org.json은 JVM에서 동작하지 않으므로 JSONObject·Context를 쓰는 Store·Ai의 나머지 동작은 AndroidChecks가 기기에서 확인합니다.
 - node tests/화면검증-브라우저.cjs <캡처폴더> : 헤드리스 Chrome 화면 검사
 - AndroidChecks.java는 DebugBuild에만 포함됩니다. 검증 전용 가상기기에 설치한 뒤 실행합니다.
 
