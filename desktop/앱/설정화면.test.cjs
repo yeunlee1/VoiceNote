@@ -7,7 +7,6 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const minutes = { overview: '업무 요약 문장', topics: [{ title: '배경', points: ['설명'] }], decisions: [], actions: [{ task: '초안 작성', owner: null, due: null }], openQuestions: ['기한 미정'] };
-const project = (slot, name = '', extra = {}) => ({ slot, name, title: name ? '주간 회의' : '', context: '', outputFormat: 'meeting', revision: name ? 2 : 0, ...extra });
 
 function fixture({ routes = {}, confirmAnswer = true } = {}) {
   const element = (tag = 'div') => {
@@ -30,21 +29,20 @@ function fixture({ routes = {}, confirmAnswer = true } = {}) {
       if (routes[url]) return routes[url](calls.at(-1));
       if (url === '/api/summary') return json({ minutes });
       if (url.startsWith('/api/trial/')) return json({ accessMode: 'trial', trialLimit: 3, trialRemaining: 2, mustRegister: false });
-      if (url === '/api/projects/1/meetings' && options.method === 'POST') return json({ meeting: { dailySequence: 1 } });
-      if (url === '/api/projects/1/meetings') return json({ meetings: [] });
+      if (url === '/api/meetings/main' && options.method === 'POST') return json({ meeting: { dailySequence: 1 } });
+      if (url === '/api/meetings') return json({ meetings: [], skipped: 0 });
       return json({});
     } };
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
   const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/,
-    '  globalThis.review = { state, ui, bind, refresh, applyProject, renderMinutes, lines, exportDocument, summarize, openMeeting, startBlockers, applyAccess, stale, presetChanged, savePreset };\n})();');
+    '  globalThis.review = { state, ui, bind, refresh, resetMeetingForm, renderMinutes, lines, exportDocument, summarize, openMeeting, startBlockers, applyAccess, stale };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const review = sandbox.review;
   review.bind();
   const status = nodes.get('status');
   const announce = () => status.textContent;
-  review.state.projects = Array.from({ length: 9 }, (_, i) => project(i + 1, i ? '' : '기존 프로젝트'));
-  review.applyProject(1);
+  review.resetMeetingForm();
   return { ...review, calls, downloads, announce, messages, nodes };
 }
 const texts = (node) => [node.textContent, ...(node.children || []).flatMap(texts)].filter(Boolean);
@@ -52,7 +50,6 @@ const texts = (node) => [node.textContent, ...(node.children || []).flatMap(text
 test('선택한 출력 형식을 요청·저장·내보내기·화면에 쓰고 분석 식별자로 체험을 확정한다', async () => {
   const review = fixture();
   review.state.keyConfigured = true;
-  review.ui['ai-consent'].checked = true;
   review.ui['output-format'].value = 'tasks';
   review.ui.transcript.value = '초안을 작성합니다.';
   await review.summarize(true);
@@ -63,7 +60,7 @@ test('선택한 출력 형식을 요청·저장·내보내기·화면에 쓰고 
   const finish = review.calls.find((call) => call.url === '/api/trial/finish');
   assert.equal(finish.body.analysisId, analysisId);
   assert.equal(review.calls.some((call) => call.url === '/api/trial/release'), false);
-  assert.equal(review.calls.find((call) => call.url === '/api/projects/1/meetings' && call.options.method === 'POST').body.outputFormat, 'tasks');
+  assert.equal(review.calls.find((call) => call.url === '/api/meetings/main' && call.options.method === 'POST').body.outputFormat, 'tasks');
   assert.equal(review.exportDocument().outputFormat, 'tasks');
   const headings = texts(review.ui.minutes).filter((value) => ['업무 요약', '할 일', '미확정 항목', '상세 회의 내용', '합의된 방향'].includes(value));
   assert.deepEqual(headings, ['업무 요약', '할 일', '미확정 항목']);
@@ -79,7 +76,6 @@ test('분석이 실패하면 체험 예약을 회수하고 소진 응답이면 �
   const review = fixture({ routes: { '/api/summary': () => Response.json({ error: { code: 'TRIAL_EXHAUSTED', message: '새로운 API키를 등록하세요.', mustRegister: true } }, { status: 403 }),
     '/api/config': () => Response.json({ accessMode: 'exhausted', trialLimit: 3, trialRemaining: 0, mustRegister: true }) } });
   review.applyAccess({ accessMode: 'trial', trialLimit: 3, trialRemaining: 1, mustRegister: false });
-  review.ui['ai-consent'].checked = true;
   review.ui.transcript.value = '전사';
   await review.summarize(true);
   const id = review.calls.find((call) => call.url === '/api/summary').options.headers['X-Analysis-Id'];
@@ -92,29 +88,9 @@ test('분석이 실패하면 체험 예약을 회수하고 소진 응답이면 �
   assert.ok(review.startBlockers().some((item) => item.startsWith('새로운 API키를 등록하세요.')));
 });
 
-test('입력칸이 CRLF를 LF로 바꿔도 변경으로 보지 않고 다른 항목 저장 때 설명 원문을 보낸다', async () => {
-  const context = '  첫 줄\r\n둘째 줄\r\n  ';
-  let revision = 2;
-  const review = fixture({ routes: { '/api/projects/1': (call) => Response.json({ project: { ...call.body, slot: 1, revision: ++revision } }) } });
-  review.state.projects[0] = { ...review.state.projects[0], context };
-  review.applyProject(1);
-  review.ui['meeting-context'].value = context.replace(/\r\n/g, '\n');
-  assert.equal(review.presetChanged(), false);
-  review.ui.title.value = '바뀐 회의명';
-  assert.equal(review.presetChanged(), true);
-  await review.savePreset();
-  const body = review.calls.find((call) => call.url === '/api/projects/1').body;
-  assert.equal(body.context, context);
-  review.ui['meeting-context'].value = '  고친 설명  ';
-  assert.equal(review.presetChanged(), true);
-  await review.savePreset();
-  assert.equal(review.calls.filter((call) => call.url === '/api/projects/1').at(-1).body.context, '  고친 설명  ');
-});
-
 test('체험을 모두 쓴 뒤 분석을 누르면 요청 없이 정확한 새 키 안내와 AI 설정을 연다', async () => {
   const review = fixture();
   review.applyAccess({ accessMode: 'exhausted', trialLimit: 3, trialRemaining: 0, mustRegister: true });
-  review.ui['ai-consent'].checked = true;
   review.ui.transcript.value = '전사';
   review.refresh();
   assert.equal(review.ui.summarize.disabled, false);
@@ -127,7 +103,6 @@ test('체험을 모두 쓴 뒤 분석을 누르면 요청 없이 정확한 새 �
 test('체험 확정 저장이 실패해도 결과는 보관하고 경고를 완료 안내와 함께 남기며 예약을 회수하지 않는다', async () => {
   const review = fixture({ routes: { '/api/trial/finish': () => Response.json({ error: { code: 'TRIAL_STORAGE_FAILED', message: '폴더의 쓰기 권한을 확인해 주세요.' } }, { status: 500 }) } });
   review.applyAccess({ accessMode: 'trial', trialLimit: 3, trialRemaining: 3, mustRegister: false });
-  review.ui['ai-consent'].checked = true;
   review.ui.transcript.value = '전사';
   await review.summarize(true);
   assert.equal(review.calls.filter((call) => call.url === '/api/trial/finish').length, 2);
@@ -144,8 +119,8 @@ test('체험 중에는 남은 횟수를 보여 주고 지난 회의를 열면 �
   assert.match(review.ui['key-state'].textContent, /남은 분석 2\/3회/);
   assert.equal(review.startBlockers().some((item) => /API 키/.test(item)), false);
   const meeting = { id: crypto.randomUUID(), title: '지난 회의', date: '2026-10-01', participants: '', context: '', transcript: '전사', minutes, outputFormat: 'summary', audio: [] };
-  const opened = fixture({ routes: { [`/api/projects/1/meetings/${meeting.id}`]: () => Response.json({ meeting }) } });
-  await opened.openMeeting(meeting.id);
+  const opened = fixture({ routes: { [`/api/meetings/main/${meeting.id}`]: () => Response.json({ meeting, versions: [] }) } });
+  await opened.openMeeting('main', meeting.id);
   assert.equal(opened.ui['output-format'].value, 'summary');
   assert.equal(opened.stale(), false);
   const shown = texts(opened.ui.minutes);

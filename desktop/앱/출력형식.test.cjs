@@ -62,26 +62,23 @@ test('모르는 출력 형식은 OpenAI 호출 없이 거절한다', async t => 
   assert.equal(server.calls.length, 1);
 });
 
-test('프리셋·녹음·회의 기록·목록·파일 출력에 형식을 보존하고 옛 기록은 회의록형으로 읽는다', async t => {
+test('녹음·회의 기록·목록·파일 출력에 형식을 보존하고 형식이 없는 기록은 회의록형으로 읽는다', async t => {
   const { dir, request } = await start(t);
-  assert.equal((await request('/api/projects/1', { name: '형식 시험', title: '회의', context: '', outputFormat: 'report', revision: 0 })).status, 400);
-  const preset = await request('/api/projects/1', { name: '형식 시험', title: '회의', context: '', outputFormat: 'tasks', revision: 0 });
-  assert.equal(preset.body.project.outputFormat, 'tasks');
-  assert.equal((await request('/api/projects/1', { name: '형식 시험', title: '회의', context: '', revision: 1 })).body.project.outputFormat, 'tasks');
-
   const recordingId = randomUUID();
-  const meta = { title: '업무 회의', date: '2026-10-01', participants: '', context: '', expectedParts: 1, outputFormat: 'summary' };
-  assert.equal((await request(`/api/projects/1/recordings/${recordingId}`, meta)).body.recording.outputFormat, 'summary');
-  assert.equal((await request(`/api/projects/1/recordings/${recordingId}`, { ...meta, outputFormat: 'tasks' })).status, 409);
-  assert.equal((await request(`/api/projects/1/meetings/${recordingId}`)).body.meeting.outputFormat, 'summary');
+  const meta = { title: '업무 회의', date: '2026-10-01', participants: '', expectedParts: 1, outputFormat: 'summary' };
+  for (const outputFormat of ['report', ['summary']])
+    assert.equal((await request(`/api/recordings/main/${recordingId}`, { ...meta, outputFormat })).status, 400, JSON.stringify(outputFormat));
+  assert.equal((await request(`/api/recordings/main/${recordingId}`, meta)).body.recording.outputFormat, 'summary');
+  assert.equal((await request(`/api/recordings/main/${recordingId}`, { ...meta, outputFormat: 'tasks' })).status, 409);
+  assert.equal((await request(`/api/meetings/main/${recordingId}`)).body.meeting.outputFormat, 'summary');
 
-  const base = { title: '업무 회의', date: '2026-10-01', participants: '', context: '', transcript: '양식 초안을 작성합니다.', minutes };
-  const tasks = await request('/api/projects/1/meetings', { ...base, id: randomUUID(), outputFormat: 'tasks' });
-  const summary = await request('/api/projects/1/meetings', { ...base, id: randomUUID(), outputFormat: 'summary' });
-  const meeting = await request('/api/projects/1/meetings', { ...base, id: randomUUID() });
+  const base = { title: '업무 회의', date: '2026-10-01', participants: '', transcript: '양식 초안을 작성합니다.', minutes };
+  const tasks = await request('/api/meetings/main', { ...base, id: randomUUID(), outputFormat: 'tasks' });
+  const summary = await request('/api/meetings/main', { ...base, id: randomUUID(), outputFormat: 'summary' });
+  const meeting = await request('/api/meetings/main', { ...base, id: randomUUID() });
   assert.equal(tasks.body.meeting.outputFormat, 'tasks');
   assert.equal('outputFormat' in meeting.body.meeting, false);
-  const folder = path.join(dir, '프로젝트-01');
+  const folder = path.join(dir, '회의기록');
   const markdown = record => fs.readFileSync(path.join(folder, record.artifacts.summary), 'utf8');
   assert.match(markdown(tasks.body.meeting), /## 업무 요약[\s\S]*## 할 일\n- 양식 초안 작성 · 담당 미정 · 기한 미정[\s\S]*## 미확정 항목/);
   assert.doesNotMatch(markdown(tasks.body.meeting), /## 상세 회의 내용|## 합의된 방향|## 결정 사항/);
@@ -89,8 +86,8 @@ test('프리셋·녹음·회의 기록·목록·파일 출력에 형식을 보�
   assert.doesNotMatch(markdown(summary.body.meeting), /## 상세 회의 내용|## 결정 사항/);
   assert.match(markdown(meeting.body.meeting), /## 상세 회의 내용[\s\S]*## 합의된 방향/);
 
-  const list = (await request('/api/projects/1/meetings')).body.meetings;
+  const list = (await request('/api/meetings')).body.meetings;
   assert.deepEqual(new Set(list.map(item => item.outputFormat)), new Set(['tasks', 'summary', 'meeting']));
-  assert.equal((await request(`/api/projects/1/meetings/${tasks.body.meeting.id}`)).body.meeting.outputFormat, 'tasks');
-  assert.equal((await request(`/api/projects/1/meetings/${meeting.body.meeting.id}`)).body.meeting.outputFormat, 'meeting');
+  assert.equal((await request(`/api/meetings/main/${tasks.body.meeting.id}`)).body.meeting.outputFormat, 'tasks');
+  assert.equal((await request(`/api/meetings/main/${meeting.body.meeting.id}`)).body.meeting.outputFormat, 'meeting');
 });

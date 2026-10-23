@@ -1,4 +1,4 @@
-<!-- 프로젝트별로 회의를 준비하고 녹음·분석한 기록을 보관하는 VoiceNote 작업실 화면. -->
+<!-- 회의를 녹음·분석하고 그 기록을 지난 회의로 보관하는 VoiceNote 작업실 화면. -->
 <!doctype html>
 <html lang="ko">
 <head>
@@ -29,19 +29,14 @@
 <a class="skip-link" href="#main">본문으로 이동</a>
 <header class="topbar">
   <div class="wordmark"><svg class="app-symbol" aria-hidden="true" focusable="false"><use href="#app-symbol"/></svg><strong>VoiceNote</strong></div>
-  <p class="topbar-project"><span class="topbar-label">현재 프로젝트</span><span id="header-project">불러오는 중</span></p>
   <button id="open-ai-settings" class="ai-chip" type="button" aria-haspopup="dialog" aria-controls="ai-settings"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-sliders"/></svg><span>AI 설정</span><span id="ai-status-label" class="ai-chip-state">확인 중</span></button>
 </header>
 
 <div class="workbench">
-<nav class="rail" aria-label="프로젝트와 지난 회의">
-  <section class="rail-section" aria-labelledby="projects-heading">
-    <h2 id="projects-heading" class="rail-heading">프로젝트</h2>
-    <div id="project-presets" class="project-list" role="group" aria-label="프로젝트 프리셋, 최대 3개"></div>
-  </section>
+<nav class="rail" aria-label="지난 회의">
   <section class="rail-section rail-history" aria-labelledby="history-title">
     <h2 id="history-title" class="rail-heading">지난 회의</h2>
-    <p id="history-status" class="rail-meta">선택한 프로젝트의 회의입니다.</p>
+    <p id="history-status" class="rail-meta">보관된 회의를 불러오는 중입니다.</p>
     <div id="meeting-history" class="history-list"></div>
   </section>
   <section class="rail-section rail-tools" aria-label="작업 도구">
@@ -54,8 +49,7 @@
 
 <main id="main" class="desk" tabindex="-1">
   <div class="desk-head">
-    <p id="selected-project" class="desk-project">프로젝트를 불러오는 중입니다.</p>
-    <a class="mobile-jump" href="#projects-heading">프로젝트·지난 회의 목록으로 이동</a>
+    <a class="mobile-jump" href="#history-title">지난 회의 목록으로 이동</a>
     <h1 id="meeting-heading" class="desk-title">새 회의</h1>
     <ol id="stage" class="stage" aria-label="회의 진행 단계">
       <li data-stage="prepare"><span class="stage-mark" aria-hidden="true"></span>준비</li>
@@ -69,16 +63,10 @@
     <h2 id="prepare-heading" class="visually-hidden">회의 준비</h2>
     <div class="sheet-prepare">
     <button id="prepare" class="button button-outline prepare-button" type="button" aria-expanded="false" aria-controls="meeting-setup"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-prepare"/></svg>회의 준비</button>
-    <fieldset class="consents">
-      <legend class="visually-hidden">회의 시작 전 동의</legend>
-      <label class="check-row"><input id="record-consent" type="checkbox" /><span>참석자의 녹음 동의를 확인했습니다.</span></label>
-      <label class="check-row"><input id="ai-consent" type="checkbox" /><span>회의 종료 후 원음과 전사를 외부 AI로 보내 분석하는 데 동의합니다. 길이 한도에 걸리면 나눠서 최대 6회 추가 요청하며 API 사용료가 발생합니다.</span></label>
-    </fieldset>
 
     <div id="meeting-setup" class="setup" hidden>
       <div class="field-grid">
-        <label class="field">프로젝트 이름<input id="project-name" maxlength="100" placeholder="예. 홈페이지 개편" autocomplete="off" /></label>
-        <label class="field">회의명<input id="title" maxlength="160" autocomplete="off" /></label>
+        <label class="field field-wide">회의명 <span class="field-note">선택 · 비워 두면 AI가 회의 내용을 보고 정합니다</span><input id="title" maxlength="160" autocomplete="off" /></label>
         <label class="field">회의 날짜<input id="date" type="date" /></label>
         <div class="field">
           <label for="output-format">출력 형식</label>
@@ -109,14 +97,7 @@
         <label class="field field-wide">상세 회의내용 <span class="field-note">이번 회의의 안건·배경 메모</span><textarea id="meeting-notes" rows="5" maxlength="4000" aria-describedby="notes-help" placeholder="예. 1) 표준 양식 확정 범위 2) 개발 순서 3) 담당자 정하기"></textarea></label>
       </div>
       <p id="notes-help" class="fine-print">상세 회의내용은 이 회의에만 저장되고, 요약할 때 사전 참고 자료로만 전달됩니다. 회의에서 확정된 사실로 취급하지 않습니다.</p>
-      <details class="preset-details">
-        <summary>프로젝트 설명과 회의 정리 기준 (프리셋)</summary>
-        <label class="field">프로젝트 설명과 회의 정리 기준<textarea id="meeting-context" rows="5" maxlength="4000" aria-describedby="context-help"></textarea></label>
-        <p id="context-help" class="fine-print">프로젝트 이름·회의명·설명은 프리셋에 저장되어 다음 회의에도 불러옵니다. 출력 형식은 회의마다 고르고, 프로젝트별로 마지막에 고른 형식을 기억합니다.</p>
-      </details>
       <div class="button-row">
-        <button id="save-preset" class="button button-quiet" type="button">프리셋 저장</button>
-        <button id="delete-preset" class="button button-quiet" type="button">프로젝트 삭제</button>
         <button id="microphone-volume" class="button button-quiet" type="button">마이크 음량 100% 설정</button>
         <button id="setup-close" class="button button-quiet" type="button">준비 내용 접기</button>
       </div>
@@ -142,11 +123,12 @@
         <button id="stop" class="button button-stop" type="button" disabled hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-stop"/></svg>회의 종료</button>
         <button id="cancel-permission" class="button button-quiet" type="button" hidden>허가 요청 취소</button>
       </div>
+      <p id="consent-notice" class="fine-print">녹음 전에 참석자에게 녹음과 AI 분석(OpenAI 전송)을 알려 주세요.</p>
       <div id="start-hint" class="start-hint" aria-live="polite"></div>
     </div>
 
     <div class="progress-block">
-      <p id="workflow-status" class="workflow-status" role="status" aria-live="polite">프로젝트를 고르고 ‘회의 준비’를 누르세요.</p>
+      <p id="workflow-status" class="workflow-status" role="status" aria-live="polite">‘회의 시작’을 누르면 바로 녹음합니다.</p>
       <div class="button-row">
         <button id="retry-analysis" class="button button-outline" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-retry"/></svg>저장·분석 다시 시도</button>
         <button id="cancel-ai" class="button button-quiet" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-cancel"/></svg>분석 취소</button>
@@ -184,8 +166,8 @@
     </div>
     <p id="result-status" class="fine-print" role="status"></p>
     <section id="panel-minutes" class="result-panel" role="tabpanel" aria-labelledby="tab-minutes">
-      <p id="archive-status" class="fine-print" role="status">분석이 끝나면 선택한 프로젝트에 자동 저장됩니다.</p>
-      <button id="save-archive" class="button button-outline" type="button" disabled>프로젝트 저장 다시 시도</button>
+      <p id="archive-status" class="fine-print" role="status">분석이 끝나면 지난 회의에 자동 저장됩니다.</p>
+      <button id="save-archive" class="button button-outline" type="button" disabled>저장 다시 시도</button>
       <div id="minutes" class="minutes-content"></div>
       <details class="result-more">
         <summary>AI 사용량 · 다른 형식으로 저장</summary>

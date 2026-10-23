@@ -86,7 +86,7 @@ test('분석 하나의 여러 요청은 한 번만 세고 실패·취소는 차�
   assert.equal(exhausted.status, 403);
   assert.deepEqual(exhausted.body.error, { code: 'TRIAL_EXHAUSTED', message: '새로운 API키를 등록하세요.', mustRegister: true });
   assert.equal((await server.request('/api/config')).body.accessMode, 'exhausted');
-  assert.equal((await server.request('/api/projects')).status, 200);
+  assert.equal((await server.request('/api/meetings')).status, 200);
   assert.equal((await server.request('/api/settings/export')).status, 200);
   const savedTrial = JSON.parse(fs.readFileSync(path.join(server.dir, '체험권한.json'), 'utf8'));
   assert.equal(savedTrial.used, 3);

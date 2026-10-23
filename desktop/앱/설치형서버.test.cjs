@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
+const { randomUUID } = require('node:crypto');
 
 async function start(root) {
   const readyFile = path.join(root, `ready-${Date.now()}.json`);
@@ -34,19 +35,21 @@ async function stop(server) {
   await exited;
   assert.equal(fs.existsSync(server.readyFile), false);
 }
-test('설치 위치 밖에 프리셋과 키를 저장하고 재실행 후 보존한다', async () => {
+test('설치 위치 밖에 회의 기록과 키를 저장하고 재실행 후 보존한다', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meeting-desktop-'));
   let server;
   try {
     server = await start(root);
-    assert.equal((await server.api('/api/projects')).projects.length, 3);
-    await server.api('/api/projects/2', { name: '설치본 시험', title: '다음 회의', context: '프로젝트 내용', revision: 0 });
+    assert.deepEqual((await server.api('/api/meetings')).meetings, []);
+    const record = { id: randomUUID(), title: '설치본 시험', date: '2026-10-23', participants: '', transcript: '발언',
+      minutes: { overview: '요약', topics: [], decisions: [], actions: [], openQuestions: [] } };
+    await server.api('/api/meetings/main', record);
     await server.api('/api/key', { apiKey: 'test-only-no-network', persist: true });
     await stop(server);
     server = await start(root);
-    assert.equal((await server.api('/api/projects')).projects[1].name, '설치본 시험');
+    assert.equal((await server.api('/api/meetings')).meetings[0].title, '설치본 시험');
     assert.equal((await server.api('/api/config')).keySaved, true);
-    assert.ok(fs.existsSync(path.join(root, '회의자료', '프로젝트-02', '설정.json')));
+    assert.ok(fs.existsSync(path.join(root, '회의자료', '회의기록', `회의-${record.id}.json`)));
     await stop(server);
   } finally {
     if (server && server.child.exitCode === null) server.child.kill();

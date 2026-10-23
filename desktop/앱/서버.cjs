@@ -20225,7 +20225,7 @@ function operation(request) {
   return id.toLowerCase();
 }
 function createMeetingServer(options = {}) {
-  const projectStore = require("./프로젝트보관.cjs").createProjectStore(
+  const meetingStore = require("./회의보관.cjs").createMeetingStore(
     options.dataDir ?? (0, import_node_path.join)(__dirname, "회의자료"),
     (value) => {
       const result = minutesSchema.safeParse(value);
@@ -20384,8 +20384,8 @@ function createMeetingServer(options = {}) {
     const before = settingsFile && (0, import_node_fs.existsSync)(settingsFile) ? (0, import_node_fs.readFileSync)(settingsFile) : null;
     saveSettings(next);
     try {
-      if (parsed.customFormat) projectStore.saveCustomFormat(parsed.customFormat);
-      else projectStore.deleteCustomFormat();
+      if (parsed.customFormat) meetingStore.saveCustomFormat(parsed.customFormat);
+      else meetingStore.deleteCustomFormat();
     } catch {
       let restored = true;
       try {
@@ -20397,7 +20397,7 @@ function createMeetingServer(options = {}) {
       throw fail("SETTINGS_IMPORT_FAILED", restored ? "설정을 바꾸지 못해 이전 값으로 되돌렸습니다. 회의자료 폴더의 쓰기 권한과 디스크 공간을 확인하세요." : "설정을 바꾸지 못했고 이전 값으로 되돌리지도 못했습니다. 설정에서 값을 다시 확인하세요.", 503);
     }
     applySettings(next);
-    return { settings: settings(), customFormat: projectStore.customFormat(), skipped };
+    return { settings: settings(), customFormat: meetingStore.customFormat(), skipped };
   }
   function saveKeyFile(key, persist) {
     if (!options.keyFile) {
@@ -20453,7 +20453,7 @@ function createMeetingServer(options = {}) {
           // 설정 파일은 미리보기와 적용 모두 서버에서 같은 규칙으로 검증하고, 적용은 검증이 끝난 뒤에만 쓴다.
           try {
             if (path === "/api/settings/export" && request.method === "GET") {
-              json2(response, 200, { file: settingsFormat.buildSettingsFile({ summaryModel: summaryModel || aiModels.DEFAULT_SUMMARY_MODEL, defaultOutputFormat, customFormat: projectStore.customFormat(), storage }) });
+              json2(response, 200, { file: settingsFormat.buildSettingsFile({ summaryModel: summaryModel || aiModels.DEFAULT_SUMMARY_MODEL, defaultOutputFormat, customFormat: meetingStore.customFormat(), storage }) });
             } else if ((path === "/api/settings/preview" || path === "/api/settings/import") && request.method === "POST") {
               const importing = path === "/api/settings/import";
               if (importing && active) throw fail("BUSY", "진행 중인 AI 요청이 끝난 뒤 설정 파일을 불러오세요.", 409);
@@ -20472,9 +20472,9 @@ function createMeetingServer(options = {}) {
         }
         if (path === "/api/custom-format") {
           try {
-            if (request.method === "GET") json2(response, 200, { customFormat: projectStore.customFormat() });
-            else if (request.method === "POST") json2(response, 200, { customFormat: projectStore.saveCustomFormat(await jsonBody(request)) });
-            else if (request.method === "DELETE") json2(response, 200, { customFormat: projectStore.deleteCustomFormat() });
+            if (request.method === "GET") json2(response, 200, { customFormat: meetingStore.customFormat() });
+            else if (request.method === "POST") json2(response, 200, { customFormat: meetingStore.saveCustomFormat(await jsonBody(request)) });
+            else if (request.method === "DELETE") json2(response, 200, { customFormat: meetingStore.deleteCustomFormat() });
             else throw fail("NOT_FOUND", "내 형식 경로를 확인하세요.", 404);
           } catch (error) {
             if (error instanceof MeetingError) throw error;
@@ -20482,52 +20482,56 @@ function createMeetingServer(options = {}) {
           }
           return;
         }
-        if (path === "/api/projects" || path.startsWith("/api/projects/")) {
+        if (path === "/api/meetings" || path.startsWith("/api/meetings/") || path.startsWith("/api/recordings/")) {
+          // 모든 회의 동작은 경로의 보관함 이름(main, p1~p3)으로 폴더를 찾는다. 알 수 없는 보관함은 저장소가 404로 막는다.
           try {
-            const transcriptRoute = /^\/api\/projects\/([1-9])\/recordings\/([0-9a-f-]{36})\/transcript$/.exec(path);
+            const transcriptRoute = /^\/api\/recordings\/([a-z0-9]+)\/([0-9a-f-]{36})\/transcript$/.exec(path);
             if (transcriptRoute && request.method === "POST") {
               let data;
               try { data = JSON.parse((await bodyBytes(request, 8 * 1024 * 1024)).toString("utf8")); }
               catch (error) { if (error instanceof MeetingError) throw error; throw fail("INVALID_INPUT", "전사 저장 형식을 확인하세요.", 400); }
-              projectStore.saveTranscript(Number(transcriptRoute[1]), transcriptRoute[2], data?.text);
+              meetingStore.saveTranscript(transcriptRoute[1], transcriptRoute[2], data?.text);
               json2(response, 200, { saved: true });
               return;
             }
-            const audioRoute = /^\/api\/projects\/([1-9])\/recordings\/([0-9a-f-]{36})(?:\/audio\/(\d{1,4}))?$/.exec(path);
+            const audioRoute = /^\/api\/recordings\/([a-z0-9]+)\/([0-9a-f-]{36})(?:\/audio\/(\d{1,4}))?$/.exec(path);
             if (audioRoute) {
-              const slot = Number(audioRoute[1]), id = audioRoute[2], index = Number(audioRoute[3]);
+              const location = audioRoute[1], id = audioRoute[2], index = Number(audioRoute[3]);
               if (audioRoute[3] && request.method === "GET") {
-                const audio = projectStore.loadAudio(slot, id, index);
+                const audio = meetingStore.loadAudio(location, id, index);
                 headers(response, audio.type);
                 response.end(audio.bytes);
               } else if (audioRoute[3] && request.method === "POST") {
                 const type = request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase();
                 const bytes = await bodyBytes(request, maxAudioBytes);
-                json2(response, 200, { audio: projectStore.saveAudio(slot, id, index, type, bytes) });
+                json2(response, 200, { audio: meetingStore.saveAudio(location, id, index, type, bytes) });
               } else if (!audioRoute[3] && request.method === "POST") {
-                json2(response, 200, { recording: projectStore.createRecording(slot, id, await jsonBody(request)) });
+                json2(response, 200, { recording: meetingStore.createRecording(location, id, await jsonBody(request)) });
               } else throw fail("NOT_FOUND", "녹음 경로를 확인하세요.", 404);
               return;
             }
-            const match = /^\/api\/projects\/([1-9])(?:\/(meetings)(?:\/([0-9a-f-]{36}))?)?$/.exec(path);
-            if (path === "/api/projects" && request.method === "GET") {
-              json2(response, 200, { projects: projectStore.projects() });
-            } else if (match && request.method === "GET" && match[2]) {
-              json2(response, 200, match[3] ? { meeting: projectStore.loadMeeting(Number(match[1]), match[3]) } : { meetings: projectStore.listMeetings(Number(match[1])) });
-            } else if (match && request.method === "POST" && !match[3]) {
+            const reviewRoute = /^\/api\/meetings\/([a-z0-9]+)\/([0-9a-f-]{36})\/review$/.exec(path);
+            if (reviewRoute && request.method === "POST") {
+              json2(response, 200, { review: meetingStore.saveReview(reviewRoute[1], reviewRoute[2], await jsonBody(request)) });
+              return;
+            }
+            const match = /^\/api\/meetings\/([a-z0-9]+)(?:\/([0-9a-f-]{36}))?$/.exec(path);
+            if (path === "/api/meetings" && request.method === "GET") {
+              json2(response, 200, meetingStore.listMeetings());
+            } else if (match && match[2] && request.method === "GET") {
+              json2(response, 200, meetingStore.loadMeeting(match[1], match[2]));
+            } else if (match && !match[2] && request.method === "POST") {
               if (request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json")
                 throw fail("INVALID_INPUT", "JSON 형식을 확인하세요.", 415);
               let data;
-              try { data = JSON.parse((await bodyBytes(request, match[2] ? 8 * 1024 * 1024 : maxJsonBytes)).toString("utf8")); }
+              try { data = JSON.parse((await bodyBytes(request, 8 * 1024 * 1024)).toString("utf8")); }
               catch (error) { if (error instanceof MeetingError) throw error; throw fail("INVALID_INPUT", "입력 형식을 확인하세요.", 400); }
               if (!object3(data)) throw fail("INVALID_INPUT", "입력 형식을 확인하세요.", 400);
-              json2(response, 200, match[2] ? { meeting: projectStore.saveMeeting(Number(match[1]), data) } : { project: projectStore.savePreset(Number(match[1]), data) });
-            } else if (match && request.method === "DELETE" && !match[2]) {
-              json2(response, 200, { projects: projectStore.deletePreset(Number(match[1]), (await jsonBody(request)).revision) });
-            } else throw fail("NOT_FOUND", "프로젝트 경로를 확인하세요.", 404);
+              json2(response, 200, { meeting: meetingStore.saveMeeting(match[1], data) });
+            } else throw fail("NOT_FOUND", "회의 경로를 확인하세요.", 404);
           } catch (error) {
             if (error instanceof MeetingError) throw error;
-            throw fail("PROJECT_STORAGE_ERROR", error.status ? error.message : "프로젝트 파일을 저장하거나 읽지 못했습니다. 실행 폴더의 쓰기 권한과 디스크 공간을 확인하세요.", error.status || 503);
+            throw fail("MEETING_STORAGE_ERROR", error.status ? error.message : "회의 파일을 저장하거나 읽지 못했습니다. 회의자료 폴더의 쓰기 권한과 디스크 공간을 확인하세요.", error.status || 503);
           }
           return;
         }

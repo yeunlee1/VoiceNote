@@ -63,23 +63,22 @@ test('내 형식은 하나만 저장·조회·삭제하고 잘못된 정의는 �
 
 test('내 형식 회의는 당시 정의를 기록에 남기고 저장 파일을 그 항목 순서로 쓴다', async t => {
   const { dir, request } = await start(t);
-  assert.equal((await request('/api/projects/1', 'POST', { name: '형식 시험', title: '회의', context: '', revision: 0 })).status, 200);
   const record = { id: randomUUID(), title: '주간 회의', date: '2026-10-02', participants: '', context: '', transcript: '발언', minutes, outputFormat: 'custom', customFormat: custom };
-  const saved = await request('/api/projects/1/meetings', 'POST', record);
+  const saved = await request('/api/meetings/main', 'POST', record);
   assert.equal(saved.status, 200);
   assert.equal(saved.body.meeting.outputFormat, 'custom');
   assert.equal(saved.body.meeting.customFormat.name, '주간 보고');
-  const loaded = (await request(`/api/projects/1/meetings/${record.id}`)).body.meeting;
+  const loaded = (await request(`/api/meetings/main/${record.id}`)).body.meeting;
   assert.deepEqual(loaded.customFormat, formats.validateCustom(custom));
-  const text = fs.readFileSync(path.join(dir, '프로젝트-01', saved.body.meeting.artifacts.summary), 'utf8');
+  const text = fs.readFileSync(path.join(dir, '회의기록', saved.body.meeting.artifacts.summary), 'utf8');
   assert.ok(text.indexOf('## 이번 주 할 일') < text.indexOf('## 한 줄 요약'));
   assert.doesNotMatch(text, /## 결정 사항|## 주요 내용/);
-  assert.equal((await request('/api/projects/1/meetings', 'POST', { ...record, id: randomUUID(), customFormat: { name: '' } })).status, 400);
+  assert.equal((await request('/api/meetings/main', 'POST', { ...record, id: randomUUID(), customFormat: { name: '' } })).status, 400);
   const recordingId = randomUUID();
   const recording = { title: '녹음 회의', date: '2026-10-02', participants: '', context: '', expectedParts: 1, outputFormat: 'custom', customFormat: custom };
-  assert.equal((await request(`/api/projects/1/recordings/${recordingId}`, 'POST', recording)).status, 200);
-  assert.equal((await request(`/api/projects/1/recordings/${recordingId}`, 'POST', recording)).status, 200);
-  assert.equal((await request(`/api/projects/1/recordings/${recordingId}`, 'POST', { ...recording, customFormat: { ...custom, name: '다른 이름' } })).status, 409);
+  assert.equal((await request(`/api/recordings/main/${recordingId}`, 'POST', recording)).status, 200);
+  assert.equal((await request(`/api/recordings/main/${recordingId}`, 'POST', recording)).status, 200);
+  assert.equal((await request(`/api/recordings/main/${recordingId}`, 'POST', { ...recording, customFormat: { ...custom, name: '다른 이름' } })).status, 409);
 });
 
 test('화면은 서버가 주는 같은 출력 형식 파일을 쓴다', async t => {

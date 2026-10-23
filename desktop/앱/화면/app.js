@@ -6,13 +6,11 @@
   const ui = Object.fromEntries(
     [
       "title",
-      "project-presets", "project-name", "selected-project", "save-preset", "delete-preset", "prepare",
+      "prepare",
       "workflow-status", "meeting-setup", "retry-analysis", "archive-status", "save-archive",
       "history-status", "meeting-history",
       "date",
       "participants",
-      "meeting-context",
-      "record-consent",
       "record-state",
       "microphone-volume",
       "microphone-status",
@@ -25,7 +23,6 @@
       "stop",
       "audio-parts",
       "audio-file",
-      "ai-consent",
       "transcript",
       "transcript-count",
       "transcribe",
@@ -44,7 +41,7 @@
       "clear",
       "shutdown",
       "status",
-      "meeting-notes", "start-hint", "stage", "header-project", "open-ai-settings", "ai-status-label",
+      "meeting-notes", "start-hint", "stage", "open-ai-settings", "ai-status-label",
       "summary-model", "model-help", "settings-lock", "meeting-detail", "ai-settings", "detail-title",
       "detail-meta", "usage", "open-result", "open-result-label", "setup-close", "meeting-heading", "key-form",
       "output-format",
@@ -58,8 +55,9 @@
   const outputFormat = (value) => (Object.hasOwn(formatLabels, value) ? value : "meeting");
   const state = {
     token: "",
-    projects: [], slot: 1, setupOpen: false, projectBusy: false, flowBusy: false, archiveBusy: false,
-    meetingId: null, resultId: null, recordingMetadata: null, audioStored: false, resultStored: false,
+    setupOpen: false, historyBusy: false, flowBusy: false, archiveBusy: false,
+    // 열린 회의가 든 보관함(main, p1~p3)과 그 녹음 id다. 새 녹음은 언제나 main에 만든다.
+    location: "main", projectName: "", recordingId: null, resultId: null, recordingMetadata: null, audioStored: false, resultStored: false,
     keyConfigured: false,
     keySaved: false,
     keyStorageError: "",
@@ -419,15 +417,12 @@
 
   function startBlockers() {
     const blockers = [];
-    if (!state.projects.length) blockers.push("프로젝트 목록을 불러오는 중입니다.");
     if (hasMeetingRecord()) blockers.push("지난 회의 기록이 열려 있습니다. ‘회의 준비’를 눌러 새 회의를 준비하세요.");
     if (!canAnalyze()) blockers.push(state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요. 상단 ‘AI 설정’에서 등록합니다." : "상단 ‘AI 설정’에서 API 키를 등록하세요.");
     if (state.modelError) blockers.push(`상단 ‘AI 설정’에서 요약 모델을 다시 선택하세요. ${state.modelError}`);
-    if (!ui["project-name"].value.trim()) blockers.push("‘회의 준비’에서 프로젝트 이름을 입력하세요.");
-    if (!ui.title.value.trim()) blockers.push("‘회의 준비’에서 회의명을 입력하세요.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ui.date.value)) blockers.push("‘회의 준비’에서 회의 날짜를 확인하세요.");
+    if (ui["meeting-notes"].value.length > 4000) blockers.push("‘회의 준비’의 상세 회의내용을 4,000자 이하로 줄이세요.");
     if (ui["output-format"].value === "custom" && !currentCustom()) blockers.push("‘회의 준비’의 예시 보기에서 내 형식을 먼저 저장하세요.");
-    if (!ui["record-consent"].checked) blockers.push("참석자 녹음 동의를 체크하세요.");
-    if (!ui["ai-consent"].checked) blockers.push("외부 AI 분석 동의를 체크하세요.");
     return blockers;
   }
 
@@ -476,24 +471,20 @@
   function refresh() {
     renderResultActions();
     const recording = Boolean(state.recorder && !state.recordingStopping);
-    const busy = Boolean(state.aiController) || state.keyBusy || state.projectBusy || state.archiveBusy;
+    const busy = Boolean(state.aiController) || state.keyBusy || state.historyBusy || state.archiveBusy;
     const locked = busy || state.flowBusy || state.permissionPending || state.recorders.size > 0;
-    ui.prepare.disabled = locked || !state.projects.length;
+    ui.prepare.disabled = locked;
     ui.prepare.setAttribute("aria-expanded", String(state.setupOpen));
     ui["meeting-setup"].hidden = !state.setupOpen;
-    ui["save-preset"].disabled = locked || !state.projects.length;
-    ui["delete-preset"].hidden = !state.projects[state.slot - 1]?.name;
-    ui["delete-preset"].disabled = locked || hasMeetingRecord();
     ui["save-archive"].disabled = locked || !state.minutes || stale() || state.resultStored;
     ui["save-archive"].hidden = !state.minutes || state.resultStored;
     ui["retry-analysis"].disabled = locked;
     ui.clear.disabled = locked;
-    ui.shutdown.disabled = state.flowBusy || state.archiveBusy || state.projectBusy;
-    for (const id of ["project-name", "title", "date", "output-format", "participants", "meeting-notes", "meeting-context", "transcript", "audio-file"])
+    ui.shutdown.disabled = state.flowBusy || state.archiveBusy || state.historyBusy;
+    for (const id of ["title", "date", "output-format", "participants", "meeting-notes", "transcript", "audio-file"])
       ui[id].disabled = Boolean(locked);
-    for (const button of ui["project-presets"].querySelectorAll("button")) button.disabled = Boolean(locked);
     for (const button of ui["meeting-history"].querySelectorAll("button")) button.disabled = Boolean(locked);
-    const allowedAI = (canAnalyze() || needsNewKey()) && ui["ai-consent"].checked && !busy;
+    const allowedAI = (canAnalyze() || needsNewKey()) && !busy;
     const canSendAudio = state.parts.some(
       (part) =>
         part.blob && part.blob.size <= state.maxAudioBytes && !part.applied,
@@ -522,7 +513,7 @@
     const title = ui.title.value.trim();
     ui["meeting-heading"].textContent = title || "새 회의";
     ui["detail-title"].textContent = title || "회의 기록";
-    ui["detail-meta"].textContent = [state.projects[state.slot - 1]?.name, ui.date.value, state.dailySequence && `${state.dailySequence}차 회의`]
+    ui["detail-meta"].textContent = [state.projectName && `이전 프로젝트: ${state.projectName}`, ui.date.value, state.dailySequence && `${state.dailySequence}차 회의`]
       .filter(Boolean).join(" · ");
     const lockedSettings = settingsLocked();
     for (const id of ["api-key", "persist-key", "save-key", "remove-key"]) ui[id].disabled = lockedSettings || state.keyBusy;
@@ -634,7 +625,7 @@
   function recordingMetadata() {
     return {
       title: ui.title.value.trim(), date: ui.date.value, participants: ui.participants.value.trim(),
-      context: ui["meeting-context"].value.trim(), notes: ui["meeting-notes"].value.trim(), ...formatFields(),
+      notes: ui["meeting-notes"].value.trim(), ...formatFields(),
     };
   }
 
@@ -754,7 +745,7 @@
 
   function rotateRecording() {
     const previous = state.recorder;
-    if (!previous || state.recordingStopping || !ui["record-consent"].checked) return;
+    if (!previous || state.recordingStopping) return;
     try {
       startPart(state.stream, previous.recorder.mimeType);
       previous.recorder.stop();
@@ -764,21 +755,8 @@
     }
   }
 
-  // 브라우저 입력칸은 CRLF를 LF로 바꾸므로 줄바꿈만 맞춰 비교하고, 앞뒤 공백은 자르지 않는다.
-  const newlines = (value) => String(value ?? "").replace(/\r\n?/g, "\n");
-  function presetContext(project) {
-    const value = ui["meeting-context"].value;
-    return project && newlines(project.context) === newlines(value) ? project.context : value;
-  }
-
-  function presetChanged() {
-    const project = state.projects[state.slot - 1];
-    return !project || project.name !== ui["project-name"].value.trim() || project.title !== ui.title.value.trim()
-      || project.context !== presetContext(project);
-  }
-
   async function startRecording() {
-    if (state.flowBusy || state.projectBusy || state.archiveBusy || state.aiController) return;
+    if (state.flowBusy || state.historyBusy || state.archiveBusy || state.aiController) return;
     if (state.permissionPending || state.recorders.size) return;
     const blockers = startBlockers();
     if (blockers.length) {
@@ -790,14 +768,6 @@
       announce("이 브라우저에서 마이크 녹음을 사용할 수 없습니다.");
       return;
     }
-    if (presetChanged()) {
-      try {
-        await savePreset();
-      } catch (error) {
-        workflow(`프리셋을 저장하지 못해 녹음을 시작하지 않았습니다. ${error.message}`);
-        return;
-      }
-    }
     const generation = ++state.permissionGeneration;
     state.permissionPending = true;
     ui["record-state"].textContent = "마이크 허가 대기";
@@ -807,7 +777,7 @@
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       });
-      if (generation !== state.permissionGeneration || !ui["record-consent"].checked) {
+      if (generation !== state.permissionGeneration) {
         stopTracks(stream);
         return;
       }
@@ -820,7 +790,9 @@
       });
       clearParts();
       resetResult();
-      state.meetingId = newOperationId();
+      state.recordingId = newOperationId();
+      state.location = "main";
+      state.projectName = "";
       state.recordingMetadata = recordingMetadata();
       state.audioStored = false;
       state.setupOpen = false;
@@ -923,11 +895,13 @@
     renderParts();
     resetResult();
     ui["record-state"].textContent = "파일 불러옴";
-    state.meetingId = newOperationId();
+    state.recordingId = newOperationId();
+    state.location = "main";
+    state.projectName = "";
     state.recordingMetadata = null;
     state.audioStored = false;
     ui["retry-analysis"].hidden = false;
-    workflow("음성을 불러왔습니다. ‘저장·분석 다시 시도’를 누르면 프로젝트에 보관하고 분석합니다.");
+    workflow("음성을 불러왔습니다. ‘저장·분석 다시 시도’를 누르면 보관하고 분석합니다.");
     announce(`${files.length}개 파일을 이름 순서대로 불러왔습니다. 전사할 때만 외부로 전송됩니다.`);
   }
 
@@ -937,7 +911,7 @@
   }
 
   function assertAI(signal) {
-    if (signal.aborted || !ui["ai-consent"].checked || state.recorders.size)
+    if (signal.aborted || state.recorders.size)
       throw new DOMException("요청 취소", "AbortError");
   }
 
@@ -984,7 +958,7 @@
 
   async function paidTask(task) {
     if (needsNewKey() && !state.aiController) return promptNewKey();
-    if (!canAnalyze() || !ui["ai-consent"].checked || state.aiController) return;
+    if (!canAnalyze() || state.aiController) return;
     state.trialWarning = "";
     const controller = new AbortController();
     // 분석 시도마다 새 식별자를 써서 분할·자동 재요청은 한 번으로, 명시적 재분석은 새 한 번으로 센다.
@@ -1068,8 +1042,8 @@
       if (!transcript) throw new Error("전사 내용이 비어 있습니다.");
       const source = summaryInput();
       const metadata = JSON.parse(source);
-      if (state.audioStored && state.meetingId) {
-        await api(`/api/projects/${state.slot}/recordings/${state.meetingId}/transcript`, {
+      if (state.audioStored && state.recordingId) {
+        await api(`/api/recordings/${state.location}/${state.recordingId}/transcript`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: transcript }), signal,
         });
         assertAI(signal);
@@ -1130,7 +1104,7 @@
       renderMinutes();
       refresh();
       await archiveResult();
-      workflow("회의록 저장 완료. 이 프로젝트의 ‘지난 회의’에서 다시 열 수 있습니다.");
+      workflow("회의록 저장 완료. ‘지난 회의’에서 다시 열 수 있습니다.");
       ui["retry-analysis"].hidden = true;
       announce(withTrialWarning(`${state.audioStored ? "음성과 " : ""}회의록을 보관했습니다. 내용을 검토하세요.`));
     });
@@ -1348,8 +1322,7 @@
 
   function documentObject() {
     return {
-      projectName: state.projects[state.slot - 1]?.name || "",
-      context: ui["meeting-context"].value.trim(),
+      ...(state.projectName ? { projectName: state.projectName } : {}),
       title: ui.title.value.trim(),
       date: ui.date.value,
       dailySequence: state.dailySequence,
@@ -1372,7 +1345,7 @@
     const head = [
       `# ${data.title || "회의록"}`,
       "",
-      `프로젝트: ${data.projectName}`,
+      ...(data.projectName ? [`프로젝트: ${data.projectName}`] : []),
       `날짜: ${data.date || "미입력"}${data.dailySequence ? ` · ${data.dailySequence}차 회의` : ""}`,
       `참석자: ${data.participants || "미입력"}`,
       "",
@@ -1436,7 +1409,7 @@
       state.permissionPending ||
       Boolean(state.recorders.size) ||
       Boolean(state.aiController) ||
-      state.flowBusy || state.archiveBusy || state.projectBusy ||
+      state.flowBusy || state.archiveBusy || state.historyBusy ||
       state.parts.some((part) => part.blob && !part.saved) ||
       Boolean((ui.transcript.value || state.minutes) && !state.notesSaved)
     );
@@ -1464,16 +1437,15 @@
     stopTimer();
     clearParts();
     resetResult();
-    state.meetingId = null;
+    state.recordingId = null;
+    state.location = "main";
+    state.projectName = "";
     state.recordingMetadata = null;
     state.audioStored = false;
     ui["retry-analysis"].hidden = true;
     ui.title.value = "";
     ui.participants.value = "";
     ui["meeting-notes"].value = "";
-    ui["meeting-context"].value = "";
-    ui["record-consent"].checked = false;
-    ui["ai-consent"].checked = false;
     ui["record-state"].textContent = "대기";
     ui.timer.textContent = "00:00";
     refresh();
@@ -1564,108 +1536,33 @@
     return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   }
 
-  function renderPresets() {
-    const slot = state.slot;
-    const project = state.projects[slot - 1];
-    ui["selected-project"].textContent = `${slot}번 프로젝트 · ${project.name || "새 프로젝트 등록"}`;
-    ui["header-project"].textContent = project.name || `${slot}번 · 새 프로젝트`;
-    ui["project-presets"].replaceChildren();
-    // 저장된 프로젝트와 지금 등록 중인 빈 칸만 보이고, 빈 칸이 남아 있으면 추가 버튼을 둔다.
-    for (const preset of state.projects.filter((item) => item.name || item.slot === slot)) {
-      const button = element("button", "", "preset-button");
-      button.type = "button";
-      button.setAttribute("aria-pressed", String(preset.slot === slot));
-      button.append(element("span", preset.slot, "preset-no"), element("span", preset.name || "새 프로젝트 등록", "preset-name"));
-      button.addEventListener("click", () => selectProject(preset.slot));
-      ui["project-presets"].append(button);
-    }
-    const empty = state.projects.find((item) => !item.name);
-    if (empty && project.name) {
-      const add = element("button", `+ 프로젝트 추가 (최대 ${state.projects.length}개)`, "preset-add");
-      add.type = "button";
-      add.addEventListener("click", () => selectProject(empty.slot));
-      ui["project-presets"].append(add);
-    }
-  }
-
-  function applyProject(slot, resetDate = true) {
-    state.slot = slot;
-    const project = state.projects[slot - 1];
-    ui["project-name"].value = project.name;
-    ui.title.value = project.title;
+  function resetMeetingForm(resetDate = true) {
+    // 새 회의 양식을 비우고 설정의 기본 출력 형식으로 시작한다. 회의명은 비워 두면 분석할 때 AI가 정한다.
+    ui.title.value = "";
     if (resetDate) ui.date.value = today();
-    ui["meeting-context"].value = project.context;
     ui["output-format"].value = defaultFormat();
     state.meetingCustom = null;
-    renderPresets();
-    if (!project.name) state.setupOpen = true;
-    workflow("‘회의 준비’를 눌러 회의 정보를 확인하고, 동의를 체크한 뒤 ‘회의 시작’을 누르세요.", true);
+    workflow("‘회의 시작’을 누르면 바로 녹음합니다. 회의명·참석자·메모는 ‘회의 준비’에서 적을 수 있습니다.", true);
     refresh();
-  }
-
-  async function selectProject(slot) {
-    if (state.projectBusy || state.flowBusy || state.recorders.size || state.aiController || state.permissionPending) return;
-    if (hasUnsavedWork() && !confirm("저장되지 않은 현재 회의 내용을 비우고 다른 프로젝트로 이동할까요?")) return;
-    state.projectBusy = true;
-    refresh();
-    try {
-      const result = await api("/api/projects");
-      state.projects = result.projects;
-      clearLocal(true);
-      applyProject(slot);
-      await loadHistory();
-    } catch (error) { workflow(error.message); }
-    finally { state.projectBusy = false; refresh(); }
-  }
-
-  async function savePreset() {
-    const project = state.projects[state.slot - 1];
-    if (!project || state.projectBusy) throw new Error("프로젝트를 먼저 불러오세요.");
-    const input = { name: ui["project-name"].value.trim(), title: ui.title.value.trim(), context: presetContext(project),
-      outputFormat: outputFormat(project.outputFormat), revision: project.revision };
-    if (!input.name || !input.title) throw new Error("프로젝트 이름과 회의명을 입력하세요.");
-    state.projectBusy = true;
-    refresh();
-    try {
-      const result = await api(`/api/projects/${state.slot}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
-      state.projects[state.slot - 1] = result.project;
-      applyProject(state.slot, false);
-      workflow(`${input.name} 프리셋을 저장했습니다. 다음 실행에서도 불러옵니다.`);
-    } finally { state.projectBusy = false; refresh(); }
-  }
-
-  async function deletePreset() {
-    const project = state.projects[state.slot - 1];
-    if (!project?.name || state.projectBusy) return;
-    if (!confirm(`‘${project.name}’ 프로젝트를 삭제할까요? 회의 기록이 있는 프로젝트는 삭제되지 않습니다.`)) return;
-    state.projectBusy = true;
-    refresh();
-    try {
-      const result = await api(`/api/projects/${state.slot}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: project.revision }) });
-      state.projects = result.projects;
-      clearLocal(true);
-      applyProject(state.projects.find((item) => item.name)?.slot || 1);
-      await loadHistory();
-      workflow(`${project.name} 프로젝트를 삭제했습니다.`);
-    } finally { state.projectBusy = false; refresh(); }
   }
 
   function focusSetup() {
-    const target = ["project-name", "title"].map((id) => ui[id]).find((input) => !input.value.trim()) || ui["meeting-notes"];
+    const target = ui.title.value.trim() ? ui["meeting-notes"] : ui.title;
     target.focus?.();
   }
 
   function prepareMeeting() {
-    if (state.projectBusy || state.flowBusy || state.recorders.size || state.aiController || state.permissionPending) return;
+    if (state.historyBusy || state.flowBusy || state.recorders.size || state.aiController || state.permissionPending) return;
     if (hasMeetingRecord()) {
       if (hasUnsavedWork() && !confirm("저장하지 않은 이전 회의 내용을 비우고 새 회의를 준비할까요?")) return;
       clearParts();
       resetResult();
-      state.meetingId = null;
+      state.recordingId = null;
+      state.location = "main";
+      state.projectName = "";
       state.recordingMetadata = null;
       state.audioStored = false;
-      const project = state.projects[state.slot - 1];
-      ui.title.value = project?.title || "";
+      ui.title.value = "";
       ui["output-format"].value = defaultFormat();
       state.meetingCustom = null;
       ui.date.value = today();
@@ -1674,45 +1571,46 @@
       ui["record-state"].textContent = "대기";
       ui.timer.textContent = "00:00";
       ui["retry-analysis"].hidden = true;
-      ui["archive-status"].textContent = "회의 종료 후 음성과 회의록을 이 프로젝트에 보관합니다.";
+      ui["archive-status"].textContent = "회의 종료 후 음성과 회의록을 지난 회의에 보관합니다.";
     }
     state.setupOpen = true;
     refresh();
     focusSetup();
-    workflow("회의 정보를 입력하고 동의를 체크하면 바로 ‘회의 시작’을 누를 수 있습니다.", true);
+    workflow("필요한 회의 정보만 적고 ‘회의 시작’을 누르세요. 회의명을 비워 두면 AI가 정합니다.", true);
   }
 
   async function loadHistory() {
-    const slot = state.slot;
+    // 모든 보관함의 회의를 한 목록으로 보여 준다. 옛 프로젝트 기록에는 그때 프로젝트 이름을 작게 붙인다.
     try {
-      const result = await api(`/api/projects/${slot}/meetings`);
-      if (slot !== state.slot) return;
-      ui["history-status"].textContent = `${state.projects[slot - 1]?.name || `${slot}번 프로젝트`} · ${result.meetings.length}개 회의`;
+      const result = await api("/api/meetings");
+      ui["history-status"].textContent = `${result.meetings.length}개 회의${result.skipped ? ` · 읽지 못한 기록 ${result.skipped}개` : ""}`;
       ui["meeting-history"].replaceChildren();
       if (!result.meetings.length) ui["meeting-history"].append(element("p", "아직 보관된 회의가 없습니다."));
       for (const meeting of result.meetings) {
         const button = element("button", "", "history-button");
         button.type = "button";
         const format = outputFormat(meeting.outputFormat);
-        button.append(element("strong", `${meeting.date || "날짜 미입력"} · ${meeting.dailySequence || 1}차 · ${meeting.title}`),
-          element("span", `${meeting.analyzed ? `${format === "meeting" ? "회의록" : formatLabels[format]} 완료 · 눌러서 보기` : "분석 대기"} · 음성 ${meeting.audioCount}개`));
-        button.addEventListener("click", () => openMeeting(meeting.id, button));
+        const status = [meeting.analyzed ? `${format === "meeting" ? "회의록" : formatLabels[format]} 완료 · 눌러서 보기` : "분석 대기", `음성 ${meeting.audioCount}개`, meeting.stars && `별 ${meeting.stars}개`];
+        button.append(element("strong", `${meeting.date || "날짜 미입력"} · ${meeting.dailySequence || 1}차 · ${meeting.title || "제목 미정 회의"}`),
+          element("span", status.filter(Boolean).join(" · ")));
+        if (meeting.projectName) button.append(element("span", `이전 프로젝트: ${meeting.projectName}`));
+        button.addEventListener("click", () => openMeeting(meeting.location, meeting.id, button));
         ui["meeting-history"].append(button);
       }
     } catch (error) { ui["history-status"].textContent = `목록 확인 실패. ${error.message}`; }
     refresh();
   }
 
-  async function openMeeting(id, opener) {
-    if (state.projectBusy || state.flowBusy || state.recorders.size || state.aiController) return;
+  async function openMeeting(location, id, opener) {
+    if (state.historyBusy || state.flowBusy || state.recorders.size || state.aiController) return;
     if (hasUnsavedWork() && !confirm("현재 저장하지 않은 내용을 비우고 지난 회의를 열까요?")) return;
-    state.projectBusy = true;
+    state.historyBusy = true;
     refresh();
     try {
-      const { meeting } = await api(`/api/projects/${state.slot}/meetings/${id}`);
+      const { meeting } = await api(`/api/meetings/${location}/${id}`);
       const parts = [];
       for (const audio of meeting.audio || []) {
-        const response = await fetch(`/api/projects/${state.slot}/recordings/${meeting.recordingId || id}/audio/${audio.index}`, { headers: { "X-Meeting-Token": state.token } });
+        const response = await fetch(`/api/recordings/${location}/${meeting.recordingId || id}/audio/${audio.index}`, { headers: { "X-Meeting-Token": state.token } });
         if (!response.ok) throw new Error("저장된 원음을 불러오지 못했습니다.");
         parts.push({ blob: await response.blob(), saved: true, diskSaved: true, transcript: "", applied: Boolean(meeting.transcript) });
       }
@@ -1720,14 +1618,15 @@
       ui.title.value = meeting.title;
       ui.date.value = meeting.date;
       ui.participants.value = meeting.participants;
-      ui["meeting-context"].value = meeting.context;
       ui["meeting-notes"].value = meeting.notes || "";
       state.meetingCustom = meeting.outputFormat === "custom" ? meeting.customFormat || null : null;
       ui["output-format"].value = outputFormat(meeting.outputFormat);
       ui.transcript.value = meeting.transcript;
       state.parts = parts.map(part => ({ ...part, url: URL.createObjectURL(part.blob) }));
-      state.meetingId = meeting.recordingId || id;
-      state.recordingMetadata = { title: meeting.title, date: meeting.date, participants: meeting.participants, context: meeting.context, notes: meeting.notes || "",
+      state.recordingId = meeting.recordingId || id;
+      state.location = location;
+      state.projectName = meeting.projectName || "";
+      state.recordingMetadata = { title: meeting.title, date: meeting.date, participants: meeting.participants, notes: meeting.notes || "",
         outputFormat: outputFormat(meeting.outputFormat), ...(state.meetingCustom ? { customFormat: state.meetingCustom } : {}) };
       state.audioStored = parts.length > 0 && (!meeting.expectedParts || meeting.expectedParts === parts.length);
       state.minutes = meeting.minutes;
@@ -1745,12 +1644,12 @@
       renderParts();
       renderMinutes();
       ui["retry-analysis"].hidden = Boolean(meeting.minutes) || !state.audioStored;
-      ui["archive-status"].textContent = meeting.minutes ? "프로젝트에 보관된 회의록입니다." : meeting.transcript ? "음성과 전사 원문은 보관되어 있습니다. 다시 분석하면 전사를 재사용합니다." : "음성은 보관되어 있고 분석은 완료되지 않았습니다.";
+      ui["archive-status"].textContent = meeting.minutes ? "보관된 회의록입니다." : meeting.transcript ? "음성과 전사 원문은 보관되어 있습니다. 다시 분석하면 전사를 재사용합니다." : "음성은 보관되어 있고 분석은 완료되지 않았습니다.";
       if (meeting.transcript && !meeting.minutes) document.getElementById("transcript-details").open = true;
       openDialog(ui["meeting-detail"], opener);
-      workflow(meeting.minutes ? "지난 회의를 불러왔습니다. ‘회의록 보기’에서 결과·내보내기·재분석을 할 수 있습니다." : state.audioStored ? "음성 저장 완료. AI 연결과 전송 동의를 확인한 뒤 다시 분석하세요." : "일부 음성 저장이 끝나지 않은 회의입니다. 원래 녹음 창에서 저장을 완료하세요.");
+      workflow(meeting.minutes ? "지난 회의를 불러왔습니다. ‘회의록 보기’에서 결과·내보내기·재분석을 할 수 있습니다." : state.audioStored ? "음성 저장 완료. AI 연결을 확인한 뒤 다시 분석하세요." : "일부 음성 저장이 끝나지 않은 회의입니다. 원래 녹음 창에서 저장을 완료하세요.");
     } catch (error) { workflow(error.message); }
-    finally { state.projectBusy = false; refresh(); }
+    finally { state.historyBusy = false; refresh(); }
   }
 
   async function archiveResult() {
@@ -1758,13 +1657,13 @@
     state.archiveBusy = true;
     state.resultId ||= newOperationId();
     refresh();
-    const document = { ...documentObject(), id: state.resultId, ...(state.audioStored ? { recordingId: state.meetingId } : {}) };
+    const document = { ...documentObject(), id: state.resultId, ...(state.audioStored ? { recordingId: state.recordingId } : {}) };
     try {
-      const saved = await api(`/api/projects/${state.slot}/meetings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(document) });
+      const saved = await api(`/api/meetings/${state.location}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(document) });
       state.dailySequence = saved.meeting?.dailySequence;
       state.resultStored = true;
       state.notesSaved = true;
-      ui["archive-status"].textContent = `${document.projectName} · 전사 원문과 회의록 저장 완료`;
+      ui["archive-status"].textContent = "전사 원문과 회의록 저장 완료";
       await loadHistory();
     } catch (error) {
       ui["archive-status"].textContent = "회의록 저장 실패. 결과는 화면에 남아 있습니다. 저장을 다시 시도하세요.";
@@ -1773,7 +1672,7 @@
   }
 
   async function finishMeeting() {
-    if (state.flowBusy || state.projectBusy || state.archiveBusy || state.aiController) return;
+    if (state.flowBusy || state.historyBusy || state.archiveBusy || state.aiController) return;
     state.flowBusy = true;
     ui["retry-analysis"].hidden = true;
     const pending = [...state.recorders].map(context => context.done);
@@ -1784,13 +1683,15 @@
       await Promise.all(pending);
       if (!state.parts.length || state.parts.some(part => !part.blob?.size)) throw new Error("저장할 음성이 없습니다. 마이크와 녹음 시간을 확인하세요.");
       if (!state.audioStored) {
-        state.meetingId ||= newOperationId();
+        // 원음은 기본 보관함의 새 녹음으로만 저장한다. 옛 보관함 회의의 원음이 덜 저장돼 있었다면 새 녹음으로 다시 올린다.
+        if (state.location !== "main") { state.recordingId = null; state.location = "main"; state.projectName = ""; }
+        state.recordingId ||= newOperationId();
         state.recordingMetadata ||= recordingMetadata();
-        await api(`/api/projects/${state.slot}/recordings/${state.meetingId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...state.recordingMetadata, expectedParts: state.parts.length }) });
+        await api(`/api/recordings/main/${state.recordingId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...state.recordingMetadata, expectedParts: state.parts.length }) });
         for (let i = 0; i < state.parts.length; i++) {
           const part = state.parts[i];
           workflow(`음성 저장 중 · ${i + 1}/${state.parts.length}개`);
-          await api(`/api/projects/${state.slot}/recordings/${state.meetingId}/audio/${i + 1}`, { method: "POST", headers: { "Content-Type": part.blob.type.split(";")[0] || "audio/webm" }, body: part.blob });
+          await api(`/api/recordings/main/${state.recordingId}/audio/${i + 1}`, { method: "POST", headers: { "Content-Type": part.blob.type.split(";")[0] || "audio/webm" }, body: part.blob });
           part.saved = true;
           part.diskSaved = true;
         }
@@ -1803,7 +1704,7 @@
         promptNewKey();
         throw new Error("새로운 API키를 등록하세요.");
       }
-      if (!canAnalyze() || !ui["ai-consent"].checked) throw new Error("음성은 저장했습니다. API 키와 외부 AI 전송 동의를 확인한 뒤 다시 분석하세요.");
+      if (!canAnalyze()) throw new Error("음성은 저장했습니다. 상단 ‘AI 설정’에서 API 키를 확인한 뒤 다시 분석하세요.");
       workflow("음성 저장 완료. 전사와 회의록을 분석하고 있습니다…");
       await summarize();
     } catch (error) {
@@ -1902,8 +1803,6 @@
 
   function bind() {
     ui.prepare.addEventListener("click", prepareMeeting);
-    ui["save-preset"].addEventListener("click", () => savePreset().catch(error => workflow(error.message)));
-    ui["delete-preset"].addEventListener("click", () => deletePreset().catch(error => workflow(error.message)));
     ui["retry-analysis"].addEventListener("click", finishMeeting);
     ui["save-archive"].addEventListener("click", () => archiveResult().catch(error => workflow(error.message)));
     ui["microphone-volume"].addEventListener("click", setMicrophoneVolume);
@@ -1919,7 +1818,7 @@
       announce("전사 원문 다운로드를 시작했습니다. 저장된 파일을 확인하세요.");
     });
     ui["cancel-ai"].addEventListener("click", () => state.aiController?.abort());
-    for (const id of ["transcript", "title", "date", "participants", "meeting-notes", "meeting-context", "project-name"])
+    for (const id of ["transcript", "title", "date", "participants", "meeting-notes"])
       ui[id].addEventListener("input", () => {
         state.resultStored = false;
         state.notesSaved = false;
@@ -1975,19 +1874,8 @@
     ui["custom-save"].addEventListener("click", () => saveCustom().catch((error) => { ui["custom-status"].textContent = error.message; }));
     ui["custom-delete"].addEventListener("click", () => deleteCustom().catch((error) => { ui["custom-status"].textContent = error.message; }));
     ui["ai-settings"].addEventListener("close", () => { ui["api-key"].value = ""; });
-    ui.clear.addEventListener("click", () => { if (clearLocal()) applyProject(state.slot); });
+    ui.clear.addEventListener("click", () => { if (clearLocal()) resetMeetingForm(); });
     ui.shutdown.addEventListener("click", shutdown);
-    ui["record-consent"].addEventListener("change", () => {
-      if (!ui["record-consent"].checked) {
-        cancelPermission();
-        stopRecording("녹음 동의를 해제해 녹음을 정지했습니다.");
-      }
-      refresh();
-    });
-    ui["ai-consent"].addEventListener("change", () => {
-      if (!ui["ai-consent"].checked) state.aiController?.abort();
-      refresh();
-    });
     for (const format of ["md", "txt", "json"])
       ui[`download-${format}`].addEventListener("click", () => saveMinutes(format));
     window.addEventListener("beforeunload", guardClose);
@@ -2016,12 +1904,10 @@
       applyModels(config);
       state.customFormat = (await api("/api/custom-format")).customFormat;
       updateCustomOption();
-      const projects = await api("/api/projects");
-      state.projects = projects.projects;
-      applyProject(state.projects.find((item) => item.name)?.slot || 1);
+      resetMeetingForm();
       await loadHistory();
       refresh();
-      announce(canAnalyze() ? "프로젝트를 고르고 ‘회의 준비’를 누르세요." : state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요." : "처음이면 상단 ‘AI 설정’에서 API 키를 등록하세요.");
+      announce(canAnalyze() ? "‘회의 시작’을 누르면 바로 녹음합니다." : state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요." : "처음이면 상단 ‘AI 설정’에서 API 키를 등록하세요.");
     } catch (error) {
       announce(`서버 연결을 확인하지 못했습니다. ${error.message}`);
     }
