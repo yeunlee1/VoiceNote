@@ -297,3 +297,47 @@ test('녹음·분석 중에는 설정 창 입력이 잠긴다', () => {
   assert.equal(review.ui['default-format'].disabled, false);
   assert.equal(review.ui['settings-lock'].hidden, true);
 });
+
+test('늦게 온 앞 파일의 미리보기 응답은 마지막에 고른 파일을 덮지 않는다', async () => {
+  let releaseFirst;
+  const late = new Promise((resolve) => { releaseFirst = resolve; });
+  const preview = (format) => ({ summaryModel: { value: 'gpt-6.1-sol', apply: true }, defaultOutputFormat: { value: format, apply: true }, customFormat: { name: null, apply: true }, storage: null });
+  const textA = JSON.stringify({ format: 'voicenote-settings', version: 2, defaultOutputFormat: 'summary' });
+  const textB = JSON.stringify({ format: 'voicenote-settings', version: 2, defaultOutputFormat: 'tasks' });
+  const review = fixture({ routes: {
+    '/api/settings/preview': async (call) => {
+      if (call.body.file === textA) await late;
+      return Response.json({ preview: preview(JSON.parse(call.body.file).defaultOutputFormat) });
+    },
+    '/api/settings/import': () => Response.json({ settings: settingsValue({ defaultOutputFormat: 'tasks' }), customFormat: null, skipped: [] }) } });
+  const first = pick(review, file(textA));
+  await pick(review, file(textB));
+  assert.ok(texts(review.ui['settings-preview']).includes('업무 정리'));
+  releaseFirst();
+  await first;
+  await settle();
+  const shown = texts(review.ui['settings-preview']);
+  assert.ok(shown.includes('업무 정리') && !shown.includes('핵심 요약'), '늦게 온 앞 파일 미리보기가 마지막 선택을 덮지 않는다');
+  await review.applyImportedSettings();
+  assert.equal(review.calls.find((call) => call.url === '/api/settings/import').body.file, textB);
+});
+
+test('BOM이 두 개 붙은 파일은 서버가 바이트로 받을 때와 같이 거절한다', async () => {
+  const { parseSettingsFile } = require('./설정파일.cjs');
+  const body = new TextEncoder().encode(JSON.stringify({ format: 'voicenote-settings', version: 2, summaryModel: 'gpt-6.1-sol', defaultOutputFormat: 'meeting', customFormat: null }));
+  const withBom = (count) => new Uint8Array([...Array.from({ length: count }, () => [0xef, 0xbb, 0xbf]).flat(), ...body]);
+  assert.throws(() => parseSettingsFile(withBom(2)));
+  parseSettingsFile(withBom(1));
+  // 화면이 보낸 글을 실제 해석기로 판정해, 화면과 서버가 같은 파일을 같게 판정하는지 본다.
+  const review = fixture({ routes: { '/api/settings/preview': (call) => {
+    try {
+      parseSettingsFile(call.body.file);
+      return Response.json({ preview: { summaryModel: { value: 'gpt-6.1-sol', apply: true }, defaultOutputFormat: { value: 'meeting', apply: true }, customFormat: { name: null, apply: true }, storage: null } });
+    } catch (error) { return Response.json({ error: { code: 'SETTINGS_FILE_ERROR', message: error.message } }, { status: 400 }); }
+  } } });
+  await pick(review, file('', '설정.json', withBom(2)));
+  assert.equal(review.ui['settings-import'].open, false);
+  assert.match(review.ui['settings-file-status'].textContent, /JSON 형식이 아닌 파일/);
+  await pick(review, file('', '설정.json', withBom(1)));
+  assert.equal(review.ui['settings-import'].open, true, 'BOM 하나는 받아들인다');
+});

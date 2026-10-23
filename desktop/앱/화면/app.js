@@ -2068,19 +2068,27 @@
     ui["settings-file-status"].textContent = "설정 파일 내려받기를 시작했습니다. 저장된 파일을 확인하세요.";
   }
 
+  let settingsPreviewGeneration = 0;
+
   async function previewSettings(event) {
     // 고른 파일의 크기와 UTF-8을 이 화면에서 먼저 확인하고, 통과한 글만 서버에 보내 바뀔 내용을 받아 보여 준다.
+    // 파일을 여러 번 고르면 마지막에 고른 파일만 남긴다. 늦게 온 앞 파일의 응답은 미리보기와 적용할 파일을 바꾸지 않는다.
+    const generation = ++settingsPreviewGeneration;
+    const latest = () => generation === settingsPreviewGeneration;
     const input = event.target;
     const file = input.files?.[0];
     input.value = "";
     if (!file) return;
-    const report = (message) => { ui["settings-file-status"].textContent = message; };
+    const report = (message) => { if (latest()) ui["settings-file-status"].textContent = message; };
     if (file.size > SETTINGS_FILE_LIMIT) return report("설정 파일이 128KiB보다 커서 불러올 수 없습니다.");
     let bytes, text;
     try { bytes = await file.arrayBuffer(); } catch { return report("설정 파일을 읽지 못했습니다. 파일을 다시 골라 주세요."); }
-    try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { return report("설정 파일이 UTF-8로 저장되어 있지 않아 불러올 수 없습니다."); }
+    // BOM은 서버의 해석기가 바이트로 받을 때처럼 하나만 지우므로, 여기서는 지우지 않고 그대로 보낸다.
+    try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch { return report("설정 파일이 UTF-8로 저장되어 있지 않아 불러올 수 없습니다."); }
+    if (!latest()) return;
     try {
       const { preview } = await api("/api/settings/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: text }) });
+      if (!latest()) return;
       renderSettingsPreview(preview);
       report("");
       openDialog(ui["settings-import"], ui["import-settings"]);
