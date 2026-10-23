@@ -6,6 +6,7 @@ const defaults = require('./기본프로젝트.json');
 const aiUsage = require('./AI사용량.js');
 const exchange = require('./프로젝트설정교환.cjs');
 const formats = require('./출력형식.js');
+const { markdown } = require('./회의문서.cjs');
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const fail = (status, message) => Object.assign(new Error(message), { status });
 function text(value, max, required = false) {
@@ -52,25 +53,6 @@ function storedFormat(record) {
   return { outputFormat: exchange.outputFormat(record.outputFormat) || 'meeting' };
 }
 const formatFields = value => ({ ...(value.outputFormat !== 'meeting' ? { outputFormat: value.outputFormat } : {}), ...(value.customFormat ? { customFormat: value.customFormat } : {}) });
-function markdown(record) {
-  const m = record.minutes;
-  const head = [`# ${record.title}`, '', `프로젝트: ${record.projectName}`, `날짜: ${record.date} · ${record.dailySequence || 1}차 회의`, `참석자: ${record.participants || '미입력'}`, ''];
-  if (record.outputFormat === 'custom' && record.customFormat) return [...head, ...formats.customText(m, record.customFormat)].join('\n');
-  const action = a => `- ${a.task} · 담당 ${a.owner || '미정'} · 기한 ${a.due || '미정'}`;
-  const list = (title, items, format = x => `- ${x}`) => items.length ? [`## ${title}`, ...items.map(format), ''] : [];
-  const topics = title => m.topics.length ? [`## ${title}`, '', ...m.topics.flatMap(t => [`### ${t.title}`, '', ...t.points.flatMap(p => [p, ''])])] : [];
-  // 핵심 요약형과 업무 정리형은 내용이 있는 절만 남기고, 회의록형은 기존 순서를 그대로 쓴다.
-  if (record.outputFormat === 'summary')
-    return [...head, '## 핵심 요약', m.overview, '', ...topics('주요 내용'), ...list('결정 사항', m.decisions), ...list('후속 작업', m.actions, action), ...list('확인 필요', m.openQuestions)].join('\n');
-  if (record.outputFormat === 'tasks')
-    return [...head, '## 업무 요약', m.overview, '', '## 할 일', ...(m.actions.length ? m.actions.map(action) : ['- 확인된 할 일 없음']), '',
-      ...list('미확정 항목', m.openQuestions), ...list('결정 사항', m.decisions), ...topics('참고 내용')].join('\n');
-  return [...head,
-    '## 핵심 요약', m.overview, '', '## 상세 회의 내용', '', '## 합의된 방향', ...m.decisions.flatMap(x => [x, '']),
-    ...m.topics.flatMap(t => [`## ${t.title}`, '', ...t.points.flatMap(p => [p, ''])]), '## 다음 할 일',
-    ...m.actions.map(a => `- ${a.task} · 담당 ${a.owner || '미정'} · 기한 ${a.due || '미정'}`), '',
-    '## 미확정 사항', ...m.openQuestions.map(x => `- ${x}`), ''].join('\n');
-}
 function createProjectStore(root, validateMinutes, options = {}) {
   const write = options.atomicWrite ?? atomicWrite;
   function directory(slot) {
