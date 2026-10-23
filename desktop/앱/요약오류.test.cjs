@@ -16,7 +16,7 @@ async function run(t, status, body) {
   const key = await fetch(origin + '/api/key', { method: 'POST', headers, body: JSON.stringify({ apiKey: 'mock-only', persist: false }) });
   await key.text();
   const response = await fetch(origin + '/api/summary', { method: 'POST', headers: { ...headers, 'X-Operation-Id': randomUUID(), 'X-AI-Consent': 'yes' },
-    body: JSON.stringify({ text: '가'.repeat(14977), title: '회의', date: '2026-09-30', participants: '', context: '' }) });
+    body: JSON.stringify({ text: '가'.repeat(14977), title: '회의', date: '2026-09-30', participants: '' }) });
   return { status: response.status, body: await response.json(), calls };
 }
 test('14977자 전사를 자르지 않고 Sol 모델과 32000토큰 출력 여유를 요청한다', async t => {

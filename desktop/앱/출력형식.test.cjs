@@ -26,7 +26,7 @@ async function start(t) {
     return { status: response.status, body: await response.json() };
   };
   await request('/api/key', { apiKey: 'mock-only', persist: false });
-  const summary = body => request('/api/summary', { text: '회의 발언', title: '회의', date: '2026-10-01', participants: '', context: '', ...body }, { 'X-Operation-Id': randomUUID(), 'X-AI-Consent': 'yes' });
+  const summary = body => request('/api/summary', { text: '회의 발언', title: '회의', date: '2026-10-01', participants: '', ...body }, { 'X-Operation-Id': randomUUID(), 'X-AI-Consent': 'yes' });
   return { dir, calls, request, summary };
 }
 

@@ -36,7 +36,7 @@ async function start(t, { fail = () => false, defaultKey = true } = {}) {
     const text = await response.text();
     return { status: response.status, text, body: JSON.parse(text) };
   };
-  const summary = analysisId => request('/api/summary', { text: '회의 발언', title: '회의', date: '2026-10-01', participants: '', context: '' },
+  const summary = analysisId => request('/api/summary', { text: '회의 발언', title: '회의', date: '2026-10-01', participants: '' },
     { 'X-Operation-Id': randomUUID(), 'X-AI-Consent': 'yes', ...(analysisId ? { 'X-Analysis-Id': analysisId } : {}) });
   return { dir, calls, request, summary };
 }

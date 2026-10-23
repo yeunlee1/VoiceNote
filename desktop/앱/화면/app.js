@@ -290,7 +290,6 @@
 
   function summaryInput() {
     return JSON.stringify({
-      context: ui["meeting-context"].value.trim(),
       text: ui.transcript.value,
       title: ui.title.value.trim(),
       date: ui.date.value,
