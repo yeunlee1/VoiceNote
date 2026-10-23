@@ -1,0 +1,476 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "모바일 카카오톡 '나에게 보내기' 요약본 공유 안 됨",
+        "description": "모바일 앱에서 요약본을 카카오톡으로 공유하고 '나에게 보내기'를 골라 전송해도 나와의 채팅방에 올라오지 않는다. 원인을 찾아 고친다.",
+        "details": "사용자 보고 2026-10-23. 증상은 전송 버튼까지 눌렀는데 채팅방에 요약본이 남지 않음. 담당 주작성자 Claude, 짝 Codex. 원인 조사(공유 인텐트·MIME·첨부 방식) → 재현·시험 → 최소 수정 → 빌드·검증 순서. 배포(배포준비.ps1)는 별도 승인.",
+        "testStrategy": "공유 데이터 구성 단위 시험과 Android 빌드 확인. 실제 카카오톡 전송은 사용자 기기 확인 필요.",
+        "status": "deferred",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [],
+        "updatedAt": "2026-10-23T00:33:35.212Z"
+      },
+      {
+        "id": 2,
+        "title": "GitHub 공개 업로드 전 중요정보 점검",
+        "description": "VoiceNote를 GitHub 공개 저장소로 올리기 전에 API 키·서명 키·개인정보·회의 자료·설치파일 등 올리면 안 되는 것을 찾아 제외 목록을 만든다.",
+        "details": "사용자 요청 2026-10-23. 현재 Git 저장소 아님. 점검은 읽기 전용. 제외 방식(.gitignore 등) 적용과 git init·원격 생성·push는 사용자 확인 후 진행. push는 사용자의 명시적 허락이 있을 때만. 주작성자 Claude, 짝 Codex.",
+        "testStrategy": "비밀 패턴 검색·파일 목록·바이너리/키 파일 확인을 두 에이전트가 나눠 하고 교차 확인.",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "GitHub 공개 저장소 생성과 push (사용자 허락 대기)",
+            "description": "로컬 커밋 43f5a0d(main, 100개 파일)를 yeunlee1 계정의 새 공개 저장소에 올린다. 사용자의 명시적 push 허락 후에만 진행.",
+            "details": "준비 완료 2026-10-23. 점검·교차 확인 근거는 %LOCALAPPDATA%\\짝작업\\VoiceNote\\2026-10-23-공개업로드점검\\. 공용 키가 든 설치파일은 공개 배포하지 않는다.",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 2,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T01:56:06.406Z"
+          },
+          {
+            "id": 2,
+            "title": "사용안내.md의 체험 키 문장을 공개 소스 기준으로 수정",
+            "description": "desktop/앱/사용안내.md 10·73행의 '설치본 기본 키 3회 체험' 문장을 자기 OpenAI API 키 등록 안내로 바꾼다. 사용자 승인 2026-10-23.",
+            "details": "",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 2,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T01:40:55.156Z"
+          },
+          {
+            "id": 3,
+            "title": "push 전 깨끗한 복제본에서 전체 로컬 시험",
+            "description": "GitHub Actions를 쓰지 않으므로 push 대상 커밋(cb56142)을 복제한 폴더에서 데스크톱·모바일 Node·Java·헤드리스 화면 시험을 모두 돌린다. 사용자 지시 2026-10-23.",
+            "details": "",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 2,
+            "updatedAt": "2026-10-23T01:40:55.149Z",
+            "parentId": "undefined"
+          }
+        ],
+        "updatedAt": "2026-10-23T01:56:06.406Z"
+      },
+      {
+        "id": 3,
+        "title": "C:\\DEV의 eval(String.fromCharCode(...)) 이름 항목 조사",
+        "description": "C:\\DEV 바로 아래에 'eval(String.fromCharCode(40', 'eval(String.fromCharCode(47' 이름의 항목이 생긴 원인과 위험 여부를 읽기 전용으로 확인한다.",
+        "details": "사용자 질문 2026-10-23. 어느 프로젝트에서 생겼는지 아직 모름(VoiceNote 세션에서 받아 이 목록에 등록). 삭제·이동은 사용자 확인 후.",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [],
+        "updatedAt": "2026-10-23T00:58:36.777Z"
+      },
+      {
+        "id": 4,
+        "title": "README 소개·사용법과 문서 디자인 개선",
+        "description": "사용자가 README를 잘 쓰고 예쁘게 꾸며 달라고 요청했다. 기존 브랜드를 활용해 기능·사용 흐름·개인 OpenAI API 키 안내·개발 문서를 읽기 쉽게 정리한다.",
+        "details": "Codex가 README.md만 수정하고 기존 Claude 짝이 사실·링크·표현을 검토한다. 기존 변경을 보존하며 원격 생성·push·커밋·앱 실행은 하지 않는다. 문서 링크·명령 경로·GitHub Markdown 표시를 확인한다.",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": [],
+        "updatedAt": "2026-10-23T01:17:25.489Z"
+      },
+      {
+        "id": 5,
+        "title": "프로젝트별 녹음 설정 제거와 사용 흐름 단순화",
+        "description": "프로젝트(최대 3개)별 프리셋·배경·정리 기준을 고르는 구조가 쓸모가 적어, 이를 빼고 바로 녹음·정리할 수 있게 단순화한다.",
+        "details": "사용자 요청 2026-10-23. 범위(데스크톱·Android, 기존 기록·설정 파일 처리)는 설계 확인 후 확정. 주작성자 Claude, 짝 Codex. 시험은 push 전 깨끗한 복제본에서 로컬로 모두 실행. push는 별도 허락.",
+        "testStrategy": "",
+        "status": "in-progress",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "설계 확정: 남길 것과 뺄 것",
+            "description": "범용으로 편하게 쓰되 요약은 잘되게(사용자 2026-10-23). 확정: 기존 프로젝트-01~03 기록은 파일을 옮기거나 지우지 않고 한 목록으로 합쳐 보여 준다.",
+            "details": "남은 질문: 회의명 필수 해제 여부(AI가 제목을 정함), 설정 내보내기·불러오기 제거 여부, 녹음 동의·외부 AI 분석 동의 두 개 유지 여부, 프로젝트 정리 기준 없이 요약 품질을 지키는 방법. 가정(확인 필요): 데스크톱·Android 둘 다, 출력 형식 4종 유지, 회의별 상세 회의내용 메모는 선택 입력으로 유지. 아키텍처 작업이라 설계 승인 → 설계 문서 → 구현 계획 순서.",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 5,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T04:52:39.044Z"
+          },
+          {
+            "id": 2,
+            "title": "데스크톱 화면에서 프로젝트 구조 제거",
+            "description": "왼쪽 프로젝트 목록(#project-presets), 프리셋 저장·프로젝트 삭제, 프로젝트 이름 입력과 필수 조건, '프로젝트 설명과 회의 정리 기준' 프리셋 영역, 설정 내보내기·불러오기를 정리하고 지난 회의를 하나의 목록으로 보여 준다.",
+            "details": "대상: desktop/앱/화면/index.html, app.js(약 100KB), app.css. 회의 시작 조건(현재 API 키·프로젝트 이름·회의명·두 동의)을 다시 정한다.",
+            "status": "done",
+            "dependencies": [
+              "5.1"
+            ],
+            "parentTaskId": 5,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T08:09:44.236Z"
+          },
+          {
+            "id": 3,
+            "title": "데스크톱 저장소·서버 API 단순화",
+            "description": "새 회의는 한 폴더에 저장하고, 기존 프로젝트-01~03 기록과 내형식.json을 합쳐 읽는다. 파일 이동·삭제 없음.",
+            "details": "대상: desktop/앱/프로젝트보관.cjs(슬롯 1~3, 설정.json, 차수 계산), 프로젝트설정교환.cjs, 서버.cjs의 /api/projects·/api/project-settings·/api/settings 경로, 기본프로젝트.json. 프로젝트별 마지막 출력 형식 기억도 다시 정한다.",
+            "status": "done",
+            "dependencies": [
+              "5.1"
+            ],
+            "parentTaskId": 5,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T08:09:44.249Z"
+          },
+          {
+            "id": 4,
+            "title": "프로젝트 배경 없이도 요약 품질 유지",
+            "description": "요약 요청에서 프로젝트 설명·정리 기준이 빠져도 결과가 나빠지지 않도록 요청 문구를 보완하고, 회의별 상세 회의내용 메모를 배경으로 쓰는 흐름을 정리한다.",
+            "details": "대상: desktop/앱/서버.cjs 요약 요청 구성, mobile/안드로이드/요약계약추출.cjs로 뽑는 summary-*.json 양식(데스크톱 서버가 빌드 입력). 변경 전후를 같은 전사로 비교할 수 있는 확인 방법이 필요하다(실제 API 호출은 비용 발생, 별도 승인).",
+            "status": "done",
+            "dependencies": [
+              "5.1"
+            ],
+            "parentTaskId": 5,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T08:09:44.256Z"
+          },
+          {
+            "id": 5,
+            "title": "Android 앱도 같은 방향으로 수정",
+            "description": "휴대폰 화면의 프로젝트 선택·프리셋·설정 파일 기능을 정리하고, 기존 프로젝트별 기록을 한 목록으로 보여 준다.",
+            "details": "대상: mobile/안드로이드/assets/index.html·app.js·flow.js, src/.../Store.java(슬롯·lastFormat), SettingsExchange.java, MainActivity.java, Ai.java(프로젝트 설명 전달), preset.json.",
+            "status": "in-progress",
+            "dependencies": [
+              "5.1"
+            ],
+            "parentTaskId": 5,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T05:30:41.421Z"
+          },
+          {
+            "id": 6,
+            "title": "시험·문서 갱신과 push 전 로컬 검증",
+            "description": "프로젝트·설정 교환 관련 시험을 새 구조에 맞게 고치고, 사용안내·README·빌드안내를 갱신한 뒤 깨끗한 복제본에서 전체 시험을 돌린다. push는 별도 허락.",
+            "details": "영향 시험(예): desktop 프로젝트보관·프로젝트설정교환·설정화면·설정브라우저·회의흐름·준비흐름 시험, mobile 설정호환·화면검증-브라우저·SettingsExchangeTest·AndroidChecks(기기 필요). GitHub Actions 없음.",
+            "status": "in-progress",
+            "dependencies": [
+              "5.2",
+              "5.3",
+              "5.4",
+              "5.5"
+            ],
+            "parentTaskId": 5,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T08:09:44.376Z"
+          },
+          {
+            "id": 7,
+            "title": "짝 범위 확인 보완: 빠진 대상 1개와 수용 조건 3개",
+            "description": "짝(Codex) 정적 검토 2026-10-23에서 찾은 누락을 5.1~5.6 설계·시험에 반영한다. 근거 보고서: %LOCALAPPDATA%\\짝작업\\VoiceNote\\2026-10-23-프로젝트제거-범위확인.md",
+            "details": "1) 5.5 대상 추가: mobile/안드로이드/src/kr/local/meetingjournal/MeetingService.java:27,42가 Intent의 slot으로 기록을 열고 원음을 저장한다. MainActivity의 서비스 시작 계약과 함께 바꾼다. 2) 5.2·5.3·5.5·5.6 수용 조건: 합친 목록에서도 항목의 원래 저장 위치(옛 프로젝트-01~03)를 열기·원음·재분석·복사·공유까지 전달한다. 근거 desktop/앱/화면/app.js:1707,1720,1723(현재 state.slot으로 엶), mobile/안드로이드/assets/app.js:10, MainActivity.java:89,91,177. 옛 세 폴더 기록과 새 회의를 섞은 시험을 둔다(파일 이동 없음). 3) 5.1 설계 질문·5.5: Android 프로젝트별 작성중.json(Store.java:134,137,139, assets/app.js:113,126)의 기존 세 초안(회의명·참석자·메모)을 덮어쓰거나 지우지 않고 어떻게 보여 줄지 정한다. 4) 5.4·5.5·5.6: Android Ai.java:92,95,96은 입력·모델·형식으로 중간요약 캐시 키를 만들고 지침 양식은 100행에서 읽는다. 요약 지침만 바꾸면 옛 캐시를 재사용할 수 있으므로 지침 버전을 캐시 기준에 넣을지 정하고 시험한다. 참고: SettingsExchange 제거 시 Store.java:148의 출력 형식 공용 검증은 남긴다.",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 5,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T08:09:44.265Z"
+          },
+          {
+            "id": 8,
+            "title": "녹음·AI 분석 동의 체크 제거와 안내 문구 한 줄",
+            "description": "사용자 결정 2026-10-23: 동의는 구두로 받으므로 체크 두 개(회의 시작·다시 분석)를 모두 없애고, 녹음 버튼 근처에 '녹음 전에 참석자에게 녹음과 AI 분석을 알려 주세요' 안내 한 줄만 둔다.",
+            "details": "데스크톱: app.js startBlockers(427-439)의 동의 조건, #record-consent·#ai-consent·#retry-consent, 서버 X-AI-Consent 검사(서버.cjs 20524, 20566-20568). Android: flow.js 시작 조건(19-28), MainActivity.java:78-80 동의 검사, assets/app.js:335 동의 해제, analyze의 aiConsent. README·사용안내의 외부 전송 고지는 유지.",
+            "status": "in-progress",
+            "dependencies": [],
+            "parentTaskId": 5,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T04:52:39.847Z"
+          },
+          {
+            "id": 9,
+            "title": "요약 별점(1~5)과 의견 반영 다시 정리",
+            "description": "사용자 결정 2026-10-23: 요약을 읽고 별 1~5개(선택)와 한 줄 의견을 남기고, 의견이 있으면 그 의견을 반영해 요약만 다시 만든다(전사 재사용, 요약 요금 1회 추가, 이전 결과 보존). 만족도 통계·본보기 활용은 이번에 하지 않는다.",
+            "details": "데스크톱·Android 공통. 평가 저장은 AI 결과 기록을 고치지 않는 별도 파일 방식 검토. 의견은 요약 요청의 별도 system 지시로 넣되 전사에 없는 내용은 만들지 않게. Android 요약 지시문은 요약계약추출.cjs로 데스크톱 서버에서 추출하므로 계약·Ai.java·캐시 키(Ai.java:92-100)에 의견을 포함.",
+            "status": "in-progress",
+            "dependencies": [],
+            "parentTaskId": 5,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T04:52:39.858Z"
+          },
+          {
+            "id": 10,
+            "title": "첫 묶음 설치파일 빌드와 배포 폴더 갱신(공용 키 없이)",
+            "description": "사용자 결정 2026-10-23: 시험 통과 뒤 Windows·Android 설치파일을 공용 키 없이 새로 만들고 배포준비.ps1로 배포\\최신과 zip을 갱신한다. 버전은 1.3.0 제안.",
+            "details": "프로젝트 작업규칙의 파일 이름·해시·사용안내.txt 규칙을 따른다. 서명은 로컬 개인서명 파일 사용(저장소 밖). GitHub push는 별도 허락.",
+            "status": "pending",
+            "dependencies": [
+              "5.6"
+            ],
+            "parentTaskId": 5,
+            "parentId": "undefined"
+          },
+          {
+            "id": 11,
+            "title": "집 PC에서 이어 할 순서(2026-10-23 퇴근 인계)",
+            "description": "회사 PC에서 Windows 작업 1~8·15·18과 Android 9~12를 마치고 두 작업 브랜치를 push했다. 남은 일은 Android 13 마무리·14, 두 브랜치 병합(계획 Task 16), Android 에뮬레이터 확인(17의 Android 부분), 최종 시험·설치파일·배포(19)다.",
+            "details": "브랜치: Claude work/2026-10-23-프로젝트제거-설정화면(134971b 이후, Windows 작업 전체), Codex work/2026-10-23-안드로이드-프로젝트제거(Android 9~12 완료, 13 중간 저장 커밋). main 병합·배포는 하지 않았고 사용자 허락이 필요하다.\n끝난 것(짝 교차 검증 통과): Windows 1 요약 요청 정리, 2 회의 문서 변환기, 3 프로젝트 제거·보관함, 4 설정 파일 2판, 5 고른 폴더 사본, 6 설정 창, 7 평가·의견 반영·결과 버전, 8 Windows 창(마이크 자동 허용·폴더 선택·1.3.0), 15 문서, 18 실제 OpenAI 3회(6회 한도). 17의 Windows 부분(숨긴 창+Playwright로 옛 기록 목록·폴더 선택 창·마이크 자동 허용 확인, 이 PC는 마이크 장치가 없어 가상 장치 사용). Android 9 설정 파일 2판, 10 저장 구조, 11 요약 요청·의견 반영(N1 포함), 12 사본 저장(교차 검토는 회사 PC에서 진행 중이었음 — 결과가 없으면 다시 검토).\n남은 순서: (1) Android 13 화면 마무리와 교차 검증(Task 11 검토 선택 S4·S5: 의견 앞뒤 공백, 평가 먼저 저장, 'AI 설정'→'설정' 문구). (2) Android 14 버전 1.3.0·빌드 스크립트(빌드안내.txt 첫 줄 포함, PowerShell 5.1에서 mobile 빌드.ps1 35행 검사가 자산을 키 파일로 잡는 문제 참고). (3) Codex 브랜치를 Claude 브랜치에 git merge --no-ff, 제목 'chore: 안드로이드 첫 묶음 작업 병합', 충돌은 설계 기준으로 해결, 병합본 전체 교차 확인과 새 검토자 1명. (4) Android 에뮬레이터에서 SAF 폴더 선택·권한 유지·사본 쓰기 확인. (5) 깨끗한 복제본에서 Windows·Android 시험 전체(GitHub Actions 없음), 공용 키 없이 Windows 설치파일·Android release APK, 배포준비.ps1 -Version 1.3.0, 그 뒤 push·main 병합 허락 요청.\n결정 대기: 요약본 .txt 모양(권장 지금대로), 작업 19 토큰 사용량 표시 시기(권장 첫 묶음 뒤), 작업 8 발언자 구분(권장 보류, 구분 모델 2027-02-26 종료).\n주의: 설계서·구현 계획·진행 원장·검토 보고서는 회사 PC에만 있다(C:\\DEV\\11_로컬작업물\\VoiceNote\\설계, C:\\DEV\\VoiceNote\\.superpowers\\sdd\\2026-10-23-첫묶음-구현계획\\progress.md, %LOCALAPPDATA%\\짝작업\\VoiceNote\\2026-10-23-첫묶음구현). 도구 경로(JDK, C:\\vn-emu 에뮬레이터 정션, playwright-core)는 회사 PC 기준이라 집 PC에서는 다시 정해야 한다. 저장소는 공개(PUBLIC)이므로 키·서명 파일을 올리지 않는다.",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 5
+          }
+        ],
+        "updatedAt": "2026-10-23T08:09:44.376Z"
+      },
+      {
+        "id": 6,
+        "title": "녹음할 때마다 마이크 권한을 다시 묻는 문제",
+        "description": "한 번 허용하면 다음 녹음·다음 실행에도 다시 묻지 않게 한다(사용자 2026-10-23).",
+        "details": "읽기 전용 확인(2026-10-23): Windows desktop/프로그램.cs:126-132 PermissionRequested가 e.SavesInProfile=false이고, 마이크는 시험 모드가 아니면 상태를 정하지 않아 WebView2 기본 질문 창이 뜬다. 또 desktop/앱/설치형서버.cjs:27 listen(0)이라 실행마다 포트·주소가 바뀌어 저장해도 다음 실행에 적용되지 않는다. 방향 후보: 로컬 주소의 마이크 요청은 앱의 녹음 동의 체크로 갈음해 자동 허용하거나, 첫 허용을 앱 설정에 기억해 이후 자동 허용. Android는 MainActivity.java:81 시스템 권한 확인이라 '이번만 허용'을 고르지 않으면 유지되는 구조. 어느 플랫폼에서 겪는지 사용자 확인 필요. 수정은 사용자가 착수를 정할 때.",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Windows 앱 화면의 마이크 요청 자동 허용",
+            "description": "사용자 확인 2026-10-23: 문제는 Windows에서만 겪음. desktop/프로그램.cs PermissionRequested에서 앱 자신의 로컬 화면이 요청한 마이크는 묻지 않고 허용, 그 밖은 계속 거부. Windows 개인정보 설정의 마이크 허용은 그대로 적용.",
+            "details": "Android는 소스상 미허용일 때만 시스템 권한을 묻는다(MainActivity.java:81, 짝 조사). 프로그램.cs 자체 검사(169-175)가 프로젝트 버튼 9개를 확인해 이미 맞지 않을 가능성(서버 조사 추정)도 함께 고친다.",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 6,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T08:09:44.272Z"
+          }
+        ],
+        "updatedAt": "2026-10-23T08:09:44.272Z"
+      },
+      {
+        "id": 7,
+        "title": "쉬는 시간 녹음 비용 줄이기(일시정지 또는 무음 제거)",
+        "description": "회의 중 쉬는 시간의 무음도 전사 요금(오디오 길이 기준)에 포함된다. 일시정지 버튼이나 무음 구간 제거로 비용과 잡음을 줄인다(사용자 질문 2026-10-23).",
+        "details": "확인(2026-10-23): 전사 모델 gpt-transcribe는 오디오 길이로 과금(OpenAI 문서 developers.openai.com/api/docs/guides/voice-latency-cost#input-transcription-costs). 앱은 데스크톱·Android 모두 일시정지·무음 처리가 없고 녹음 전체를 /v1/audio/transcriptions로 보낸다(desktop/앱/서버.cjs:19887). 요약 단계는 전사 글 토큰 기준이라 무음 영향이 작다. 긴 무음에서 전사 모델이 없는 말을 만들 가능성은 미확인. 방향 후보: (1) 녹음 일시정지·이어 녹음 버튼(추천, 단순), (2) 전사 전 무음 구간 자동 제거(작은 말소리까지 잘릴 위험). 59분·22MB 파일 분할과의 관계 확인 필요. 수정은 사용자가 착수를 정할 때.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "녹음 일시정지·이어서 녹음 버튼 추가(회의 종료와 분리)",
+            "description": "지금은 녹음을 멈추면 곧 회의 종료라서 바로 전사·요약까지 실행된다. 쉬는 시간에 멈췄다가 이어서 녹음할 수 있게 일시정지 버튼을 따로 둔다(사용자 제안 2026-10-23, 무음 자동 제거보다 이 방식을 먼저).",
+            "details": "확인(2026-10-23): 데스크톱은 브라우저 MediaRecorder(desktop/앱/화면/app.js:729, 5초 단위 start(5000)), 59분 파일 분할이 경과 시간 기준(app.js:684 rotateRecording)이라 멈춘 시간을 빼고 세야 한다. Android는 MediaRecorder(MeetingService.java:43-46, 전경 서비스), pause/resume은 API 24부터라 minSdk 26에서 사용 가능. 이름 제안: '녹음 중지' 대신 '일시정지/이어서 녹음'(종료와 헷갈림 방지). 화면 경계: 타이머·음량 표시·상태 문구·회의 종료 버튼과의 관계, 일시정지 중 앱 종료·절전 처리. 작업 5(녹음 화면 단순화)와 같은 영역이라 설계를 함께 맞춘다. 수정은 사용자가 착수를 정할 때.",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 7,
+            "parentId": "undefined"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "누가 어떤 일을 맡는지 구분(발언자·담당자)",
+        "description": "목소리로 발언자를 구분해 담당자를 정확히 잡을 방법을 정한다(사용자 질문 2026-10-23). 현재 앱은 발언자를 구분하지 않는다(사용안내.md:79).",
+        "details": "OpenAI 문서 확인(2026-10-23): 발언자 구분은 gpt-4o-transcribe-diarize(/v1/audio/transcriptions, response_format=diarized_json, 30초 넘으면 chunking_strategy=auto 필요, prompt 미지원)만 가능하고, 2027-02-26 종료 예정. 2~10초 목소리 샘플로 이름 지정은 최대 4명. gpt-transcribe·gpt-live-transcribe에는 대체 기능 없음(developers.openai.com/api/docs/guides/speech-to-text#speaker-diarization, cookbook migrating_from_whisper_to_gpt_transcribe #8). 방향 후보: A 발언자 구분 모델을 선택 기능으로(약 4개월 사용, 4명 제한), B 목소리 구분 없이 참석자 명단과 요약 지시 보완·결과 화면에서 담당자 수정(추천), C 외부·로컬 발언자 구분 도구(무거움). 요금·한국어 품질은 미확인. 작업 5의 요약 품질(5.4)과 함께 설계. 착수는 사용자가 정할 때.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 9,
+        "title": "설정 화면에서 오디오·전사문·요약본 저장 위치 지정",
+        "description": "설정 화면을 만들어 회의 오디오 파일, 전사문, 요약본을 각각 어디에 저장할지 사용자가 고르게 한다(사용자 요청 2026-10-23).",
+        "details": "확인(2026-10-23): Windows 자료 위치는 %LOCALAPPDATA%\\MeetingJournal 고정(desktop/프로그램.cs:32), 서버에 --data-root로 전달(:100), 원음·전사·회의록이 회의자료\\프로젝트-NN에 섞여 저장. 화면↔창 통로 WebMessageReceived(:133, 폴더 열기에 사용)로 폴더 선택 창 추가 가능. 기존 AI 설정 창(desktop/앱/화면/index.html:222)을 일반 설정으로 넓히는 방안. Android는 앱 내부 폴더(Store.java:15 getFilesDir), 사용자 폴더는 ACTION_OPEN_DOCUMENT_TREE와 영구 권한 필요(설정 파일 내보내기에 SAF 사용 중, MainActivity.java:123), java.io.File이 아닌 문서 URI로 써야 해 손이 더 감. 설계 질문: (a) 앱 내부 기록은 유지하고 고른 폴더에 사본 저장(추천: 목록·재분석 안전, 드라이브 분리·동기화 폴더에도 앱이 안 멈춤) vs (b) 실제 저장 위치를 옮김(기존 기록 이동·연결 끊김 처리 필요). 세 종류 각각 폴더 지정, 파일 이름 규칙(날짜·차수·제목), 폴더 없음·쓰기 실패 안내. 작업 5(저장소 단순화)와 저장 구조가 겹쳐 함께 설계. 착수는 사용자가 정할 때.",
+        "testStrategy": "",
+        "status": "in-progress",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "설정 화면 하나로 모으기: AI 설정·설정 내보내기·설정 불러오기·저장 위치",
+            "description": "흩어진 AI 설정 창, 왼쪽 목록 아래의 설정 내보내기·불러오기 버튼, 새 저장 위치 지정을 하나의 설정 화면에 모은다(사용자 결정 2026-10-23). 데스크톱·Android 공통.",
+            "details": "현재 위치: 데스크톱 AI 설정 창 desktop/앱/화면/index.html:222(dialog#ai-settings), 설정 내보내기·불러오기는 왼쪽 프로젝트 목록 아래(#export-settings·#import-settings), 불러오기 미리보기 dialog#settings-import(:242). Android는 assets/index.html의 #export-settings·#import-settings와 AI 설정. 작업 5.1 질문 '설정 내보내기·불러오기 제거 여부'는 '없애지 않고 설정 화면으로 옮김'으로 답이 됨. 남은 설계 질문: 프로젝트가 없어지면 설정 파일(voicenote-project-settings 1판)에 무엇을 담을지(요약 모델·내 형식·저장 위치 등 후보, API 키·체험 기록·회의·녹음은 계속 제외), 옛 1판 파일을 불러올 때 처리, 데스크톱·Android 호환 유지. 작업 5와 함께 설계.",
+            "status": "in-progress",
+            "dependencies": [],
+            "parentTaskId": 9,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T05:30:41.428Z"
+          },
+          {
+            "id": 2,
+            "title": "결정 기록: 사본 저장·파일 형식·설정 파일 v2·내 형식 편집 이동",
+            "description": "사용자 결정 2026-10-23: 앱 안 기록은 그대로 두고 고른 폴더에 사본 저장, 요약본은 .md와 .txt 둘 다, 전사문은 .txt, 오디오는 원본 형식. 데스크톱·Android 둘 다 이번 묶음. 설정 파일에는 요약 모델·내 형식·기본 출력 형식·저장 위치를 담는다(API 키·체험·회의·녹음 제외). 내 형식 편집은 회의 준비에서 설정 화면으로 옮긴다.",
+            "details": "저장 위치는 PC마다 다르므로 불러올 때 폴더가 없으면 적용하지 않고 알림. Android 폴더 권한(URI)은 기기 밖으로 옮길 수 없어 Android 설정 파일에는 넣지 않음. 공유 폴더 파일명 충돌 방지(날짜·차수·제목·id). Android SAF는 ACTION_OPEN_DOCUMENT_TREE+takePersistableUriPermission 새로 구현(androidx 없음, DocumentsContract 사용). CustomFormat.java가 SettingsExchange.Parser/trim/quote에 의존하므로 공용 부분은 보존.",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 9,
+            "parentId": "undefined",
+            "updatedAt": "2026-10-23T05:30:41.584Z"
+          }
+        ],
+        "updatedAt": "2026-10-23T05:30:41.584Z"
+      },
+      {
+        "id": 10,
+        "title": "녹음 조각을 바로 디스크에 저장(중단 시 회의 보존)",
+        "description": "회의 종료 전에도 녹음 조각을 디스크에 이어 저장해, 절전·새로고침·앱 종료·정전에도 녹음을 잃지 않게 한다(Claude 제안, 사용자 선택 2026-10-23).",
+        "details": "근거: 지금은 녹음 중 디스크 미저장(desktop/앱/사용안내.md:24). 데스크톱은 MediaRecorder start(5000)으로 5초 조각을 받음(desktop/앱/화면/app.js:754), 59분 분할 rotateRecording(:763). Android는 MeetingService.java MediaRecorder가 파일로 바로 씀(동작 확인 필요). 확인할 것: 조각 이어 붙인 webm의 재생·전사 가능 여부, 재시작 후 '복구할 녹음' 안내, 작업 7.1(일시정지)과의 관계. 착수는 사용자가 정할 때.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "정정: 녹음 중 미저장은 데스크톱만 해당",
+            "description": "짝 확인 2026-10-23: Android는 MediaRecorder.setOutputFile로 녹음 중 파일에 직접 쓴다(MeetingService.java:43). 이 작업은 데스크톱(part.chunks 메모리 누적 app.js:746, 종료 때 저장 :1794) 기준이다. 단 Android도 강제 종료·전원 차단 시 파일 마무리 여부는 미확인.",
+            "details": "",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 10,
+            "parentId": "undefined"
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "녹음 중 소리가 너무 작으면 경고",
+        "description": "녹음 중 음량이 일정 시간 아주 작으면 '마이크를 확인하세요'를 알려 안 들리는 녹음을 막는다(Claude 제안, 사용자 선택 2026-10-23).",
+        "details": "근거: 데스크톱 음량 막대 #level-meter·startMeter(desktop/앱/화면/app.js), Android 화면에도 음량 표시 여부 확인 필요. 정할 것: 기준 음량·지속 시간, 쉬는 시간(작업 7.1 일시정지)과 구분, 경고 방식(문구·소리). 착수는 사용자가 정할 때.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 12,
+        "title": "지난 회의 이어서 정리",
+        "description": "새 회의를 준비할 때 지난 회의 하나를 고르면 그 요약을 배경으로 붙여, 프로젝트 없이도 '지난번 결정 이후'를 이어 정리한다(Claude 제안, 사용자 선택 2026-10-23).",
+        "details": "작업 5(프로젝트 제거)로 끊기는 회의 간 맥락을 가볍게 대신한다. 요약 요청에 붙일 범위(결정·할 일·남은 쟁점 위주), 길이 상한, 외부 전송 안내(지난 회의 요약도 OpenAI로 전송됨), 작업 5.4 요약 지침과 함께 설계. 착수는 사용자가 정할 때.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [
+          "5"
+        ],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 13,
+        "title": "녹음 중 '중요 표시' 버튼",
+        "description": "녹음 중 중요한 순간에 버튼을 눌러 경과 시각과 짧은 메모를 남기고, 요약할 때 힌트로 넘긴다(Claude 제안, 사용자 선택 2026-10-23).",
+        "details": "주의: 전사 모델 gpt-transcribe가 구간별 시각을 돌려주는지는 미확인. 시각이 없으면 전사의 정확한 위치와 연결하기 어려우므로 '메모 힌트'로만 쓸지 설계에서 정한다. 작업 7.1(일시정지) 경과 시간 계산과 함께. 착수는 사용자가 정할 때.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 14,
+        "title": "지난 회의 검색",
+        "description": "지난 회의를 제목·요약·전사에서 낱말로 찾는 검색창을 둔다(Claude 제안, 사용자 선택 2026-10-23).",
+        "details": "작업 5에서 회의 목록을 하나로 합친 뒤에 의미가 커진다. 로컬 파일 검색으로 외부 전송 없음. 기록 수가 많을 때 속도, 옛 프로젝트-01~03 기록 포함. 착수는 사용자가 정할 때.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [
+          "5"
+        ],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 15,
+        "title": "메신저용 짧은 요약 복사",
+        "description": "카카오톡·메일에 붙이기 좋은 3~5줄 요약만 따로 복사·공유한다(Claude 제안, 사용자 선택 2026-10-23).",
+        "details": "작업 1(카카오톡 '나에게 보내기' 공유 안 됨)을 고칠 때 함께 다룬다. 이미 받은 회의록에서 만들지(추가 AI 호출 없음) 별도 요약을 요청할지 정한다. 착수는 사용자가 정할 때.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 16,
+        "title": "오래된 원음 자동 정리(선택 기능)",
+        "description": "설정 화면에서 '전사가 끝난 원음은 N일 뒤 삭제'를 고를 수 있게 한다. 기본값은 꺼짐(Claude 제안, 사용자 선택 2026-10-23).",
+        "details": "작업 9(설정 화면·저장 위치)와 함께. 삭제 전 조건(전사·회의록 저장 완료), 다시 분석이 원음을 쓰는 경우 안내, 사용자 지정 저장 위치의 사본은 건드리지 않을지, 되돌릴 수 없는 삭제라 확인 문구 필요. 착수는 사용자가 정할 때.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [
+          "9"
+        ],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 17,
+        "title": "Android에서 기존 녹음 파일 불러와 정리",
+        "description": "다른 녹음 앱으로 만든 파일(M4A부터)을 휴대폰 앱에서 불러와 분석한다(짝 제안, 사용자 선택 2026-10-23). 데스크톱은 이미 원음 불러오기가 있다(desktop/앱/화면/index.html:164, app.js:908).",
+        "details": "Android 파일 선택은 현재 설정 교환용(MainActivity.java:123,125). 지원 형식·크기 제한, 앱 내부 보관, 파일 검증. 작업 5(저장 구조)와 9(SAF) 뒤가 자연스럽다. 착수는 사용자가 정할 때.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 18,
+        "title": "후속 할 일 완료 체크",
+        "description": "요약의 후속 할 일마다 완료 표시를 할 수 있게 한다(짝 제안, 사용자 선택 2026-10-23).",
+        "details": "현재 actions에는 task·owner·due만 있고 완료 상태가 없다(desktop/앱/서버.cjs:19750). Android는 읽기용 목록(assets/flow.js:71, app.js:152). AI 결과 원본과 분리해 사용자 체크 상태를 저장, 재분석 때 항목 연결 규칙 필요. 작업 8(담당자)과 함께 보면 좋다. 착수는 사용자가 정할 때.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 19,
+        "title": "앱에 지금까지 쓴 토큰(AI 사용량) 표시",
+        "description": "사용자 요청 2026-10-23: 내가 지금까지 토큰을 얼마나 썼는지 앱 화면에 보여 준다(추가 기능). 첫 묶음(작업 5·9·6) 진행 중에 받은 요청이라 등록만 하고, 범위·시기는 사용자 확인 후 정한다.",
+        "details": "질문 받은 시점에 읽기 전용으로 가능 여부를 확인한다(데스크톱 AI사용량.js·회의 기록의 analysis.usage, Android AiUsage). 확인할 것: 회의마다 저장된 사용량을 합쳐 기간별(이번 달·전체) 합계를 낼 수 있는지, 전사 요금이 토큰이 아니라 오디오 길이 기준인 점, 같은 API 키를 다른 프로그램에서 쓴 양은 앱이 알 수 없는 점, 예상 요금 표시 여부. 첫 묶음의 설정 화면(작업 9)과 결과 화면 설계와 겹치므로 그 뒤에 설계한다.",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 20,
+        "title": "전사용 음성을 압축해서 보내도 되는지 확인(사용자 질문)",
+        "description": "사용자 질문 2026-10-23: 음성을 보내 전사를 받는데, 압축해서 보내도 괜찮은지. 지금 녹음 형식·비트레이트와 OpenAI 전사 API의 형식·크기 제한·요금 기준을 확인해 답하고, 바꿀 필요가 있으면 사용자 결정 후 작업으로 만든다.",
+        "details": "확인할 것: Windows MediaRecorder 형식(webm/opus 등)과 audioBitsPerSecond 설정 여부, Android MediaRecorder 인코더·비트레이트, OpenAI /v1/audio/transcriptions 허용 형식과 파일 크기 상한, 요금이 오디오 길이 기준인지(작업 7 기록 참고), 낮은 비트레이트가 인식 정확도에 주는 영향. 첫 묶음 진행 중에 받은 질문이라 답변과 등록만 한다.",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "low",
+        "subtasks": [],
+        "updatedAt": "2026-10-23T05:16:43.377Z"
+      }
+    ],
+    "metadata": {
+      "version": "1.0.0",
+      "lastModified": "2026-10-23T08:09:44.376Z",
+      "taskCount": 20,
+      "completedCount": 5,
+      "tags": [
+        "master"
+      ],
+      "created": "2026-10-23T08:10:43.484Z",
+      "description": "Tasks for master context"
+    }
+  }
+}
