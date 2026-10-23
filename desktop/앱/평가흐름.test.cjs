@@ -215,3 +215,47 @@ test('저장 위치를 고르지 않았으면 다시 저장 대신 안내 문구
   assert.equal(review.ui['copy-status'].textContent, '설정에서 저장 위치를 고르면 사본을 저장할 수 있습니다.');
   assert.equal(review.ui['copy-again'].hidden, true);
 });
+
+test('평가 저장을 기다리는 동안 결과 버전을 바꿀 수 없고 다시 정리는 시작한 결과의 전사·형식으로만 요청한다', async () => {
+  let release;
+  const late = new Promise((resolve) => { release = resolve; });
+  const newer = { ...second, transcript: '이대리: 견적 검토는 제가 맡겠습니다.' };
+  const review = fixture({ routes: { ...opening(newer, null, versions), ...opening(first, null, versions), ...savedRoute(),
+    '^/api/meetings/main/[0-9a-f-]{36}/review$': async (call) => { await late; return reviewRoute['^/api/meetings/main/[0-9a-f-]{36}/review$'](call); } } });
+  await review.openMeeting('main', newer.id);
+  review.state.keyConfigured = true;
+  typeComment(review, '담당자가 틀렸어요.');
+  review.ui.refine.click();
+  assert.equal(review.ui['result-versions'].disabled, true, '평가를 저장하는 동안 결과 버전 선택을 잠근다');
+  review.ui['result-versions'].value = first.id;
+  review.ui['result-versions'].dispatch('change');
+  await settle();
+  assert.equal(review.calls.some((call) => call.url === `/api/meetings/main/${first.id}`), false, '다른 결과를 열지 않는다');
+  assert.equal(review.ui['result-versions'].value, newer.id);
+  release();
+  await settle();
+  const [request] = summaryCalls(review);
+  assert.equal(request.body.text, newer.transcript);
+  assert.equal(request.body.outputFormat, 'summary');
+  assert.equal(request.body.feedback, '담당자가 틀렸어요.');
+  assert.equal(review.ui['result-versions'].disabled, false);
+});
+
+test('사본을 다시 저장하는 동안 결과 버전을 바꿀 수 없고 응답은 저장을 시작한 결과에만 붙는다', async () => {
+  let release;
+  const late = new Promise((resolve) => { release = resolve; });
+  const review = fixture({ routes: { ...opening(second, null, versions), ...opening(first, null, versions),
+    [`/api/meetings/main/${second.id}/copies`]: async () => { await late; return Response.json({ copies: { ok: true, written: [{ kind: 'summaryMd', path: 'D:\요약\b.md' }], skipped: [], failed: [] } }); } } });
+  review.state.settings = { summaryModel: 'gpt-6.1-sol', defaultOutputFormat: 'meeting', storage: { audio: '', transcript: '', summary: 'D:\요약' } };
+  await review.openMeeting('main', second.id);
+  review.ui['copy-again'].click();
+  assert.equal(review.ui['result-versions'].disabled, true);
+  review.ui['result-versions'].value = first.id;
+  review.ui['result-versions'].dispatch('change');
+  await settle();
+  assert.equal(review.state.resultId, second.id);
+  release();
+  await settle();
+  assert.equal(review.ui['copy-status'].textContent, '고른 폴더에 사본을 저장했습니다: 요약본(.md).');
+  assert.equal(review.ui['result-versions'].disabled, false);
+});

@@ -569,6 +569,8 @@
     ui["refine-cost"].hidden = !comment;
     ui["copy-block"].hidden = !reviewable;
     ui["copy-again"].disabled = locked || state.copyBusy || !reviewable;
+    // 평가·의견 반영·사본 저장이 끝나기 전에는 다른 결과로 바꾸지 않는다. 진행 중인 작업이 시작한 결과를 계속 가리키게 한다.
+    ui["result-versions"].disabled = locked || state.reviewBusy || state.copyBusy;
     renderCopies();
     const { accessMode, trialRemaining, trialLimit } = state.access;
     ui["key-state"].textContent =
@@ -1679,7 +1681,7 @@
   }
 
   async function openMeeting(location, id, opener) {
-    if (state.historyBusy || state.flowBusy || state.recorders.size || state.aiController) return;
+    if (state.historyBusy || state.flowBusy || state.recorders.size || state.aiController || state.reviewBusy || state.copyBusy) return;
     if (hasUnsavedWork() && !confirm("현재 저장하지 않은 내용을 비우고 지난 회의를 열까요?")) return;
     state.historyBusy = true;
     refresh();
@@ -1781,8 +1783,10 @@
 
   async function saveReview() {
     // 별점·의견은 결과 파일을 고치지 않고 그 결과의 평가로 따로 저장한다. 요금이 들지 않는다.
-    const { review } = await api(`/api/meetings/${state.location}/${state.resultId}/review`, { method: "POST", headers: { "Content-Type": "application/json" },
+    const target = state.resultId;
+    const { review } = await api(`/api/meetings/${state.location}/${target}/review`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ stars: state.reviewStars, comment: ui["review-comment"].value }) });
+    if (state.resultId !== target) return review;
     state.review = review;
     state.versions = state.versions.map((version) => (version.id === state.resultId ? { ...version, stars: review.stars ?? undefined } : version));
     ui["review-status"].textContent = "평가를 저장했습니다.";
@@ -1795,8 +1799,11 @@
     // 의견을 먼저 평가로 저장하고, 열린 결과의 전사로 요약만 다시 요청해 새 결과로 저장한다. 원음은 다시 전사하지 않는다.
     const comment = ui["review-comment"].value.trim();
     if (!comment || !state.minutes || !state.resultStored) return;
+    const target = state.resultId;
     try { await saveReview(); }
     catch (error) { ui["review-status"].textContent = `평가를 저장하지 못했습니다. ${error.message}`; return; }
+    // 평가를 저장하는 사이 다른 결과가 열렸으면 그 결과의 전사로 요약하지 않는다.
+    if (state.resultId !== target) return;
     const stop = (message) => { ui["review-status"].textContent = message; announce(message); };
     if (!ui.transcript.value.trim()) return stop("저장된 전사가 없어 의견을 반영할 수 없습니다.");
     if (needsNewKey()) return promptNewKey();
@@ -1842,17 +1849,21 @@
   async function copyAgain() {
     // 지금 설정된 폴더 기준으로 아직 저장하지 못했거나 사라진 사본만 다시 쓴다.
     if (!state.resultStored || !state.resultId || state.copyBusy) return;
+    const target = state.resultId;
+    let copies;
     state.copyBusy = true;
     refresh();
     try {
-      state.copies = (await api(`/api/meetings/${state.location}/${state.resultId}/copies`, { method: "POST" })).copies;
+      copies = (await api(`/api/meetings/${state.location}/${target}/copies`, { method: "POST" })).copies;
     } catch (error) {
-      state.copies = { ok: false, written: [], skipped: [], failed: [{ kind: "all", message: error.message }] };
+      copies = { ok: false, written: [], skipped: [], failed: [{ kind: "all", message: error.message }] };
     } finally {
       state.copyBusy = false;
+      // 저장을 시작한 결과가 아직 열려 있을 때만 그 결과의 사본 상태로 보여 준다.
+      if (state.resultId === target) state.copies = copies;
       refresh();
     }
-    if (state.copies?.failed?.length) announce(copyMessage(state.copies));
+    if (state.resultId === target && copies?.failed?.length) announce(copyMessage(copies));
   }
 
   async function finishMeeting() {
