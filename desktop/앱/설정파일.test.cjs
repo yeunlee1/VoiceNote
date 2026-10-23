@@ -81,6 +81,8 @@ test('허용하지 않는 칸·잘못된 값·128KiB 초과·깨진 UTF-8을 거
     '모델숫자': edit(v => { v.summaryModel = 5; }),
     '모델101자': edit(v => { v.summaryModel = 'm'.repeat(101); }),
     '모르는기본형식': edit(v => { v.defaultOutputFormat = 'report'; }),
+    '기본형식배열': edit(v => { v.defaultOutputFormat = ['meeting']; }),
+    '내형식배열': edit(v => { v.defaultOutputFormat = ['custom']; }),
     '기본형식없음': edit(v => { delete v.defaultOutputFormat; }),
     '내형식칸없음': edit(v => { delete v.customFormat; }),
     '잘못된내형식': edit(v => { v.customFormat = { name: '', sections: [] }; }),
@@ -224,7 +226,7 @@ test('POST /api/settings는 쓸 수 없는 폴더를 거절한다', async t => {
     assert.equal(result.body.error.message, message, value);
     assert.deepEqual(checkFolder(value), { ok: false, message }, value);
   }
-  for (const body of [{ storage: { backup: dir } }, { storage: { audio: 1 } }, { storage: 'C:\\' }, { defaultOutputFormat: 'report' }, { summaryModel: 'gpt-없는-모델' }, { theme: 'dark' }])
+  for (const body of [{ storage: { backup: dir } }, { storage: { audio: 1 } }, { storage: 'C:\\' }, { defaultOutputFormat: 'report' }, { defaultOutputFormat: ['tasks'] }, { summaryModel: 'gpt-없는-모델' }, { theme: 'dark' }])
     assert.equal((await server.request('/api/settings', body)).status, 400, JSON.stringify(body));
   assert.deepEqual(await server.request('/api/settings'), before);
   // 쓸 수 있는 폴더는 저장하고, 확인용으로 만든 파일은 남기지 않는다.
