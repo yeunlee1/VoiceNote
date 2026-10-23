@@ -34,7 +34,7 @@
   });
 
   function format(value) {
-    return Object.prototype.hasOwnProperty.call(LABELS, value) ? value : null;
+    return typeof value === 'string' && Object.prototype.hasOwnProperty.call(LABELS, value) ? value : null;
   }
   function invalid(message) {
     return Object.assign(new Error(message), { status: 400 });
