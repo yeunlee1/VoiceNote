@@ -45,15 +45,37 @@ function createCopyWriter({ store, storage, fs = realFs }) {
       if (!fs.existsSync(path.join(folder, candidate))) return candidate;
     }
   }
-  // 임시 이름으로 다 쓴 뒤 이름을 바꾼다. 중간에 실패하면 만들던 임시 파일을 지워 반쪽 파일을 남기지 않는다.
-  function writeCopy(folder, name, data) {
-    const temporary = path.join(folder, `.${name}.${randomBytes(6).toString('hex')}.tmp`);
+  // 임시 파일을 최종 이름에 붙인다. 하드 링크와 배타적 복사는 대상이 이미 있으면 EEXIST로 실패하므로 남의 파일을 덮지 않는다.
+  // 하드 링크를 못 쓰는 드라이브(FAT·exFAT 등)는 배타적 복사로 대신하고, 복사하다 실패하면 방금 만든 대상을 지운다.
+  function place(from, to) {
+    try {
+      fs.linkSync(from, to);
+    } catch (error) {
+      if (error.code === 'EEXIST') throw error;
+      try {
+        fs.copyFileSync(from, to, realFs.constants.COPYFILE_EXCL);
+      } catch (copyError) {
+        if (copyError.code !== 'EEXIST') try { fs.unlinkSync(to); } catch {}
+        throw copyError;
+      }
+    }
+  }
+  // 임시 이름으로 다 쓴 뒤 최종 이름을 붙인다. 그 사이 같은 이름 파일이 생기면 다음 이름을 쓴다. 임시 파일은 언제나 지운다.
+  function writeCopy(folder, base, data) {
+    const temporary = path.join(folder, `.${base}.${randomBytes(6).toString('hex')}.tmp`);
     try {
       fs.writeFileSync(temporary, data, { flag: 'wx' });
-      fs.renameSync(temporary, path.join(folder, name));
-    } catch (error) {
+      for (;;) {
+        const name = freeName(folder, base);
+        try {
+          place(temporary, path.join(folder, name));
+          return name;
+        } catch (error) {
+          if (error.code !== 'EEXIST') throw error;
+        }
+      }
+    } finally {
       try { fs.unlinkSync(temporary); } catch {}
-      throw error;
     }
   }
   const saved = (items, match, folder) => items.some(item => match(item) && item.folder === folder && item.ok && fs.existsSync(path.join(folder, item.name)));
@@ -65,14 +87,15 @@ function createCopyWriter({ store, storage, fs = realFs }) {
     const files = store.resultFiles(location, resultId);
     const folders = storage();
     const report = { ok: true, written: [], skipped: [], failed: [] };
-    const attempt = (kind, folder, name, data) => {
+    // 실제로 쓴 이름(충돌로 (2)가 붙었을 수 있음)과 성공 여부를 돌려준다.
+    const attempt = (kind, folder, base, data) => {
       try {
-        writeCopy(folder, name, data);
+        const name = writeCopy(folder, base, data);
         report.written.push({ kind, path: path.join(folder, name) });
-        return true;
+        return { name, ok: true };
       } catch (error) {
         report.failed.push({ kind, message: reason(error) });
-        return false;
+        return { name: base, ok: false };
       }
     };
     const resultLog = path.join(files.directory, `사본기록-${resultId}.json`);
@@ -84,8 +107,7 @@ function createCopyWriter({ store, storage, fs = realFs }) {
       if (!folder) report.skipped.push({ kind: spec.kind, reason: NOT_SELECTED });
       else if (saved(items, match, folder)) report.skipped.push({ kind: spec.kind, reason: ALREADY });
       else {
-        const name = freeName(folder, `${prefix}${spec.suffix}`);
-        items = remember(items, match, { kind: spec.kind, folder, name, ok: attempt(spec.kind, folder, name, spec.content(files)) });
+        items = remember(items, match, { kind: spec.kind, folder, ...attempt(spec.kind, folder, `${prefix}${spec.suffix}`, spec.content(files)) });
         changed = true;
       }
     }
@@ -101,11 +123,11 @@ function createCopyWriter({ store, storage, fs = realFs }) {
         for (const part of files.audio) {
           const match = item => item.index === part.index;
           if (saved(audioItems, match, folder)) { report.skipped.push({ kind: 'audio', reason: ALREADY }); continue; }
-          const name = freeName(folder, `${audioPrefix}-원음-${String(part.index).padStart(2, '0')}${path.extname(part.file)}`);
-          let ok;
-          try { ok = attempt('audio', folder, name, realFs.readFileSync(part.file)); }
-          catch { report.failed.push({ kind: 'audio', message: '앱에 보관된 원음 파일을 읽지 못했습니다.' }); ok = false; }
-          audioItems = remember(audioItems, match, { index: part.index, folder, name, ok });
+          const base = `${audioPrefix}-원음-${String(part.index).padStart(2, '0')}${path.extname(part.file)}`;
+          let outcome;
+          try { outcome = attempt('audio', folder, base, realFs.readFileSync(part.file)); }
+          catch { report.failed.push({ kind: 'audio', message: '앱에 보관된 원음 파일을 읽지 못했습니다.' }); outcome = { name: base, ok: false }; }
+          audioItems = remember(audioItems, match, { index: part.index, folder, ...outcome });
           audioChanged = true;
         }
         if (audioChanged) writeLog(audioLog, audioItems);

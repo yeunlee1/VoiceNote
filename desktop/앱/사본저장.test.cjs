@@ -40,7 +40,12 @@ async function recording(request, title = '주간 회의') {
 }
 const files = dir => fs.readdirSync(dir).sort();
 const log = (store, name) => JSON.parse(fs.readFileSync(path.join(store, name), 'utf8'));
-const failRename = when => ({ ...fs, renameSync(from, to) { if (when(to)) throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' }); return fs.renameSync(from, to); } });
+// 임시 파일을 최종 이름으로 옮기는 단계(링크·복사·이름 바꾸기)에서 EPERM을 낸다.
+const eperm = () => Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+const failPlace = when => ({ ...fs,
+  linkSync(from, to) { if (when(to)) throw eperm(); return fs.linkSync(from, to); },
+  copyFileSync(from, to, mode) { if (when(to)) throw eperm(); return fs.copyFileSync(from, to, mode); },
+  renameSync(from, to) { if (when(to)) throw eperm(); return fs.renameSync(from, to); } });
 
 test('결과 저장 뒤 고른 폴더에 전사·요약 두 파일·원음을 쓰고 내용은 변환기 결과와 같다', async t => {
   const { store, request } = await start(t);
@@ -78,7 +83,7 @@ test('폴더를 고르지 않은 종류는 쓰지 않는다', async t => {
 
 test('.md만 성공하고 .txt가 실패한 뒤 다시 저장하면 .txt만 쓴다', async t => {
   let failing = true;
-  const { request } = await start(t, { copyFs: failRename(to => failing && to.endsWith('-요약.txt')) });
+  const { request } = await start(t, { copyFs: failPlace(to => failing && to.endsWith('-요약.txt')) });
   const summary = folder(t);
   await request('/api/settings', { storage: { summary } });
   const saved = await request('/api/meetings/main', result());
@@ -151,8 +156,48 @@ test('폴더를 바꾼 뒤 다시 저장하면 새 폴더에 쓰고 옛 사본�
   assert.equal(files(second).length, 2);
 });
 
+test('최종 이름을 붙이기 직전에 같은 이름 파일이 생겨도 덮지 않고 다음 이름으로 쓴다', async t => {
+  let intruded = false;
+  const summary = folder(t);
+  const intrude = { ...fs, writeFileSync(file, data, options) {
+    const written = fs.writeFileSync(file, data, options);
+    // 임시 파일을 다 쓴 바로 뒤, 최종 이름을 붙이기 전에 다른 프로그램이 같은 이름 파일을 만든다.
+    if (!intruded && String(file).endsWith('.tmp') && String(file).includes('-요약.md')) {
+      intruded = true;
+      fs.writeFileSync(path.join(path.dirname(file), path.basename(file).slice(1).replace(/\.[0-9a-f]{12}\.tmp$/, '')), '다른 프로그램이 만든 파일');
+    }
+    return written;
+  } };
+  const { request } = await start(t, { copyFs: intrude });
+  await request('/api/settings', { storage: { summary } });
+  const { meeting, copies } = (await request('/api/meetings/main', result())).body;
+  assert.equal(intruded, true);
+  assert.equal(copies.ok, true);
+  const prefix = artifactPrefix(meeting);
+  assert.equal(fs.readFileSync(path.join(summary, `${prefix}-요약.md`), 'utf8'), '다른 프로그램이 만든 파일');
+  assert.equal(fs.readFileSync(path.join(summary, `${prefix}-요약 (2).md`), 'utf8'), markdown(meeting));
+  assert.ok(copies.written.some(item => item.path.endsWith(`${prefix}-요약 (2).md`)));
+  assert.equal(files(summary).some(name => name.endsWith('.tmp')), false);
+});
+
+test('하드 링크를 못 쓰는 드라이브에서는 배타적 복사로 쓴다', async t => {
+  const noLink = { ...fs, linkSync() { throw Object.assign(new Error('EPERM: hard links not supported'), { code: 'EPERM' }); } };
+  const { request } = await start(t, { copyFs: noLink });
+  const summary = folder(t);
+  await request('/api/settings', { storage: { summary } });
+  const record = result();
+  const prefix = artifactPrefix({ ...record, dailySequence: 1 });
+  fs.writeFileSync(path.join(summary, `${prefix}-요약.md`), '사용자가 따로 둔 파일');
+  const { meeting, copies } = (await request('/api/meetings/main', record)).body;
+  assert.equal(copies.ok, true);
+  assert.equal(fs.readFileSync(path.join(summary, `${prefix}-요약.md`), 'utf8'), '사용자가 따로 둔 파일');
+  assert.equal(fs.readFileSync(path.join(summary, `${prefix}-요약 (2).md`), 'utf8'), markdown(meeting));
+  assert.equal(fs.readFileSync(path.join(summary, `${prefix}-요약.txt`), 'utf8'), plainText(meeting));
+  assert.equal(files(summary).some(name => name.endsWith('.tmp')), false);
+});
+
 test('쓰기가 EPERM으로 실패해도 결과 저장 응답은 200이고 copies.failed에 이유가 있고 임시 파일이 남지 않는다', async t => {
-  const { request } = await start(t, { copyFs: failRename(() => true) });
+  const { request } = await start(t, { copyFs: failPlace(() => true) });
   const [audio, transcript, summary] = [folder(t), folder(t), folder(t)];
   await request('/api/settings', { storage: { audio, transcript, summary } });
   const rec = await recording(request);
