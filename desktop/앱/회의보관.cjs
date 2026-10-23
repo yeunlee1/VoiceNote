@@ -213,9 +213,10 @@ function createMeetingStore(root, validateMinutes, options = {}) {
       }).sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')) || b.dailySequence - a.dailySequence || savedAt(b).localeCompare(savedAt(a)));
       return { meetings, skipped };
     },
+    // 결과 창이 그 결과의 별점·의견을 바로 보여 주도록 평가를 함께 돌려준다. 평가가 없으면 null이다.
     loadMeeting(location, id) {
       const meeting = load(location, id);
-      return { meeting, versions: versionsOf(location, meeting) };
+      return { meeting, versions: versionsOf(location, meeting), review: meeting.minutes ? loadReview(location, id) : null };
     },
     createRecording(location, id, data) {
       if (location !== 'main') { directory(location); throw fail(400, '새 녹음은 기본 보관함에만 만들 수 있습니다.'); }

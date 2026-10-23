@@ -136,9 +136,13 @@
 
 <dialog id="meeting-detail" class="modal modal-wide modal-page" aria-labelledby="detail-title">
   <div class="modal-head">
-    <div>
+    <div class="detail-heading">
       <p id="detail-meta" class="modal-meta"></p>
       <h2 id="detail-title" class="modal-title">회의 기록</h2>
+      <div class="version-row">
+        <span id="refined-badge" class="refined-badge" hidden>의견 반영본</span>
+        <label id="result-version-field" class="version-field" hidden>결과 버전<select id="result-versions"></select></label>
+      </div>
     </div>
     <button class="icon-button" type="button" data-close aria-label="회의 기록 닫기"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
   </div>
@@ -159,6 +163,29 @@
       <p id="archive-status" class="fine-print" role="status">분석이 끝나면 지난 회의에 자동 저장됩니다.</p>
       <button id="save-archive" class="button button-outline" type="button" disabled>저장 다시 시도</button>
       <div id="minutes" class="minutes-content"></div>
+      <section id="review" class="review" aria-labelledby="review-title" hidden>
+        <h3 id="review-title" class="review-title">이 요약 평가</h3>
+        <div class="review-stars" role="group" aria-label="별점 (선택)">
+          <button id="review-star-1" class="review-star" type="button" aria-pressed="false" aria-label="별 1개">★</button>
+          <button id="review-star-2" class="review-star" type="button" aria-pressed="false" aria-label="별 2개">★</button>
+          <button id="review-star-3" class="review-star" type="button" aria-pressed="false" aria-label="별 3개">★</button>
+          <button id="review-star-4" class="review-star" type="button" aria-pressed="false" aria-label="별 4개">★</button>
+          <button id="review-star-5" class="review-star" type="button" aria-pressed="false" aria-label="별 5개">★</button>
+        </div>
+        <label class="field">의견 <span class="field-note">선택 · 1,000자 이내</span><textarea id="review-comment" rows="3" maxlength="1000" aria-describedby="review-help" placeholder="예) 담당자가 틀렸어요. 견적 검토는 이대리가 맡기로 했습니다."></textarea></label>
+        <p id="review-help" class="fine-print">다시 정리할 때 AI는 앞선 정리본을 보지 않고 전사를 다시 읽습니다. ‘두 번째 항목’처럼 위치를 가리키기보다 무엇이 어떻게 틀렸는지 적어 주세요.</p>
+        <div class="button-row review-actions">
+          <button id="save-review" class="button button-outline" type="button">평가 저장</button>
+          <button id="refine" class="button button-primary" type="button">의견 반영해 다시 정리</button>
+          <span id="refine-cost" class="fine-print refine-cost" hidden>요약 요금이 추가로 듭니다. 긴 회의는 여러 번 나눠 요청할 수 있습니다.</span>
+        </div>
+        <p id="review-status" class="fine-print" role="status"></p>
+      </section>
+      <section id="copy-block" class="copy-block" aria-labelledby="copy-title" hidden>
+        <h3 id="copy-title" class="review-title">고른 폴더 사본</h3>
+        <p id="copy-status" class="fine-print" role="status"></p>
+        <button id="copy-again" class="button button-outline" type="button">고른 폴더에 다시 저장</button>
+      </section>
       <details class="result-more">
         <summary>AI 사용량 · 다른 형식으로 저장</summary>
         <section class="usage" aria-labelledby="usage-title">

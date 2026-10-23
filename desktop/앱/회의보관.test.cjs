@@ -257,6 +257,22 @@ test('목록 항목에 최신 결과의 별 개수와 의견 반영 여부가 �
   assert.equal((await request('/api/meetings/main', result({ recordingId, feedback: '가'.repeat(1001) }))).status, 400);
 });
 
+test('결과를 열면 그 결과의 평가를 함께 돌려주고 평가가 없으면 null이다', async t => {
+  const request = await start(t, folder(t));
+  const recordingId = randomUUID();
+  await request(`/api/recordings/main/${recordingId}`, recordingMeta());
+  const first = result({ recordingId });
+  await request('/api/meetings/main', first);
+  assert.equal((await request(`/api/meetings/main/${first.id}`)).body.review, null);
+  await request(`/api/meetings/main/${first.id}/review`, { stars: null, comment: '담당자가 틀렸어요.' });
+  await pause();
+  const second = result({ recordingId, feedback: '담당자가 틀렸어요.' });
+  await request('/api/meetings/main', second);
+  const opened = (await request(`/api/meetings/main/${first.id}`)).body;
+  assert.deepEqual([opened.review.stars, opened.review.comment], [null, '담당자가 틀렸어요.']);
+  assert.equal((await request(`/api/meetings/main/${second.id}`)).body.review, null);
+});
+
 test('보관함 이름과 폴더가 맞지 않는 기록은 읽지 않는다', async t => {
   const dir = folder(t);
   const old = legacyMeeting(dir, 1);

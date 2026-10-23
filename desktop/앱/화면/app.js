@@ -52,6 +52,8 @@
       "settings-ai", "settings-format", "settings-storage", "settings-file", "settings-data", "default-format", "storage-status",
       ...STORAGE_KINDS.flatMap((kind) => [`storage-${kind}`, `pick-${kind}`, `clear-${kind}`]),
       "export-settings", "import-settings", "settings-file-input", "settings-file-status", "settings-import", "settings-preview", "confirm-import", "open-data-folder",
+      "review", "review-comment", "save-review", "refine", "refine-cost", "review-status", "result-versions", "result-version-field", "refined-badge",
+      "copy-block", "copy-status", "copy-again", ...[1, 2, 3, 4, 5].map((stars) => `review-star-${stars}`),
       "tab-minutes", "tab-transcript", "panel-minutes", "panel-transcript", "transcript-view", "transcript-meta", "copy-result", "share-result", "save-result", "result-status",
     ].map((id) => [id, $(id)]),
   );
@@ -106,6 +108,8 @@
     transcriptShown: null,
     access: { accessMode: "none", trialLimit: 3, trialRemaining: 0, mustRegister: true, unlocked: false, trialError: "" },
     analysisId: null,
+    // 같은 녹음(회의)의 결과 목록과 지금 결과의 평가·반영한 의견·사본 저장 결과다. 평가는 결과마다 따로 저장한다.
+    versions: [], feedback: "", review: null, reviewStars: null, reviewBusy: false, copies: null, copyBusy: false,
   };
 
   function applyAccess(data) {
@@ -548,6 +552,24 @@
       ui[`clear-${kind}`].disabled = settingsBusy || !state.settings?.storage?.[kind];
     }
     ui["custom-missing"].hidden = !customMissing();
+    // 평가·다시 정리·사본 다시 저장은 저장된 결과에만 쓰고, 녹음·분석·저장 중에는 잠근다.
+    const reviewable = Boolean(state.minutes && state.resultStored && state.resultId);
+    const reviewLocked = locked || state.reviewBusy || !reviewable;
+    const comment = ui["review-comment"].value.trim();
+    ui.review.hidden = !reviewable;
+    for (let stars = 1; stars <= 5; stars++) {
+      const star = ui[`review-star-${stars}`];
+      star.setAttribute("aria-pressed", String(state.reviewStars === stars));
+      star.dataset.on = String(state.reviewStars !== null && stars <= state.reviewStars);
+      star.disabled = reviewLocked;
+    }
+    ui["review-comment"].disabled = reviewLocked;
+    ui["save-review"].disabled = reviewLocked || (state.reviewStars === null && !comment);
+    ui.refine.disabled = reviewLocked || !comment || stale();
+    ui["refine-cost"].hidden = !comment;
+    ui["copy-block"].hidden = !reviewable;
+    ui["copy-again"].disabled = locked || state.copyBusy || !reviewable;
+    renderCopies();
     const { accessMode, trialRemaining, trialLimit } = state.access;
     ui["key-state"].textContent =
       state.keyStorageError ||
@@ -646,8 +668,21 @@
     state.usage = [];
     state.callIds = [];
     state.analysisModel = "";
+    state.versions = [];
+    state.feedback = "";
+    state.copies = null;
+    clearReview();
     renderMinutes();
     refresh();
+  }
+
+  function clearReview(review = null) {
+    // 결과가 바뀌면 그 결과의 평가를 보여 준다. 새 결과에는 아직 평가가 없다.
+    state.review = review;
+    state.reviewStars = review?.stars ?? null;
+    ui["review-comment"].value = review?.comment || "";
+    ui["review-status"].textContent = "";
+    renderVersions();
   }
 
   function recordingMetadata() {
@@ -1060,7 +1095,8 @@
     return sections;
   }
 
-  async function summarize(useExistingText = false) {
+  async function summarize(useExistingText = false, feedback = "") {
+    // feedback이 있으면 의견 반영 다시 정리다. 모든 구간 요청에 같은 의견을 넣고, 새 결과에 그 의견을 함께 저장한다.
     if (state.parts.length && !state.audioStored) return await finishMeeting();
     return await paidTask(async (signal) => {
       const transcript = useExistingText === true && ui.transcript.value.trim()
@@ -1074,7 +1110,7 @@
       if (!transcript) throw new Error("전사 내용이 비어 있습니다.");
       const source = summaryInput();
       const metadata = JSON.parse(source);
-      if (state.audioStored && state.recordingId) {
+      if (!feedback && state.audioStored && state.recordingId) {
         await api(`/api/recordings/${state.location}/${state.recordingId}/transcript`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: transcript }), signal,
         });
@@ -1087,7 +1123,7 @@
       async function summarizeSection(text, depth = 0) {
         assertAI(signal);
         if (summaryInput() !== source) throw new Error("전송 중 입력을 수정했습니다. 수정 내용은 유지했습니다. 다시 만들면 변경 내용을 반영합니다.");
-        const body = JSON.stringify({ ...metadata, text, previousMinutes, ...(state.models.length && state.summaryModel ? { model: state.summaryModel } : {}) });
+        const body = JSON.stringify({ ...metadata, text, previousMinutes, ...(feedback ? { feedback } : {}), ...(state.models.length && state.summaryModel ? { model: state.summaryModel } : {}) });
         const cached = state.summarySteps.find((step) => step.body === body);
         if (cached?.minutes) previousMinutes = cached.minutes;
         else if (cached?.sections) {
@@ -1133,12 +1169,16 @@
       state.notesSaved = false;
       state.resultId = newOperationId();
       state.resultStored = false;
+      state.feedback = feedback;
+      state.copies = null;
+      clearReview();
       renderMinutes();
       refresh();
       await archiveResult();
       workflow("회의록 저장 완료. ‘지난 회의’에서 다시 열 수 있습니다.");
       ui["retry-analysis"].hidden = true;
-      announce(withTrialWarning(`${state.audioStored ? "음성과 " : ""}회의록을 보관했습니다. 내용을 검토하세요.`));
+      const copyFailure = state.copies?.failed?.length ? ` ${copyMessage(state.copies)}` : "";
+      announce(withTrialWarning(`${state.audioStored ? "음성과 " : ""}회의록을 보관했습니다. 내용을 검토하세요.${copyFailure}`));
     });
   }
 
@@ -1366,6 +1406,7 @@
         transcript: part.transcript,
       })),
       ...formatFields(),
+      ...(state.feedback ? { feedback: state.feedback } : {}),
       minutes: state.minutes,
       analysis: { summaryModel: state.analysisModel || state.summaryModel || null, usage: usageTools().normalize(state.usage), callIds: state.callIds },
     };
@@ -1643,7 +1684,7 @@
     state.historyBusy = true;
     refresh();
     try {
-      const { meeting } = await api(`/api/meetings/${location}/${id}`);
+      const { meeting, versions, review } = await api(`/api/meetings/${location}/${id}`);
       const parts = [];
       for (const audio of meeting.audio || []) {
         const response = await fetch(`/api/recordings/${location}/${meeting.recordingId || id}/audio/${audio.index}`, { headers: { "X-Meeting-Token": state.token } });
@@ -1677,6 +1718,10 @@
       state.usage = usageTools().normalize(meeting.analysis?.usage);
       state.callIds = Array.isArray(meeting.analysis?.callIds) ? meeting.analysis.callIds.filter((id) => typeof id === "string") : [];
       state.analysisModel = meeting.analysis?.summaryModel || "";
+      state.versions = Array.isArray(versions) ? versions : [];
+      state.feedback = meeting.feedback || "";
+      state.copies = null;
+      clearReview(review || null);
       state.setupOpen = false;
       ui["record-state"].textContent = parts.length ? "보관된 음성" : "대기";
       renderParts();
@@ -1701,12 +1746,113 @@
       state.dailySequence = saved.meeting?.dailySequence;
       state.resultStored = true;
       state.notesSaved = true;
+      // 저장한 결과를 결과 버전 끝에 더하고, 고른 폴더에 쓴 사본 결과를 결과 창에 보여 준다.
+      const record = saved.meeting;
+      if (record?.id) state.versions = [...state.versions.filter((version) => version.id !== record.id),
+        { id: record.id, savedAt: record.savedAt, outputFormat: outputFormat(record.outputFormat), refined: Boolean(record.feedback) }];
+      state.copies = saved.copies || null;
+      renderVersions();
       ui["archive-status"].textContent = "전사 원문과 회의록 저장 완료";
       await loadHistory();
     } catch (error) {
       ui["archive-status"].textContent = "회의록 저장 실패. 결과는 화면에 남아 있습니다. 저장을 다시 시도하세요.";
       throw error;
     } finally { state.archiveBusy = false; refresh(); }
+  }
+
+  function savedLabel(value) {
+    try {
+      return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(value));
+    } catch { return ""; }
+  }
+
+  function renderVersions() {
+    // 같은 회의의 결과를 저장한 순서대로 보여 주고 지금 열린 결과를 고른 상태로 둔다. 결과가 하나뿐이면 목록을 숨긴다.
+    ui["result-version-field"].hidden = state.versions.length < 2;
+    ui["result-versions"].replaceChildren(...state.versions.map((version, index) => {
+      const option = element("option", [`${index + 1}번째 결과`, savedLabel(version.savedAt), formatLabels[outputFormat(version.outputFormat)],
+        version.refined && "의견 반영본", version.stars && `별 ${version.stars}개`].filter(Boolean).join(" · "));
+      option.value = version.id;
+      return option;
+    }));
+    ui["result-versions"].value = state.resultId || "";
+    ui["refined-badge"].hidden = !state.feedback;
+  }
+
+  async function saveReview() {
+    // 별점·의견은 결과 파일을 고치지 않고 그 결과의 평가로 따로 저장한다. 요금이 들지 않는다.
+    const { review } = await api(`/api/meetings/${state.location}/${state.resultId}/review`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stars: state.reviewStars, comment: ui["review-comment"].value }) });
+    state.review = review;
+    state.versions = state.versions.map((version) => (version.id === state.resultId ? { ...version, stars: review.stars ?? undefined } : version));
+    ui["review-status"].textContent = "평가를 저장했습니다.";
+    renderVersions();
+    await loadHistory();
+    return review;
+  }
+
+  async function refineSummary() {
+    // 의견을 먼저 평가로 저장하고, 열린 결과의 전사로 요약만 다시 요청해 새 결과로 저장한다. 원음은 다시 전사하지 않는다.
+    const comment = ui["review-comment"].value.trim();
+    if (!comment || !state.minutes || !state.resultStored) return;
+    try { await saveReview(); }
+    catch (error) { ui["review-status"].textContent = `평가를 저장하지 못했습니다. ${error.message}`; return; }
+    const stop = (message) => { ui["review-status"].textContent = message; announce(message); };
+    if (!ui.transcript.value.trim()) return stop("저장된 전사가 없어 의견을 반영할 수 없습니다.");
+    if (needsNewKey()) return promptNewKey();
+    if (!canAnalyze()) {
+      stop("분석할 API 키가 없습니다. 설정에서 API 키를 등록한 뒤 다시 정리하세요.");
+      return openSettings("settings-ai");
+    }
+    ui["review-status"].textContent = "의견을 반영해 다시 정리하고 있습니다.";
+    const done = await summarize(true, comment);
+    ui["review-status"].textContent = done
+      ? "의견을 반영한 새 결과를 저장했습니다. 앞선 결과는 ‘결과 버전’에서 다시 볼 수 있습니다."
+      : "다시 정리하지 못했습니다. 평가는 저장되어 있고 앞선 결과는 그대로입니다.";
+  }
+
+  function runReview(task) {
+    if (state.reviewBusy) return;
+    state.reviewBusy = true;
+    refresh();
+    task().catch((error) => { ui["review-status"].textContent = `평가를 저장하지 못했습니다. ${error.message}`; })
+      .finally(() => { state.reviewBusy = false; refresh(); });
+  }
+
+  const COPY_LABELS = { transcript: "전사문", summaryMd: "요약본(.md)", summaryTxt: "요약본(.txt)", audio: "원음", all: "사본" };
+
+  function copyMessage(report) {
+    // 사본 저장 결과를 한 문장으로 알린다. 일부만 실패하면 실패한 종류만 적는다.
+    if (!report) return "";
+    if (report.failed?.length) {
+      const reasons = [...new Set(report.failed.map((item) => `${COPY_LABELS[item.kind] || "사본"} — ${String(item.message || "").replace(/\.$/, "")}`))];
+      return `고른 폴더에 저장하지 못했습니다: ${reasons.join(", ")}. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.`;
+    }
+    const written = [...new Set((report.written || []).map((item) => COPY_LABELS[item.kind]).filter(Boolean))];
+    return written.length ? `고른 폴더에 사본을 저장했습니다: ${written.join(", ")}.` : "고른 폴더에 새로 저장할 사본이 없습니다.";
+  }
+
+  function renderCopies() {
+    // 저장 위치를 하나도 고르지 않았으면 다시 저장 버튼 대신 안내만 보여 준다.
+    const configured = STORAGE_KINDS.some((kind) => state.settings?.storage?.[kind]);
+    ui["copy-again"].hidden = !configured;
+    ui["copy-status"].textContent = configured ? copyMessage(state.copies) : "설정에서 저장 위치를 고르면 사본을 저장할 수 있습니다.";
+  }
+
+  async function copyAgain() {
+    // 지금 설정된 폴더 기준으로 아직 저장하지 못했거나 사라진 사본만 다시 쓴다.
+    if (!state.resultStored || !state.resultId || state.copyBusy) return;
+    state.copyBusy = true;
+    refresh();
+    try {
+      state.copies = (await api(`/api/meetings/${state.location}/${state.resultId}/copies`, { method: "POST" })).copies;
+    } catch (error) {
+      state.copies = { ok: false, written: [], skipped: [], failed: [{ kind: "all", message: error.message }] };
+    } finally {
+      state.copyBusy = false;
+      refresh();
+    }
+    if (state.copies?.failed?.length) announce(copyMessage(state.copies));
   }
 
   async function finishMeeting() {
@@ -2077,6 +2223,21 @@
     ui["import-settings"].addEventListener("click", () => ui["settings-file-input"].click());
     ui["settings-file-input"].addEventListener("change", previewSettings);
     ui["confirm-import"].addEventListener("click", applyImportedSettings);
+    for (let stars = 1; stars <= 5; stars++) ui[`review-star-${stars}`].addEventListener("click", () => {
+      // 같은 별을 다시 누르면 별점을 지운다. 별점은 고르지 않아도 된다.
+      state.reviewStars = state.reviewStars === stars ? null : stars;
+      refresh();
+    });
+    ui["review-comment"].addEventListener("input", refresh);
+    ui["save-review"].addEventListener("click", () => runReview(saveReview));
+    ui.refine.addEventListener("click", () => runReview(refineSummary));
+    ui["copy-again"].addEventListener("click", copyAgain);
+    ui["result-versions"].addEventListener("change", async () => {
+      const id = ui["result-versions"].value;
+      await openMeeting(state.location, id, ui["result-versions"]);
+      renderVersions();
+      if (state.resultId === id) announce("고른 결과 버전을 열었습니다. 이 결과의 평가와 사본 저장은 이 결과에 적용됩니다.");
+    });
     ui["settings-import"].addEventListener("close", () => { state.pendingSettings = null; });
     // 폴더 고르기와 회의자료 폴더 열기는 Windows 창 안에서만 쓸 수 있다. 창은 폴더 선택 결과를 메시지로 돌려준다.
     const webview = window.chrome?.webview;

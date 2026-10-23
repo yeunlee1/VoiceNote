@@ -321,4 +321,21 @@ body[data-recording="true"] .timer { color: var(--rec-deep); }
 .transcript-view { display: grid; gap: 12px; padding: 20px 24px; border: 1px solid var(--rule); border-radius: var(--radius-s); background: #fff; line-height: 1.8; }
 .transcript-view p { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
 .result-more { border-top: 1px solid var(--rule); padding-top: 12px; }
+.detail-heading { min-width: 0; }
+.version-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 6px; }
+.version-row:not(:has(:not([hidden]))) { display: none; }
+.refined-badge { display: inline-flex; align-items: center; min-height: 26px; padding: 2px 10px; border-radius: 999px; background: var(--teal-wash); color: var(--teal-deep); font-size: 13px; font-weight: 600; }
+.version-field { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; max-width: 100%; font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+.version-field select { min-height: 36px; min-width: 0; max-width: 100%; padding: 4px 8px; border: 1px solid var(--rule-strong); border-radius: var(--radius-s); background: var(--well); font-size: 14px; font-weight: 400; }
+
+/* 결과 창의 요약 평가와 고른 폴더 사본 */
+.review, .copy-block { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--rule); border-radius: var(--radius-m); background: var(--well); }
+.copy-block { gap: 8px; justify-items: start; }
+.review-title { font-size: 16px; font-weight: 700; }
+.review-stars { display: flex; gap: 4px; }
+.review-star { width: 44px; height: 44px; padding: 0; border: 1px solid var(--rule-strong); border-radius: var(--radius-s); background: #fff; color: var(--rule-strong); font-size: 22px; line-height: 1; }
+.review-star[data-on="true"] { border-color: rgba(166, 106, 18, 0.45); background: #fff6df; color: #a66a12; }
+.review-star:disabled { opacity: 0.6; }
+.review-actions { align-items: center; }
+.refine-cost { flex: 1 1 220px; }
 .result-more > summary { cursor: pointer; font-weight: 600; color: var(--teal-deep); }
