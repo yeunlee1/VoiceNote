@@ -62,6 +62,8 @@ function belongs(record, location) {
   return record.location === location;
 }
 const savedAt = record => String(record.savedAt ?? '');
+// 한 회의의 결과들을 묶는 열쇠다. 녹음이 있으면 녹음 id, 녹음 없이 전사로 만든 회의는 처음 결과 id(meetingId)를 쓴다.
+const groupKey = record => record.recordingId || record.meetingId || record.id;
 function createMeetingStore(root, validateMinutes, options = {}) {
   const write = options.atomicWrite ?? atomicWrite;
   const remove = options.removeFile ?? (file => fs.unlinkSync(file));
@@ -94,12 +96,12 @@ function createMeetingStore(root, validateMinutes, options = {}) {
     const assigned = new Map(), used = new Set();
     for (const record of records) {
       if (Number.isSafeInteger(record.dailySequence) && record.dailySequence > 0) {
-        assigned.set(record.recordingId || record.id, record.dailySequence);
+        assigned.set(groupKey(record), record.dailySequence);
         used.add(record.dailySequence);
       }
     }
     for (const record of records) {
-      const key = record.recordingId || record.id;
+      const key = groupKey(record);
       if (assigned.has(key)) continue;
       let number = 1;
       while (used.has(number)) number++;
@@ -137,6 +139,11 @@ function createMeetingStore(root, validateMinutes, options = {}) {
         ...(fs.existsSync(audioFile) ? { audio: readJson(audioFile).audio } : {}), ...(record.analysis !== undefined ? { analysis: aiUsage.normalizeAnalysis(record.analysis) } : {}) };
     } catch { throw fail(503, '저장된 회의 파일을 읽지 못했습니다. 기존 파일은 보존합니다.'); }
   }
+  // 녹음 없이 전사로 만든 회의를 다시 분석할 때 잇는 처음 결과다. 같은 보관함에서 열 수 있어야 한다.
+  function earlierResult(location, id) {
+    if (!fs.existsSync(recordPath(location, id))) throw fail(404, '이어 정리할 회의 결과를 찾지 못했습니다.');
+    return load(location, id);
+  }
   // 평가 파일이 없거나 읽을 수 없으면 평가가 없는 것으로 본다. 목록 전체가 평가 파일 하나 때문에 실패하지 않게 한다.
   function loadReview(location, id) {
     const file = reviewPath(location, id);
@@ -148,15 +155,15 @@ function createMeetingStore(root, validateMinutes, options = {}) {
       return { version: 1, stars: review.stars, comment: review.comment, savedAt: review.savedAt };
     } catch { return null; }
   }
-  // 같은 녹음에서 나온 결과들을 저장 시각 순으로 모은다. 결과 화면의 '결과 버전' 목록에 쓴다.
+  // 같은 회의에서 나온 결과들을 저장 시각 순으로 모은다. 결과 화면의 '결과 버전' 목록에 쓰므로 실제로 열 수 있는 결과만 넣는다.
   function versionsOf(location, meeting) {
-    const key = meeting.recordingId || meeting.id;
+    const key = groupKey(meeting);
     const results = [];
     for (const [name, kind, id] of recordFiles(location)) {
       if (kind !== '회의') continue;
       try {
         const record = readJson(path.join(directory(location), name));
-        if (record.id === id && belongs(record, location) && (record.recordingId || record.id) === key) results.push(record);
+        if (record.id === id && groupKey(record) === key) results.push(load(location, id));
       } catch {}
     }
     return results.sort((a, b) => savedAt(a).localeCompare(savedAt(b))).map(record => {
@@ -191,7 +198,7 @@ function createMeetingStore(root, validateMinutes, options = {}) {
           try { records.push(load(location, id)); } catch { skipped++; }
         }
       }
-      const keyOf = record => `${record.location}:${record.recordingId || record.id}`;
+      const keyOf = record => `${record.location}:${groupKey(record)}`;
       const analyzed = new Set(records.filter(record => record.minutes).map(keyOf));
       const latest = new Map();
       for (const record of records.filter(record => record.minutes || !analyzed.has(`${record.location}:${record.id}`)).sort((a, b) => savedAt(b).localeCompare(savedAt(a)))) {
@@ -264,7 +271,7 @@ function createMeetingStore(root, validateMinutes, options = {}) {
     },
     saveMeeting(location, data) {
       const file = recordPath(location, data.id);
-      const source = data.recordingId ? recording(location, data.recordingId) : null;
+      const source = data.recordingId ? recording(location, data.recordingId) : data.meetingId ? earlierResult(location, data.meetingId) : null;
       const notes = text(data.notes ?? '', 4000);
       const feedback = data.feedback === undefined || data.feedback === null ? '' : text(data.feedback, 1000).trim();
       const format = meetingFormat(data);
@@ -272,17 +279,17 @@ function createMeetingStore(root, validateMinutes, options = {}) {
       // AI도 제목을 정하지 못해 회의명이 비면 '회의'로 저장한다.
       const content = { id: data.id, title: text(data.title ?? '', 160).trim() || '회의', date: text(data.date, 30),
         participants: text(data.participants, 2000), ...(notes ? { notes } : {}), ...(feedback ? { feedback } : {}), ...formatFields(format), transcript: text(data.transcript, 2000000, true),
-        minutes: validateMinutes(data.minutes), ...(data.recordingId ? { recordingId: data.recordingId } : {}), ...(analysis ? { analysis } : {}) };
+        minutes: validateMinutes(data.minutes), ...(data.recordingId ? { recordingId: data.recordingId } : data.meetingId ? { meetingId: data.meetingId } : {}), ...(analysis ? { analysis } : {}) };
       const fingerprint = createHash('sha256').update(JSON.stringify(content)).digest('hex');
       if (fs.existsSync(file)) {
         const previous = load(location, data.id);
         if (previous.fingerprint !== fingerprint) throw fail(409, '기존 회의 기록은 덮어쓸 수 없습니다. 새 회의로 저장하세요.');
         return previous;
       }
-      const dailySequence = sequenceFor(location, content.date, data.recordingId || data.id);
+      const dailySequence = sequenceFor(location, content.date, groupKey(content));
       const prefix = artifactPrefix({ ...content, dailySequence });
       const artifacts = { transcript: `${prefix}-전사.txt`, summary: `${prefix}-회의록.txt`, response: `${prefix}-요약.json` };
-      // 옛 보관함의 녹음을 다시 분석한 결과에는 그 녹음의 옛 프로젝트 이름을 옮겨 적어 목록 꼬리표가 이어지게 한다.
+      // 옛 보관함의 회의를 다시 분석한 결과에는 그 녹음(또는 녹음 없는 회의의 처음 결과)의 옛 프로젝트 이름을 옮겨 적어 목록 꼬리표가 이어지게 한다.
       const projectName = location !== 'main' && typeof source?.projectName === 'string' && source.projectName ? source.projectName : '';
       const record = { ...content, location, dailySequence, artifacts, ...(projectName ? { projectName } : {}), savedAt: new Date().toISOString(), fingerprint };
       const dir = directory(location);

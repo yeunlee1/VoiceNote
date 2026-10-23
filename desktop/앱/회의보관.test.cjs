@@ -149,6 +149,39 @@ test('옛 보관함 회의를 다시 분석한 결과는 같은 옛 폴더에 lo
   assert.equal((await request('/api/meetings/main', result({ recordingId: old.recordingId }))).status, 404, '다른 보관함의 녹음으로는 저장하지 않는다');
 });
 
+test('녹음 없는 옛 회의를 다시 분석한 결과는 같은 회의로 묶이고 옛 projectName을 옮긴다', async t => {
+  const dir = folder(t);
+  const old = legacyMeeting(dir, 1, { projectName: '홈페이지 개편', dailySequence: 3, recording: false });
+  const request = await start(t, dir);
+  const again = result({ meetingId: old.id, title: '다시 정리한 제목', date: old.record.date });
+  const saved = await request('/api/meetings/p1', again);
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.meeting.meetingId, old.id);
+  assert.equal(saved.body.meeting.projectName, '홈페이지 개편');
+  assert.equal(saved.body.meeting.dailySequence, 3);
+  assert.equal('recordingId' in saved.body.meeting, false);
+  const list = (await request('/api/meetings')).body.meetings;
+  assert.deepEqual(list.map(item => [item.location, item.id, item.projectName]), [['p1', again.id, '홈페이지 개편']]);
+  for (const id of [old.id, again.id])
+    assert.deepEqual((await request(`/api/meetings/p1/${id}`)).body.versions.map(version => version.id), [old.id, again.id]);
+  assert.equal((await request('/api/meetings/p1', result({ meetingId: randomUUID() }))).status, 404);
+  assert.equal((await request('/api/meetings/main', result({ meetingId: old.id }))).status, 404, '다른 보관함의 회의로는 잇지 않는다');
+});
+
+test('본문이 손상돼 열 수 없는 결과는 결과 버전에 넣지 않는다', async t => {
+  const dir = folder(t), request = await start(t, dir);
+  const recordingId = randomUUID();
+  await request(`/api/recordings/main/${recordingId}`, recordingMeta());
+  const good = result({ recordingId });
+  await request('/api/meetings/main', good);
+  const badId = randomUUID();
+  fs.writeFileSync(path.join(dir, '회의기록', `회의-${badId}.json`), JSON.stringify({ id: badId, location: 'main', recordingId, title: '본문 손상', date: '2026-09-30',
+    minutes: { broken: true }, savedAt: '2099-01-01T00:00:00.000Z' }));
+  assert.deepEqual((await request(`/api/meetings/main/${good.id}`)).body.versions.map(version => version.id), [good.id]);
+  assert.equal((await request(`/api/meetings/main/${badId}`)).status, 503);
+  assert.deepEqual((await request('/api/meetings')).body.meetings.map(item => item.id), [good.id]);
+});
+
 test('새 녹음은 main에서만 만든다', async t => {
   const dir = folder(t);
   const old = legacyMeeting(dir, 1);

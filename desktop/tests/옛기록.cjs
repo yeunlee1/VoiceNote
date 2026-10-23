@@ -6,11 +6,19 @@ const { randomUUID, createHash } = require('node:crypto');
 const legacyMinutes = { overview: '옛 회의 요약', topics: [], decisions: ['옛 결정'], actions: [], openQuestions: [] };
 
 // slot번 옛 폴더에 프리셋과 녹음(원음 한 개)을 쓰고, analyzed면 그 녹음의 결과 하나도 쓴다. 기록에는 location이 없고 slot만 있다.
+// recording이 false면 녹음 없이 전사만 붙여 정리한 옛 결과 하나만 쓴다.
 function legacyMeeting(root, slot, options = {}) {
-  const { projectName = '홈페이지 개편', title = '옛 주간 회의', date = '2026-09-01', dailySequence = 1, savedAt = '2026-09-01T09:00:00.000Z', analyzed = true } = options;
+  const { projectName = '홈페이지 개편', title = '옛 주간 회의', date = '2026-09-01', dailySequence = 1, savedAt = '2026-09-01T09:00:00.000Z', analyzed = true, recording = true } = options;
   const dir = path.join(root, `프로젝트-${String(slot).padStart(2, '0')}`);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, '설정.json'), JSON.stringify({ slot, name: projectName, title: '주간 회의', context: '옛 프로젝트 배경', outputFormat: 'meeting', revision: 1 }, null, 2));
+  if (!recording) {
+    const id = randomUUID();
+    const record = { id, title, date, participants: '김과장', context: '옛 프로젝트 배경', transcript: '옛 회의 발언입니다.', minutes: legacyMinutes,
+      slot, dailySequence, artifacts: {}, projectName, savedAt, fingerprint: 'legacy' };
+    fs.writeFileSync(path.join(dir, `회의-${id}.json`), JSON.stringify(record, null, 2));
+    return { dir, id, record };
+  }
   const recordingId = randomUUID();
   const bytes = Buffer.from(`옛 원음 ${recordingId}`);
   const audioFile = `원음-${recordingId}-001.webm`;

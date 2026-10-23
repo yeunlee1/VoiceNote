@@ -57,7 +57,8 @@
     token: "",
     setupOpen: false, historyBusy: false, flowBusy: false, archiveBusy: false,
     // 열린 회의가 든 보관함(main, p1~p3)과 그 녹음 id다. 새 녹음은 언제나 main에 만든다.
-    location: "main", projectName: "", recordingId: null, resultId: null, recordingMetadata: null, audioStored: false, resultStored: false,
+    // 녹음이 서버에 있을 때만 recordingStored가 참이고, 녹음 없이 전사로 만든 회의는 meetingId(처음 결과 id)로 다음 결과를 잇는다.
+    location: "main", projectName: "", recordingId: null, recordingStored: false, meetingId: null, resultId: null, recordingMetadata: null, audioStored: false, resultStored: false,
     keyConfigured: false,
     keySaved: false,
     keyStorageError: "",
@@ -791,6 +792,8 @@
       clearParts();
       resetResult();
       state.recordingId = newOperationId();
+      state.recordingStored = false;
+      state.meetingId = null;
       state.location = "main";
       state.projectName = "";
       state.recordingMetadata = recordingMetadata();
@@ -896,6 +899,8 @@
     resetResult();
     ui["record-state"].textContent = "파일 불러옴";
     state.recordingId = newOperationId();
+    state.recordingStored = false;
+    state.meetingId = null;
     state.location = "main";
     state.projectName = "";
     state.recordingMetadata = null;
@@ -1438,6 +1443,8 @@
     clearParts();
     resetResult();
     state.recordingId = null;
+    state.recordingStored = false;
+    state.meetingId = null;
     state.location = "main";
     state.projectName = "";
     state.recordingMetadata = null;
@@ -1558,6 +1565,8 @@
       clearParts();
       resetResult();
       state.recordingId = null;
+      state.recordingStored = false;
+      state.meetingId = null;
       state.location = "main";
       state.projectName = "";
       state.recordingMetadata = null;
@@ -1623,7 +1632,9 @@
       ui["output-format"].value = outputFormat(meeting.outputFormat);
       ui.transcript.value = meeting.transcript;
       state.parts = parts.map(part => ({ ...part, url: URL.createObjectURL(part.blob) }));
-      state.recordingId = meeting.recordingId || id;
+      state.recordingId = meeting.recordingId || (meeting.minutes ? null : id);
+      state.recordingStored = Boolean(state.recordingId);
+      state.meetingId = state.recordingId ? null : meeting.meetingId || id;
       state.location = location;
       state.projectName = meeting.projectName || "";
       state.recordingMetadata = { title: meeting.title, date: meeting.date, participants: meeting.participants, notes: meeting.notes || "",
@@ -1657,7 +1668,7 @@
     state.archiveBusy = true;
     state.resultId ||= newOperationId();
     refresh();
-    const document = { ...documentObject(), id: state.resultId, ...(state.audioStored ? { recordingId: state.recordingId } : {}) };
+    const document = { ...documentObject(), id: state.resultId, ...(state.recordingStored ? { recordingId: state.recordingId } : state.meetingId ? { meetingId: state.meetingId } : {}) };
     try {
       const saved = await api(`/api/meetings/${state.location}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(document) });
       state.dailySequence = saved.meeting?.dailySequence;
@@ -1684,10 +1695,11 @@
       if (!state.parts.length || state.parts.some(part => !part.blob?.size)) throw new Error("저장할 음성이 없습니다. 마이크와 녹음 시간을 확인하세요.");
       if (!state.audioStored) {
         // 원음은 기본 보관함의 새 녹음으로만 저장한다. 옛 보관함 회의의 원음이 덜 저장돼 있었다면 새 녹음으로 다시 올린다.
-        if (state.location !== "main") { state.recordingId = null; state.location = "main"; state.projectName = ""; }
+        if (state.location !== "main" || !state.recordingId) { state.recordingId = null; state.recordingStored = false; state.meetingId = null; state.location = "main"; state.projectName = ""; }
         state.recordingId ||= newOperationId();
         state.recordingMetadata ||= recordingMetadata();
         await api(`/api/recordings/main/${state.recordingId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...state.recordingMetadata, expectedParts: state.parts.length }) });
+        state.recordingStored = true;
         for (let i = 0; i < state.parts.length; i++) {
           const part = state.parts[i];
           workflow(`음성 저장 중 · ${i + 1}/${state.parts.length}개`);

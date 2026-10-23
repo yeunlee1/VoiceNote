@@ -84,6 +84,22 @@ test('옛 기록을 열고 다시 분석하면 그 보관함 경로로 저장한
   assert.equal(calls.some(url => /\/api\/(meetings|recordings)\/main/.test(url)), false);
 });
 
+test('녹음 없이 전사로만 만든 옛 회의를 다시 분석하면 같은 회의로 이어 저장한다', async () => {
+  const id = crypto.randomUUID();
+  const meeting = { id, location: 'p1', title: '원음 없는 옛 회의', date: '2026-09-01', participants: '', context: '옛 프로젝트 배경', transcript: '옛 전사 원문',
+    minutes: { overview: '옛 요약', topics: [], decisions: [], actions: [], openQuestions: [] }, dailySequence: 1, projectName: '옛 업무' };
+  const { state, ui, openMeeting, summarize, posts, calls } = fixture(null, { [`/api/meetings/p1/${id}`]: { meeting, versions: [] } });
+  state.keyConfigured = true;
+  await openMeeting('p1', id);
+  ui.transcript.value += ' 보완된 전사';
+  assert.equal(await summarize(true), true);
+  const saved = posts.find(post => post.url.startsWith('/api/meetings/'));
+  assert.equal(saved.url, '/api/meetings/p1');
+  assert.equal(saved.body.meetingId, id);
+  assert.equal('recordingId' in saved.body, false);
+  assert.equal(calls.some(url => url.startsWith('/api/recordings/')), false, '없는 녹음에 전사를 저장하지 않는다');
+});
+
 test('회의명 없이 녹음·분석하면 AI 제목으로 저장한다', async () => {
   const { state, ui, summarize, posts } = fixture(() => Response.json({ minutes: { suggestedTitle: 'AI가 정한 제목', overview: '시험', topics: [], decisions: [], actions: [], openQuestions: [] } }));
   state.keyConfigured = true;
