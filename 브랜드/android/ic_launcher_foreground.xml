@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 브랜드/VoiceNote.svg 원본의 V자 음성 막대 다섯 개를 적응형 아이콘 안전 영역(지름 66dp) 안에 옮긴 전경이다. 배경 사각형 없음. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+  <group android:scaleX="0.9" android:scaleY="0.9" android:translateX="25.2" android:translateY="25.2">
+    <path android:pathData="M10,8.5V24.5M54,8.5V24.5M21,18.5V40.5M43,18.5V40.5" android:strokeColor="#0F7A72" android:strokeWidth="6.5" android:strokeLineCap="round"/>
+    <path android:pathData="M32,29.5V55.5" android:strokeColor="#22B5A6" android:strokeWidth="6.5" android:strokeLineCap="round"/>
+  </group>
+</vector>

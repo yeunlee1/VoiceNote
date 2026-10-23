@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="VoiceNote">
+  <!-- VoiceNote 앱 심볼 원본: 다섯 음성 막대의 위·아래 끝이 V자를 이룬다. 배경 없음(투명). -->
+  <g fill="none" stroke-linecap="round" stroke-width="6.5">
+    <path d="M10 8.5V24.5M54 8.5V24.5M21 18.5V40.5M43 18.5V40.5" stroke="#0F7A72"/>
+    <path d="M32 29.5V55.5" stroke="#22B5A6"/>
+  </g>
+</svg>

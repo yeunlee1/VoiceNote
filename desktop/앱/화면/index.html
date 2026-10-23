@@ -1,0 +1,257 @@
+<!-- 프로젝트별로 회의를 준비하고 녹음·분석한 기록을 보관하는 VoiceNote 작업실 화면. -->
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VoiceNote</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cg%20fill%3D%22none%22%20stroke-linecap%3D%22round%22%20stroke-width%3D%226.5%22%3E%3Cpath%20d%3D%22M10%208.5V24.5M54%208.5V24.5M21%2018.5V40.5M43%2018.5V40.5%22%20stroke%3D%22%230F7A72%22%2F%3E%3Cpath%20d%3D%22M32%2029.5V55.5%22%20stroke%3D%22%2322B5A6%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E" />
+<link rel="stylesheet" href="./app.css" />
+<script src="./ai-usage.js" defer></script>
+<script src="./formats.js" defer></script>
+<script src="./app.js" defer></script>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="app-symbol" viewBox="0 0 64 64"><g fill="none" stroke-linecap="round" stroke-width="6.5"><path d="M10 8.5V24.5M54 8.5V24.5M21 18.5V40.5M43 18.5V40.5" stroke="#0F7A72"/><path d="M32 29.5V55.5" stroke="#22B5A6"/></g></symbol>
+  <symbol id="i-prepare" viewBox="0 0 24 24"><path d="M9 4.75h6M9 3.5h6a1 1 0 0 1 1 1v.5a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-.5a1 1 0 0 1 1-1ZM8 4.75H6.5a1.5 1.5 0 0 0-1.5 1.5v13.25a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V6.25a1.5 1.5 0 0 0-1.5-1.5H16M8.5 11h7M8.5 14.5h7M8.5 18h4"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 3.5a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0v-5a3 3 0 0 1 3-3ZM6 11a6 6 0 0 0 12 0M12 17v3.5M9 20.5h6"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4"/></symbol>
+  <symbol id="i-document" viewBox="0 0 24 24"><path d="M7 3.5h7l4.5 4.5v11a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5ZM14 3.5V8h4.5M9 12.5h6M9 16h6"/></symbol>
+  <symbol id="i-retry" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 0 1 13-5.1L19.5 9M19.5 4.5V9H15M19.5 12a7.5 7.5 0 0 1-13 5.1L4.5 15M4.5 19.5V15H9"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7A1.5 1.5 0 0 1 5 5.5h4l2 2h8A1.5 1.5 0 0 1 20.5 9v9a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18Z"/></symbol>
+  <symbol id="i-eraser" viewBox="0 0 24 24"><path d="M9 20h11M5.3 14.7l8.4-8.4a1.5 1.5 0 0 1 2.1 0l3.4 3.4a1.5 1.5 0 0 1 0 2.1L12 19.9H8.5l-3.2-3.1a1.5 1.5 0 0 1 0-2.1ZM9.5 10.5l5.5 5.5"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3.5v8M7.2 6.5a7 7 0 1 0 9.6 0"/></symbol>
+  <symbol id="i-cancel" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9 9l6 6M15 9l-6 6"/></symbol>
+</svg>
+<a class="skip-link" href="#main">본문으로 이동</a>
+<header class="topbar">
+  <div class="wordmark"><svg class="app-symbol" aria-hidden="true" focusable="false"><use href="#app-symbol"/></svg><strong>VoiceNote</strong></div>
+  <p class="topbar-project"><span class="topbar-label">현재 프로젝트</span><span id="header-project">불러오는 중</span></p>
+  <button id="open-ai-settings" class="ai-chip" type="button" aria-haspopup="dialog" aria-controls="ai-settings"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-sliders"/></svg><span>AI 설정</span><span id="ai-status-label" class="ai-chip-state">확인 중</span></button>
+</header>
+
+<div class="workbench">
+<nav class="rail" aria-label="프로젝트와 지난 회의">
+  <section class="rail-section" aria-labelledby="projects-heading">
+    <h2 id="projects-heading" class="rail-heading">프로젝트</h2>
+    <div id="project-presets" class="project-list" role="group" aria-label="프로젝트 프리셋, 최대 3개"></div>
+    <div class="settings-transfer" role="group" aria-label="프로젝트 설정 파일">
+      <button id="export-settings" class="tool-button" type="button">설정 내보내기</button>
+      <button id="import-settings" class="tool-button" type="button" aria-haspopup="dialog">설정 불러오기</button>
+      <input id="settings-file" type="file" accept="application/json,.json" hidden />
+    </div>
+  </section>
+  <section class="rail-section rail-history" aria-labelledby="history-title">
+    <h2 id="history-title" class="rail-heading">지난 회의</h2>
+    <p id="history-status" class="rail-meta">선택한 프로젝트의 회의입니다.</p>
+    <div id="meeting-history" class="history-list"></div>
+  </section>
+  <section class="rail-section rail-tools" aria-label="작업 도구">
+    <button id="open-data-folder" type="button" class="tool-button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg>회의자료 폴더 열기</button>
+    <button id="clear" class="tool-button" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-eraser"/></svg>현재 화면 비우기</button>
+    <button id="shutdown" class="tool-button" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-power"/></svg>도구 종료</button>
+    <p class="rail-meta">화면을 비워도 보관된 회의와 원음은 지워지지 않습니다.</p>
+  </section>
+</nav>
+
+<main id="main" class="desk" tabindex="-1">
+  <div class="desk-head">
+    <p id="selected-project" class="desk-project">프로젝트를 불러오는 중입니다.</p>
+    <a class="mobile-jump" href="#projects-heading">프로젝트·지난 회의 목록으로 이동</a>
+    <h1 id="meeting-heading" class="desk-title">새 회의</h1>
+    <ol id="stage" class="stage" aria-label="회의 진행 단계">
+      <li data-stage="prepare"><span class="stage-mark" aria-hidden="true"></span>준비</li>
+      <li data-stage="record"><span class="stage-mark" aria-hidden="true"></span>녹음</li>
+      <li data-stage="analyze"><span class="stage-mark" aria-hidden="true"></span>분석</li>
+      <li data-stage="done"><span class="stage-mark" aria-hidden="true"></span>완료</li>
+    </ol>
+  </div>
+
+  <section class="sheet" aria-labelledby="prepare-heading">
+    <h2 id="prepare-heading" class="visually-hidden">회의 준비</h2>
+    <div class="sheet-prepare">
+    <button id="prepare" class="button button-outline prepare-button" type="button" aria-expanded="false" aria-controls="meeting-setup"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-prepare"/></svg>회의 준비</button>
+    <fieldset class="consents">
+      <legend class="visually-hidden">회의 시작 전 동의</legend>
+      <label class="check-row"><input id="record-consent" type="checkbox" /><span>참석자의 녹음 동의를 확인했습니다.</span></label>
+      <label class="check-row"><input id="ai-consent" type="checkbox" /><span>회의 종료 후 원음과 전사를 외부 AI로 보내 분석하는 데 동의합니다. 길이 한도에 걸리면 나눠서 최대 6회 추가 요청하며 API 사용료가 발생합니다.</span></label>
+    </fieldset>
+
+    <div id="meeting-setup" class="setup" hidden>
+      <div class="field-grid">
+        <label class="field">프로젝트 이름<input id="project-name" maxlength="100" placeholder="예. 홈페이지 개편" autocomplete="off" /></label>
+        <label class="field">회의명<input id="title" maxlength="160" autocomplete="off" /></label>
+        <label class="field">회의 날짜<input id="date" type="date" /></label>
+        <div class="field">
+          <label for="output-format">출력 형식</label>
+          <div class="format-row">
+            <select id="output-format"><option value="meeting">회의록</option><option value="summary">핵심 요약</option><option value="tasks">업무 정리</option><option value="custom">내 형식</option></select>
+            <button id="format-help" class="button button-quiet" type="button" aria-expanded="false" aria-controls="format-example">예시 보기</button>
+          </div>
+        </div>
+        <section id="format-example" class="format-example field-wide" aria-labelledby="format-example-title" hidden>
+          <h3 id="format-example-title" class="format-example-title">회의록 예시</h3>
+          <p id="format-example-text" class="fine-print"></p>
+          <div id="custom-editor" class="custom-editor" hidden>
+            <label class="field">형식 이름<input id="custom-name" maxlength="30" placeholder="예. 주간 보고" autocomplete="off" /></label>
+            <fieldset class="custom-sections">
+              <legend>들어갈 항목과 순서 <span class="field-note">체크한 항목만 위에서부터 이 순서로 나옵니다</span></legend>
+              <ol id="custom-section-list"></ol>
+            </fieldset>
+            <label class="field">AI에게 줄 추가 지시 <span class="field-note">선택 · 1,000자 이내</span><textarea id="custom-instruction" rows="3" maxlength="1000" placeholder="예. 할 일은 부서별로 묶고, 숫자는 표처럼 정리해 주세요."></textarea></label>
+            <div class="button-row">
+              <button id="custom-save" class="button button-outline" type="button">내 형식 저장</button>
+              <button id="custom-delete" class="button button-quiet" type="button">내 형식 삭제</button>
+            </div>
+            <p id="custom-status" class="fine-print" role="status"></p>
+          </div>
+          <div id="format-example-body" class="minutes-content format-example-body" aria-label="예시 결과"></div>
+        </section>
+        <label class="field field-wide">참석자<input id="participants" maxlength="1000" placeholder="이름 또는 팀" autocomplete="off" /></label>
+        <label class="field field-wide">상세 회의내용 <span class="field-note">이번 회의의 안건·배경 메모</span><textarea id="meeting-notes" rows="5" maxlength="4000" aria-describedby="notes-help" placeholder="예. 1) 표준 양식 확정 범위 2) 개발 순서 3) 담당자 정하기"></textarea></label>
+      </div>
+      <p id="notes-help" class="fine-print">상세 회의내용은 이 회의에만 저장되고, 요약할 때 사전 참고 자료로만 전달됩니다. 회의에서 확정된 사실로 취급하지 않습니다.</p>
+      <details class="preset-details">
+        <summary>프로젝트 설명과 회의 정리 기준 (프리셋)</summary>
+        <label class="field">프로젝트 설명과 회의 정리 기준<textarea id="meeting-context" rows="5" maxlength="4000" aria-describedby="context-help"></textarea></label>
+        <p id="context-help" class="fine-print">프로젝트 이름·회의명·설명은 프리셋에 저장되어 다음 회의에도 불러옵니다. 출력 형식은 회의마다 고르고, 프로젝트별로 마지막에 고른 형식을 기억합니다.</p>
+      </details>
+      <div class="button-row">
+        <button id="save-preset" class="button button-quiet" type="button">프리셋 저장</button>
+        <button id="delete-preset" class="button button-quiet" type="button">프로젝트 삭제</button>
+        <button id="microphone-volume" class="button button-quiet" type="button">마이크 음량 100% 설정</button>
+        <button id="setup-close" class="button button-quiet" type="button">준비 내용 접기</button>
+      </div>
+      <p id="microphone-status" class="fine-print" role="status">Windows 기본 마이크를 100%로 설정하고 음소거를 해제합니다.</p>
+    </div>
+    </div>
+
+    <div class="sheet-run">
+    <div class="console" aria-labelledby="record-title">
+      <div class="console-head">
+        <h2 id="record-title" class="console-title">녹음</h2>
+        <span id="record-state" class="state-pill">대기</span>
+      </div>
+      <div class="console-body">
+        <span id="timer" class="timer" role="timer" aria-label="녹음 시간">00:00</span>
+        <div class="meter-wrap">
+          <div class="meter-track" role="meter" aria-label="마이크 음량" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="level-meter"><span id="level-fill"></span></div>
+          <span id="audio-size" class="size-label">0 MB / 22 MB</span>
+        </div>
+      </div>
+      <div class="console-actions">
+        <button id="start" class="button button-record" type="button" disabled aria-describedby="start-hint"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-mic"/></svg>회의 시작</button>
+        <button id="stop" class="button button-stop" type="button" disabled hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-stop"/></svg>회의 종료</button>
+        <button id="cancel-permission" class="button button-quiet" type="button" hidden>허가 요청 취소</button>
+      </div>
+      <div id="start-hint" class="start-hint" aria-live="polite"></div>
+    </div>
+
+    <div class="progress-block">
+      <p id="workflow-status" class="workflow-status" role="status" aria-live="polite">프로젝트를 고르고 ‘회의 준비’를 누르세요.</p>
+      <div class="button-row">
+        <button id="retry-analysis" class="button button-outline" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-retry"/></svg>저장·분석 다시 시도</button>
+        <button id="cancel-ai" class="button button-quiet" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-cancel"/></svg>분석 취소</button>
+        <button id="open-result" class="button button-primary" type="button" aria-haspopup="dialog" aria-controls="meeting-detail" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-document"/></svg><span id="open-result-label">회의록 보기</span></button>
+      </div>
+    </div>
+
+    <ol id="audio-parts" class="audio-parts" aria-label="녹음 파일 목록"></ol>
+    <p class="fine-print">긴 회의는 파일당 약 59분 또는 22MB에서 나눠 녹음합니다. 회의 종료 후 모든 파일을 저장한 다음 분석합니다. 녹음 중에는 창을 닫지 마세요.</p>
+    <details class="import-details"><summary>기존 음성 파일로 회의록 만들기</summary><label class="file-pick">원음 불러오기<input id="audio-file" type="file" multiple accept="audio/webm,audio/mp4,audio/wav,.webm,.m4a,.mp4,.wav" /></label></details>
+    </div>
+  </section>
+</main>
+</div>
+
+<dialog id="meeting-detail" class="modal modal-wide modal-page" aria-labelledby="detail-title">
+  <div class="modal-head">
+    <div>
+      <p id="detail-meta" class="modal-meta"></p>
+      <h2 id="detail-title" class="modal-title">회의 기록</h2>
+    </div>
+    <button class="icon-button" type="button" data-close aria-label="회의 기록 닫기"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
+  </div>
+  <div class="modal-body result-page">
+    <div class="result-bar">
+      <div class="result-tabs" role="tablist" aria-label="회의 결과">
+        <button id="tab-minutes" class="result-tab" type="button" role="tab" aria-selected="true" aria-controls="panel-minutes">정리본</button>
+        <button id="tab-transcript" class="result-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-transcript" tabindex="-1">전사문</button>
+      </div>
+      <div class="result-actions">
+        <button id="copy-result" class="button button-primary" type="button">회의록 복사</button>
+        <button id="share-result" class="button button-outline" type="button" hidden>공유</button>
+        <button id="save-result" class="button button-outline" type="button">텍스트 파일로 저장</button>
+      </div>
+    </div>
+    <p id="result-status" class="fine-print" role="status"></p>
+    <section id="panel-minutes" class="result-panel" role="tabpanel" aria-labelledby="tab-minutes">
+      <p id="archive-status" class="fine-print" role="status">분석이 끝나면 선택한 프로젝트에 자동 저장됩니다.</p>
+      <button id="save-archive" class="button button-outline" type="button" disabled>프로젝트 저장 다시 시도</button>
+      <div id="minutes" class="minutes-content"></div>
+      <details class="result-more">
+        <summary>AI 사용량 · 다른 형식으로 저장</summary>
+        <section class="usage" aria-labelledby="usage-title">
+          <h3 id="usage-title">AI 사용량 · 이 회의 누적</h3>
+          <p id="usage-help" class="fine-print">이 회의에서 보낸 전사·요약 요청을 재분석과 실패한 요청까지 모델별로 합산합니다. 다시 분석한 결과는 새 기록으로 저장되고, 이전 결과와 그때의 사용량 기록은 지난 회의 목록에 그대로 남습니다.</p>
+          <div id="usage" class="usage-table" aria-describedby="usage-help"></div>
+        </section>
+        <div class="button-row">
+          <button id="download-md" class="button button-quiet" type="button" disabled>Markdown 저장</button>
+          <button id="download-txt" class="button button-quiet" type="button" disabled>텍스트 저장</button>
+          <button id="download-json" class="button button-quiet" type="button" disabled>JSON 저장</button>
+        </div>
+      </details>
+    </section>
+    <section id="panel-transcript" class="result-panel" role="tabpanel" aria-labelledby="tab-transcript" hidden>
+      <p id="transcript-meta" class="fine-print"></p>
+      <div id="transcript-view" class="transcript-view"></div>
+      <details id="transcript-details"><summary>전사 고치기 · 다시 분석</summary>
+        <span id="transcript-count" class="section-meta">0자</span>
+        <label class="field transcript-field">전사 원문<textarea id="transcript" rows="12" placeholder="회의 종료 후 인식한 글이 표시됩니다."></textarea></label>
+        <div class="button-row"><button id="save-transcript" class="button button-quiet" type="button">전사 원문 저장</button><button id="transcribe" class="button button-outline" type="button" disabled>원음 전사</button><button id="summarize" class="button button-outline" type="button" disabled>입력한 전사로 다시 분석</button></div>
+        <p id="stale-notice" class="notice" hidden>입력이 바뀌었습니다. 다시 분석하면 새 회의록으로 보관합니다.</p>
+      </details>
+    </section>
+  </div>
+</dialog>
+
+<dialog id="ai-settings" class="modal" aria-labelledby="ai-settings-title">
+  <div class="modal-head">
+    <h2 id="ai-settings-title" class="modal-title">AI 설정</h2>
+    <button class="icon-button" type="button" data-close aria-label="AI 설정 닫기"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
+  </div>
+  <div class="modal-body">
+    <p id="key-state" class="key-state" role="status">연결 확인 중</p>
+    <form id="key-form" class="key-form" autocomplete="off">
+      <label class="field">API 키<input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="새 키를 붙여넣으세요" /></label>
+      <label class="check-row"><input id="persist-key" type="checkbox" checked /><span>이 PC에 키 저장 (사용자 폴더에 평문 저장, 회의 자료를 전달할 때 키 파일은 제외하세요)</span></label>
+      <div class="button-row"><button id="save-key" class="button button-primary" type="submit">키 등록·변경</button><button id="remove-key" class="button button-danger-quiet" type="button">키 삭제</button></div>
+    </form>
+    <div class="model-block">
+      <label class="field">요약 모델<select id="summary-model" aria-describedby="model-help"></select></label>
+      <p id="model-help" class="fine-print">서버가 제공하는 모델 목록을 불러오는 중입니다.</p>
+    </div>
+    <p id="settings-lock" class="notice" hidden>녹음이나 분석 중에는 AI 설정을 바꿀 수 없습니다.</p>
+  </div>
+</dialog>
+
+<dialog id="settings-import" class="modal" aria-labelledby="settings-import-title">
+  <div class="modal-head">
+    <h2 id="settings-import-title" class="modal-title">설정 파일 불러오기</h2>
+    <button class="icon-button" type="button" data-close aria-label="설정 불러오기 취소"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
+  </div>
+  <div class="modal-body">
+    <p id="settings-import-file" class="fine-print"></p>
+    <ol id="settings-preview" class="settings-preview" aria-label="불러올 프로젝트 1번부터 9번"></ol>
+    <p class="notice">현재 프로젝트 설정(최대 3개)을 모두 이 파일 내용으로 바꿉니다. 저장된 회의와 녹음은 지우지 않습니다.</p>
+    <div class="button-row"><button id="confirm-import" class="button button-primary" type="button">설정 교체</button><button class="button button-quiet" type="button" data-close>취소</button></div>
+  </div>
+</dialog>
+
+<div id="status" class="status-toast" role="status" aria-live="polite"></div>
+</body>
+</html>

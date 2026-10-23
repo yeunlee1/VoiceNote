@@ -1,0 +1,11 @@
+bin/
+obj/
+회의자료/
+화면캐시/
+.env*
+*.exe
+*.dll
+*.pdb
+*.apk
+*.p12
+personal.key

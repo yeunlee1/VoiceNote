@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 적응형 아이콘에 배경층 자리가 필요해 완전 투명색만 둔다. 앱은 불투명 배경을 넣지 않으며, 모양 자르기와 바탕은 기기 런처가 정한다. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle"><solid android:color="#00000000"/></shape>

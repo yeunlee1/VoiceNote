@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="VoiceNote">
+  <!-- VoiceNote 심볼의 16·24·32px용 단순형: 막대 셋으로 같은 V 실루엣을 유지하고 16·32px 픽셀 격자에 맞춘다. 배경 없음(투명). -->
+  <g fill="none" stroke-linecap="round" stroke-width="8">
+    <path d="M12 12V28M52 12V28" stroke="#0F7A72"/>
+    <path d="M32 24V52" stroke="#22B5A6"/>
+  </g>
+</svg>

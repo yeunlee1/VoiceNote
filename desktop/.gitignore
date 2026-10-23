@@ -1,0 +1,9 @@
+bin/
+obj/
+회의자료/
+화면캐시/
+.env*
+*.exe
+*.dll
+*.pdb
+앱/기본키.json
