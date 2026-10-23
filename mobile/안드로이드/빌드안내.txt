@@ -25,7 +25,8 @@ DefaultKeyFile은 apiKey 속성이 있는 JSON 파일입니다. 기본값은 빈
 
 설정 파일
 
-설치본의 초기 프로젝트 설정(assets/preset.json)은 빈값입니다. 이전 버전에서 명시적으로 저장한 설정.json은 그대로 읽고, 출력 형식 값이 없으면 회의록으로 봅니다. 프로젝트는 처음 1개로 시작해 최대 3개까지 추가하고, 회의 기록이 없는 프로젝트만 삭제할 수 있습니다. 이전 버전의 4~9번 폴더는 지우지 않고 읽지도 않습니다. 프로젝트 창의 설정 파일에서 저장된 설정만 데스크톱과 같은 형식(voicenote-project-settings, version 1, 9칸 중 4~9번은 빈칸)으로 내보내고, 4~9번에 내용이 있는 파일은 불러오지 않습니다. 불러오기는 128KiB 이하 UTF-8 파일을 쓰기 전에 모두 검증하고, 미리보기에서 전체 교체를 확인해야만 저장하며, 저장 중 실패하면 이전 설정으로 되돌립니다. 회의 기록과 녹음은 건드리지 않습니다.
+1.3.0부터 프로젝트가 없습니다. 새 회의는 기본 보관함에 쌓이고, 1.2.0까지의 프로젝트-01~03 폴더에 있던 회의는 지우지 않고 지난 회의 목록에 함께 보여 줍니다.
+설정 파일은 Windows와 같은 2판 형식(voicenote-settings, version 2)으로 요약 모델·기본 출력 형식·내 형식을 내보냅니다. Android는 저장 위치(storage)를 내보내지 않고, Windows에서 만든 파일의 storage 칸은 읽기만 하고 적용하지 않습니다. 불러오기는 128KiB 이하 UTF-8 파일을 쓰기 전에 모두 검증하고, 저장 중 하나라도 실패하면 요약 모델·기본 출력 형식·내 형식을 이전 값으로 함께 되돌립니다. 파일의 내 형식이 null이면 지금 내 형식을 지웁니다. 1.2.0까지의 프로젝트 설정 파일(voicenote-project-settings 1판)은 "이전 버전의 프로젝트 설정 파일입니다. 프로젝트 기능이 없어져 불러올 수 없습니다."라고 알리고 아무것도 바꾸지 않습니다. 회의 기록과 녹음은 건드리지 않습니다.
 
 서명
 
@@ -33,8 +34,8 @@ DefaultKeyFile은 apiKey 속성이 있는 JSON 파일입니다. 기본값은 빈
 
 검증
 
-- node --test tests/*.test.cjs : 시작 조건, 출력 형식 화면 구성, 체험 표시, 모델 목록, 데스크톱 설정 교환 모듈과의 판정·왕복 비교(JDK 필요)
-- tests/SettingsExchangeTest.java, tests/TextChunksTest.java, tests/TrialAccessTest.java : 해당 소스와 함께 javac로 컴파일해 실행
+- node --test tests/*.test.cjs : 시작 조건, 화면 흐름, 출력 형식 화면 구성, 체험 표시, 모델 목록, 내 형식 판정, Windows 설정 파일 모듈(desktop\앱\설정파일.cjs)과의 판정·왕복 비교(JDK 필요)
+- tests/SettingsFileTest.java, tests/CustomFormatTest.java, tests/TextChunksTest.java, tests/TrialAccessTest.java, tests/AiUsageTest.java, tests/AiResponseModelTest.java : java.*만 쓰는 클래스를 해당 소스와 함께 하나씩 javac로 컴파일해 실행합니다. tests/*.java를 한꺼번에 컴파일하지 않습니다. android.jar의 org.json은 JVM에서 동작하지 않으므로 JSONObject·Context를 쓰는 Store·Ai 등은 AndroidChecks가 기기에서 확인합니다.
 - node tests/화면검증-브라우저.cjs <캡처폴더> : 헤드리스 Chrome 화면 검사
 - AndroidChecks.java는 DebugBuild에만 포함됩니다. 검증 전용 가상기기에 설치한 뒤 실행합니다.
 
@@ -42,4 +43,4 @@ DefaultKeyFile은 apiKey 속성이 있는 JSON 파일입니다. 기본값은 빈
 
 가상기기는 도구 경로에 한글이 있으면 부팅 중 멈춥니다. C:\vn-emu\sdk(SDK 정션)와 C:\vn-emu\phone.avd(가상기기 정션)처럼 영어 경로로 연결해 실행합니다. 예: $env:ANDROID_SDK_ROOT='C:\vn-emu\sdk'; C:\vn-emu\sdk\emulator\emulator.exe -avd VoiceNotePhone -no-metrics
 
-이 검증은 프로젝트 03에 시험 기록을 만들고, 프로젝트 설정과 저장된 키는 시험 뒤 되돌립니다. 실제 사용자 휴대폰 대신 검증 전용 가상기기에서 실행합니다. 실제 API 호출은 없습니다.
+이 검증은 앱 캐시 아래의 시험 폴더(task10-*)에 시험 기록을 만들고 앱의 회의자료 폴더는 건드리지 않습니다. 앱 설정 값은 바꿀 수 있으므로 실제 사용자 휴대폰 대신 검증 전용 가상기기에서 실행합니다. 실제 API 호출은 없습니다.
