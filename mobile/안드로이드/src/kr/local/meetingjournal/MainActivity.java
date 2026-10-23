@@ -91,6 +91,16 @@ public final class MainActivity extends Activity {
                 fileIdle();store.requireAccess();
                 String meetingId=data.getString("id");store.load(location,meetingId);launch(id,"analyze",location,meetingId);break;
             }
+            case "refine":{
+                if(MeetingService.active)throw new IOException("진행 중인 회의가 있습니다.");
+                fileIdle();store.requireAccess();String meetingId=data.getString("id"),resultId=nullableString(data,"resultId"),feedback=Ai.checkedFeedback(data.opt("feedback"));
+                JSONObject selected=store.result(location,meetingId,resultId);
+                if(selected.optJSONObject("minutes")==null)throw new IOException("정리된 결과에만 의견을 반영할 수 있습니다.");
+                File transcript=new File(store.directory(location,meetingId),"전사.txt");
+                if(!transcript.isFile()||JsonText.trim(Store.read(transcript)).isEmpty())throw new IOException("저장된 전사가 없어 의견을 반영할 수 없습니다.");
+                Intent request=new Intent(this,MeetingService.class).setAction("refine").putExtra("location",location).putExtra("id",meetingId).putExtra("resultId",selected.getString("resultId")).putExtra("feedback",feedback);
+                runOnUiThread(()->{try{startForegroundService(request);answer(id,new JSONObject().put("id",meetingId),null);}catch(Exception ex){answer(id,null,"의견 반영 서비스를 시작하지 못했습니다. 다시 시도하세요.");}});break;
+            }
             case "open":{
                 String meetingId=data.getString("id");JSONObject record=store.result(location,meetingId,nullableString(data,"resultId"));
                 File transcript=new File(store.directory(location,meetingId),"전사.txt");String resultId=record.optString("resultId",null);

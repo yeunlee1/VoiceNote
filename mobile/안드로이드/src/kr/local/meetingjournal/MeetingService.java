@@ -15,7 +15,7 @@ public final class MeetingService extends Service {
     static volatile boolean active=false;
     private Store store; private JSONObject record; private MediaRecorder recorder; private PowerManager.WakeLock wake;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
-    private boolean analyzing=false; private File audioFile;
+    private boolean analyzing=false,refining=false; private File audioFile;
     @Override public void onCreate(){super.onCreate();store=new Store(this);getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel("meeting","회의 녹음과 분석",NotificationManager.IMPORTANCE_LOW));}
     @Override public IBinder onBind(Intent intent){return null;}
     @Override public int onStartCommand(Intent intent,int flags,int startId){
@@ -24,10 +24,10 @@ public final class MeetingService extends Service {
         try{
             if("finish".equals(action)){if(recorder!=null){stopAudio();analyze();}else if(!active)stopSelf();return START_NOT_STICKY;}
             if(active)return START_NOT_STICKY;
-            record=store.load(intent.getStringExtra("location"),intent.getStringExtra("id"));analyzing="analyze".equals(action);active=true;
+            record=store.load(intent.getStringExtra("location"),intent.getStringExtra("id"));refining="refine".equals(action);analyzing=refining||"analyze".equals(action);active=true;
             show(analyzing?"회의록 분석 준비 중":"회의 녹음 중",!analyzing);
             wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"MeetingJournal:work");wake.acquire(4*60*60*1000L);
-            if(analyzing)analyze();else startAudio();
+            if(refining)refine(intent.getStringExtra("resultId"),intent.getStringExtra("feedback"));else if(analyzing)analyze();else startAudio();
         }catch(Exception ex){fail(ex);}
         return START_NOT_STICKY;
     }
@@ -37,7 +37,7 @@ public final class MeetingService extends Service {
         if(microphone){PendingIntent finish=PendingIntent.getService(this,1,new Intent(this,MeetingService.class).setAction("finish"),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);builder.addAction(new Notification.Action.Builder(null,"회의 종료 · 분석",finish).build());}
         if(Build.VERSION.SDK_INT>=29)startForeground(10,builder.build(),microphone?ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE:ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);else startForeground(10,builder.build());
     }
-    private void status(String state,String message) throws Exception {record.put("state",state).put("message",message);store.save(record);snapshot=record.toString();}
+    private void status(String state,String message) throws Exception {record.put("state",state).put("message",message);if(!refining)store.save(record);snapshot=record.toString();}
     private void startAudio() throws Exception {
         JSONArray audio=record.getJSONArray("audio");String name=String.format(Locale.ROOT,"원음-%03d.m4a",audio.length()+1);audioFile=new File(store.directory(Store.location(record),record.getString("id")),name);
         recorder=new MediaRecorder();recorder.setAudioSource(MediaRecorder.AudioSource.MIC);recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);recorder.setAudioChannels(1);recorder.setAudioSamplingRate(24000);recorder.setAudioEncodingBitRate(64000);recorder.setOutputFile(audioFile.getAbsolutePath());recorder.setMaxDuration(20*60*1000);recorder.setMaxFileSize(22*1024*1024);
@@ -54,6 +54,10 @@ public final class MeetingService extends Service {
     private void analyze() throws Exception {
         analyzing=true;show("회의록 분석 중",false);status("analyzing","음성 저장 완료 · 분석을 시작합니다.");
         worker.submit(()->{try{new Ai(store,message->{status("analyzing",message);show(message,false);}).run(record);snapshot=record.toString();}catch(Exception ex){try{status("failed",safeMessage(ex));}catch(Exception ignored){}}finally{active=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}});
+    }
+    private void refine(String resultId,String feedback)throws Exception {
+        show("의견 반영 중",false);status("analyzing","저장된 전사로 의견을 반영합니다.");
+        worker.submit(()->{try{new Ai(store,message->{status("analyzing",message);show(message,false);}).refine(record,resultId,feedback);snapshot=record.toString();}catch(Exception ex){try{status("failed",safeMessage(ex));}catch(Exception ignored){}}finally{active=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}});
     }
     static String safeMessage(Exception ex){
         if(ex instanceof java.net.UnknownHostException||ex instanceof java.net.ConnectException||ex instanceof java.net.NoRouteToHostException)return "인터넷에 연결할 수 없습니다. 연결을 확인한 뒤 지난 회의에서 다시 분석하세요. 녹음은 저장되어 있습니다.";

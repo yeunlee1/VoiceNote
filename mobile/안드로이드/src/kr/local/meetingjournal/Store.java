@@ -277,7 +277,7 @@ final class Store {
         synchronized(Store.class){
             if(feedback!=null&&feedback.length()>1000)throw new IOException("의견은 1,000자 이하로 입력하세요.");
             String location=location(record),id=record.getString("id");File dir=directory(location,id);preserveLegacy(location,id);
-            // 입력·쓰기 실패가 서비스의 현재 결과를 망가뜨리지 않게 사본을 완성한 뒤 호출자에 돌려준다.
+            // 최신 포인터를 발행하기 전에는 입력·쓰기 실패가 호출자의 현재 결과를 바꾸지 않는다.
             JSONObject next=new JSONObject(record.toString());next.remove("minutes");
             String title=minutes.optString("suggestedTitle","").trim();if(title.isEmpty())title=next.optString("title","").trim();if(title.isEmpty())title="회의";
             long version=System.currentTimeMillis();while(new File(dir,"결과-"+version+".json").exists())version++;
@@ -285,11 +285,11 @@ final class Store {
             if(feedback!=null&&!feedback.trim().isEmpty())next.put("feedback",feedback);else next.remove("feedback");
             JSONObject snapshot=new JSONObject(next.toString()).put("minutes",new JSONObject(minutes.toString()));
             write(new File(dir,"결과-"+version+".json"),snapshot.toString(2));
-            write(new File(dir,"요약.json"),minutes.toString(2));write(new File(dir,"회의록.txt"),format(next,minutes));
-            // 보존은 위에서 이미 끝냈다. 새 요약을 옛 요약으로 다시 보존하지 않는다.
             write(new File(dir,"회의정보.json"),next.toString(2));
+            // 실제 결과와 최신 포인터를 먼저 확정한다. 부속 파일 쓰기가 실패해도 새 요약을 가짜 옛 결과로 읽지 않는다.
             List<String> oldKeys=new ArrayList<>();for(Iterator<String> keys=record.keys();keys.hasNext();)oldKeys.add(keys.next());for(String key:oldKeys)record.remove(key);
             for(Iterator<String> keys=next.keys();keys.hasNext();){String key=keys.next();record.put(key,next.get(key));}
+            write(new File(dir,"요약.json"),minutes.toString(2));write(new File(dir,"회의록.txt"),format(next,minutes));
         }
     }
     static String meetingFormat(JSONObject record){
