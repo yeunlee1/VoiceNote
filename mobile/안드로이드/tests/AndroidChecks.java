@@ -18,7 +18,6 @@ public final class AndroidChecks extends Instrumentation {
     static void expect(boolean value,String label){if(!value)throw new AssertionError(label);checks++;}
     static JSONObject minutes()throws Exception{return new JSONObject().put("suggestedTitle","표준 문서 구현 준비").put("overview","전체 방향 | 제조지시서를 먼저 구현합니다.\n주요 결정 | 기존 DB를 사용합니다.").put("topics",new JSONArray().put(new JSONObject().put("title","문서 연결").put("points",new JSONArray().put("생산 중 문서를 반복해서 확인하므로 이동을 단순하게 합니다.")))).put("decisions",new JSONArray().put("기존 DB 활용")).put("actions",new JSONArray().put(new JSONObject().put("task","화면 기획").put("owner",JSONObject.NULL).put("due",JSONObject.NULL))).put("openQuestions",new JSONArray().put("탭 방식은 미정"));}
     static String completed()throws Exception{return new JSONObject().put("status","completed").put("output",new JSONArray().put(new JSONObject().put("type","message").put("content",new JSONArray().put(new JSONObject().put("type","output_text").put("text",minutes().toString()))))).toString();}
-    static String[] settingsFiles(Store store)throws Exception{String[] all=new String[SettingsExchange.MAX_PROJECTS];for(int i=0;i<SettingsExchange.MAX_PROJECTS;i++){File f=new File(store.project(i+1),"설정.json");all[i]=f.exists()?Store.read(f):null;}return all;}
     static int meetingFiles(File dir){int n=0;File[] items=dir.listFiles();if(items!=null)for(File f:items)n+=f.isDirectory()?count(f):0;return n;}
     static int count(File dir){int n=0;File[] items=dir.listFiles();if(items!=null)for(File f:items)n+=f.isDirectory()?count(f):1;return n;}
     static JSONObject analyzable(Store store,String title)throws Exception{
@@ -27,38 +26,46 @@ public final class AndroidChecks extends Instrumentation {
         Store.write(new File(store.directory("main",record.getString("id")),"전사-001.txt"),"체험 검증 전사");return record;
     }
     static String firstSystem(String body)throws Exception{return new JSONObject(body).getJSONArray("input").getJSONObject(0).getString("content");}
+    static void settingsChecks(Store store)throws Exception{
+        android.content.SharedPreferences prefs=store.context.getSharedPreferences("connection",0);
+        prefs.edit().putString("summaryModel","gpt-6-luna").putString("defaultOutputFormat","summary").putString("storage.audio","content://합성/옛폴더").commit();
+        JSONObject custom=new JSONObject().put("name","기존 형식").put("sections",new JSONArray().put(new JSONObject().put("key","overview").put("title","요약"))).put("instruction","");
+        store.saveCustomFormat(custom);Store.write(store.customFile()," \n"+custom.toString()+" \n");
+        String before=Store.read(store.customFile());JSONObject record=legacy(store,1,"2099-03-01","설정과 무관한 기록","100");
+        String metadata=Store.read(new File(store.directory("p1",record.getString("id")),"회의정보.json"));
+        CustomFormat nextCustom=CustomFormat.parse(custom.put("name","새 형식").toString());
+        SettingsFile.Value next=new SettingsFile.Value("gpt-6-astra","tasks",nextCustom);
+        for(int point:new int[]{1,2}){
+            Store.failImportAfter=point;
+            try{store.importSettings(next);throw new AssertionError("설정 중간 실패가 필요합니다.");}catch(IOException ex){expect(ex.getMessage().contains("되돌렸"),"중간 저장 실패를 알린다");}
+            expect(store.summaryModel().equals("gpt-6-luna")&&store.defaultOutputFormat().equals("summary")&&Store.read(store.customFile()).equals(before),"모델·기본 형식·내 형식 원래 바이트를 함께 복구한다");
+        }
+        Store.failImportAfter=2;
+        try{store.importSettings(new SettingsFile.Value("gpt-6-astra","custom",null));throw new AssertionError("삭제 뒤 실패가 필요합니다.");}catch(IOException ex){expect(Store.read(store.customFile()).equals(before),"내 형식을 지운 뒤 실패해도 원래 파일을 복구한다");}
+        Store.failImportAfter=-1;
+        store.importSettings(next);
+        expect(store.summaryModel().equals("gpt-6-astra")&&store.defaultOutputFormat().equals("tasks")&&store.customFormat().getString("name").equals("새 형식"),"2판 설정 값을 모두 적용한다");
+        JSONObject unknown=store.importSettings(new SettingsFile.Value("아직 없는 모델","custom",null));
+        expect(store.summaryModel().equals("gpt-6-astra")&&unknown.getJSONArray("skipped").length()==1,"없는 모델은 건너뛰고 알린다");
+        expect(store.customFormat()==null,"명시적인 null은 지금 내 형식을 지운다");
+        expect(store.create(new JSONObject().put("date","2099-03-02")).getString("outputFormat").equals("meeting"),"기본 내 형식이 없으면 새 회의를 회의록으로 시작한다");
+        store.saveCustomFormat(custom);
+        expect(store.create(new JSONObject().put("date","2099-03-02")).getJSONObject("customFormat").getString("name").equals("새 형식"),"기본 내 형식이 있으면 새 회의에 정의를 보관한다");
+        String imported=new String(SettingsFile.write(next),StandardCharsets.UTF_8);imported=imported.substring(0,imported.length()-1)+",\"storage\":{\"audio\":\"D:\\\\다른PC\",\"transcript\":\"\",\"summary\":\"\"}}";
+        store.importSettings(SettingsFile.read(imported.getBytes(StandardCharsets.UTF_8)));
+        expect(prefs.getString("storage.audio","").equals("content://합성/옛폴더"),"Windows 저장 위치가 Android 기기 설정을 바꾸지 않는다");
+        String exported=new String(store.exportSettings(),StandardCharsets.UTF_8);
+        expect(!exported.contains("\"storage\"")&&!exported.contains("\"key\"")&&!exported.contains("trial")&&SettingsFile.read(store.exportSettings()).defaultOutputFormat.equals("tasks"),"2판 내보내기는 키·체험·저장 위치를 빼고 현재 설정만 담는다");
+        expect(Store.read(new File(store.directory("p1",record.getString("id")),"회의정보.json")).equals(metadata),"설정 불러오기는 옛 회의 파일을 고치지 않는다");
+        store.saveSettings(new JSONObject().put("defaultOutputFormat","summary"));
+        expect(store.defaultOutputFormat().equals("summary"),"기본 출력 형식만 저장할 수 있다");
+        try{store.saveSettings(new JSONObject().put("defaultOutputFormat",new JSONArray().put("meeting")));throw new AssertionError("배열 형식은 거절합니다.");}catch(IOException ex){expect(store.defaultOutputFormat().equals("summary"),"잘못된 기본 형식은 기존 값을 보존한다");}
+    }
     static void settingsFormatAndTrial(Store store)throws Exception{
-        // 시험 전 프로젝트 설정 파일과 저장된 키를 보관했다가 끝에 그대로 되돌린다. 회의 자료와 녹음은 지우지 않는다.
-        String[] original=settingsFiles(store);android.content.SharedPreferences prefs=store.context.getSharedPreferences("connection",0);String savedKey=prefs.getString("key",null);
+        android.content.SharedPreferences prefs=store.context.getSharedPreferences("connection",0);String savedKey=prefs.getString("key",null);
         TrialAccess previousTrial=Store.trial;String previousSession=Store.sessionKey;
         try{
-            expect(store.create(new JSONObject().put("date","2099-01-01")).getString("outputFormat").equals("meeting"),"new meetings default to meeting without a preset");
-            Store.write(new File(store.project(2),"설정.json"),"{\"slot\":2,\"name\":\"옛 프로젝트\",\"title\":\"회의\",\"context\":\"옛 설명\"}");
-            JSONObject old=store.preset(2);
-            expect(old.getString("name").equals("옛 프로젝트")&&old.getString("context").equals("옛 설명")&&old.getString("outputFormat").equals("meeting"),"pre-1.1.1 settings kept and read as meeting");
-            byte[] exported=store.exportSettings();String exportedText=new String(exported,StandardCharsets.UTF_8);
-            expect(SettingsExchange.read(exported).get(1).name.equals("옛 프로젝트")&&!exportedText.contains("sk-")&&!exportedText.contains("apiKey")&&!exportedText.contains("trial"),"export holds saved settings without keys or trial state");
-            List<SettingsExchange.Project> incoming=new ArrayList<>();
-            for(int i=1;i<=SettingsExchange.MAX_PROJECTS;i++)incoming.add(i==1?new SettingsExchange.Project(1,"가져온 업무","주간 점검","여러 줄\n설명 😀","tasks"):i==3?new SettingsExchange.Project(3,"자동 검증 프로젝트","","테스트","summary"):new SettingsExchange.Project(i,"","","","meeting"));
-            String[] before=settingsFiles(store);int meetings=store.history().getJSONArray("meetings").length(),files=meetingFiles(store.project(3));
-            Store.failImportAfter=2;
-            try{store.importSettings(incoming);throw new AssertionError("import failure must throw");}catch(IOException ex){expect(ex.getMessage().contains("되돌렸"),"failed import reports rollback");}
-            Store.failImportAfter=-1;
-            expect(Arrays.equals(settingsFiles(store),before),"failed import leaves all settings unchanged");
-            store.importSettings(incoming);JSONArray presets=store.presets();
-            expect(presets.getJSONObject(0).getString("name").equals("가져온 업무")&&presets.getJSONObject(0).getString("context").equals("여러 줄\n설명 😀")&&presets.getJSONObject(0).getString("outputFormat").equals("tasks")&&presets.getJSONObject(1).getString("name").isEmpty()&&presets.getJSONObject(2).getString("outputFormat").equals("summary"),"import replaces all settings");
-            expect(store.history().getJSONArray("meetings").length()==meetings&&meetingFiles(store.project(3))==files,"import keeps meeting records and recordings");
-            expect(Arrays.equals(SettingsExchange.write(SettingsExchange.read(store.exportSettings())),store.exportSettings()),"imported settings export again unchanged");
-            try{store.deletePreset(2);throw new AssertionError("empty delete");}catch(IOException ex){expect(ex.getMessage().contains("저장된 프로젝트"),"empty project cannot be deleted");}
-            store.savePreset(2,new JSONObject().put("name","삭제 시험"));store.deletePreset(2);
-            expect(store.preset(2).optString("name").isEmpty()&&!new File(store.project(2),"설정.json").exists(),"project without meetings deleted");
-            try{store.project(4);throw new AssertionError("slot 4");}catch(IllegalArgumentException ex){expect(true,"slot 4 and above not used");}
-
-            store.savePreset(3,new JSONObject().put("name","자동 검증 프로젝트").put("context","테스트").put("outputFormat","tasks"));
-            try{store.savePreset(3,new JSONObject().put("name","자동 검증 프로젝트").put("outputFormat","minutes"));throw new AssertionError("bad format");}catch(IOException ex){expect(ex.getMessage().contains("출력 형식"),"unknown output format rejected on save");}
             JSONObject tasks=analyzable(store,"형식 검증");tasks.put("outputFormat","tasks");store.save(tasks);expect(tasks.getString("outputFormat").equals("tasks"),"meeting keeps its selected output format");
-            legacy(store,3,"2099-01-01","옛 기록","10");
-            try{store.deletePreset(3);throw new AssertionError("delete with meetings");}catch(IOException ex){expect(ex.getMessage().contains("회의 기록"),"project with meetings cannot be deleted");}
             int sent=requests.size();replies.add(completed());new Ai(store,message->{}).run(tasks);
             JSONObject tasksRequest=new JSONObject(requests.get(sent));
             expect(firstSystem(requests.get(sent)).equals(store.asset("summary-tasks.json").getJSONArray("input").getJSONObject(0).getString("content"))&&!firstSystem(requests.get(sent)).equals(store.asset("summary-meeting.json").getJSONArray("input").getJSONObject(0).getString("content")),"tasks format sends tasks instructions");
@@ -86,6 +93,7 @@ public final class AndroidChecks extends Instrumentation {
             store.deleteCustomFormat();expect(store.customFormat()==null,"custom format deleted");
             JSONObject legacy=new JSONObject().put("title","옛 회의").put("date","2026-09-30").put("dailySequence",1);
             expect(Store.format(legacy,minutes()).contains("상세 회의 내용")&&Store.format(new JSONObject(legacy.toString()).put("outputFormat","summary"),minutes()).contains("주요 내용"),"old records keep meeting layout, summary has its layout");
+            expect(Store.format(new JSONObject(legacy.toString()).put("outputFormat","custom"),minutes()).contains("상세 회의 내용"),"내 형식 정의가 없는 옛 결과도 회의록으로 열고 복사한다");
 
             // 공용 기본 키 체험: 개인 키를 잠시 비우고 시험용 상태 파일과 모의 키로만 확인한다.
             Store.sessionKey=null;prefs.edit().remove("key").commit();
@@ -110,7 +118,6 @@ public final class AndroidChecks extends Instrumentation {
         }finally{
             Store.failImportAfter=-1;code=200;Store.testDefaultKey=null;Store.trial=previousTrial;Store.sessionKey=previousSession;
             if(savedKey!=null)prefs.edit().putString("key",savedKey).commit();
-            for(int i=0;i<SettingsExchange.MAX_PROJECTS;i++){File f=new File(store.project(i+1),"설정.json");if(original[i]!=null)Store.write(f,original[i]);else new android.util.AtomicFile(f).delete();}
         }
     }
     static JSONObject legacy(Store store,int slot,String date,String title,String version)throws Exception {
@@ -186,6 +193,7 @@ public final class AndroidChecks extends Instrumentation {
     }
     @Override public void onStart(){Bundle result=new Bundle();try{
         archiveChecks(new Store(testContext()));
+        settingsChecks(new Store(testContext()));
         draftFailureCheck();
         URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){protected URLConnection openConnection(URL url){return new HttpURLConnection(url){
             final ByteArrayOutputStream sent=new ByteArrayOutputStream();
@@ -196,7 +204,7 @@ public final class AndroidChecks extends Instrumentation {
             public InputStream getInputStream()throws IOException{requests.add(new String(sent.toByteArray(),StandardCharsets.UTF_8));auths.add(lastAuth);String next=replies.poll();if(next==null)throw new IOException("Unexpected network request");return new ByteArrayInputStream(next.getBytes(StandardCharsets.UTF_8));}
             public InputStream getErrorStream(){try{return getInputStream();}catch(IOException ex){throw new RuntimeException(ex);}}
         };}}:null);
-        Store store=new Store(testContext());store.savePreset(3,new JSONObject().put("name","자동 검증 프로젝트").put("context","테스트"));
+        Store store=new Store(testContext());
         String previousModel=store.summaryModel();store.summaryModel(null);
         boolean bundledKey=true;try{getTargetContext().getAssets().open("personal.key").close();}catch(FileNotFoundException absent){bundledKey=false;}
         expect(!bundledKey,"installer has no bundled API key");

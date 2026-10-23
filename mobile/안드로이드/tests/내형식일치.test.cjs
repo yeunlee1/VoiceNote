@@ -46,7 +46,7 @@ test('Java 내 형식 검증과 AI 지시문이 데스크톱과 같다', () => {
     { name: 7, sections: [{ key: 'overview', title: '요약' }] },
   ];
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'vn-custom-'));
-  execFileSync(path.join(jdk, 'javac.exe'), ['-encoding', 'UTF-8', '-d', work, path.join(root, 'src/kr/local/meetingjournal/SettingsExchange.java'), path.join(root, 'src/kr/local/meetingjournal/CustomFormat.java'), path.join(__dirname, 'CustomFormatTest.java')]);
+  execFileSync(path.join(jdk, 'javac.exe'), ['-encoding', 'UTF-8', '-d', work, path.join(root, 'src/kr/local/meetingjournal/JsonText.java'), path.join(root, 'src/kr/local/meetingjournal/CustomFormat.java'), path.join(__dirname, 'CustomFormatTest.java')]);
   const input = path.join(work, 'in.jsonl'), output = path.join(work, 'out.jsonl');
   fs.writeFileSync(input, cases.map(value => JSON.stringify(value)).join('\n') + '\n');
   execFileSync(path.join(jdk, 'java.exe'), ['-Dfile.encoding=UTF-8', '-cp', work, 'kr.local.meetingjournal.CustomFormatTest', input, output]);

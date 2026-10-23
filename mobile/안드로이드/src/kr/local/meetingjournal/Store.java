@@ -16,60 +16,72 @@ final class Store {
     static String read(File file) throws Exception { try(InputStream in=new FileInputStream(file)){return read(in);} }
     static String read(InputStream in) throws Exception { ByteArrayOutputStream out=new ByteArrayOutputStream(); byte[] b=new byte[8192]; for(int n;(n=in.read(b))!=-1;)out.write(b,0,n);return out.toString("UTF-8"); }
     static void write(File file,String text) throws Exception {
+        writeBytes(file,text.getBytes(StandardCharsets.UTF_8));
+    }
+    static byte[] bytes(File file)throws IOException{try(InputStream in=new FileInputStream(file);ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[8192];for(int n;(n=in.read(b))!=-1;)out.write(b,0,n);return out.toByteArray();}}
+    static void writeBytes(File file,byte[] bytes)throws IOException{
         file.getParentFile().mkdirs(); AtomicFile atomic=new AtomicFile(file); FileOutputStream out=atomic.startWrite();
-        try {out.write(text.getBytes(StandardCharsets.UTF_8));atomic.finishWrite(out);} catch(Exception ex){atomic.failWrite(out);throw ex;}
+        try {out.write(bytes);atomic.finishWrite(out);} catch(Exception ex){atomic.failWrite(out);throw ex;}
     }
     JSONObject asset(String name) throws Exception {try(InputStream in=context.getAssets().open(name)){return new JSONObject(read(in));}}
-    // 이전 버전의 4~9번 폴더는 지우지 않고 남겨 두되 읽거나 쓰지 않는다.
-    File project(int slot) {if(slot<1||slot>SettingsExchange.MAX_PROJECTS)throw new IllegalArgumentException("프로젝트 번호 오류"); File dir=new File(root,String.format(Locale.ROOT,"프로젝트-%02d",slot));dir.mkdirs();return dir;}
-    JSONObject preset(int slot) throws Exception {
-        File file=new File(project(slot),"설정.json");
-        JSONObject value=file.exists()?new JSONObject(read(file)):new JSONObject().put("name","").put("title","").put("context","");
-        return value.put("slot",slot).put("outputFormat",SettingsExchange.outputFormat(value.opt("outputFormat")));
+    JSONObject settings()throws Exception{
+        String model=summaryModel();if(AiModels.find(model)==null)model=AiModels.DEFAULT_MODEL;
+        return new JSONObject().put("summaryModel",model).put("defaultOutputFormat",defaultOutputFormat());
     }
-    JSONArray presets() throws Exception {JSONArray all=new JSONArray();for(int i=1;i<=SettingsExchange.MAX_PROJECTS;i++)all.put(preset(i));return all;}
-    void deletePreset(int slot) throws Exception {
-        // 회의 기록이 하나라도 있으면 기록이 이름 없는 프로젝트에 남지 않도록 삭제를 막는다.
-        File file=new File(project(slot),"설정.json");
-        if(SettingsExchange.trim(preset(slot).optString("name")).isEmpty())throw new IOException("저장된 프로젝트가 아닙니다.");
-        File[] meetings=project(slot).listFiles(File::isDirectory);
-        if(meetings!=null&&meetings.length>0)throw new IOException("회의 기록이 있는 프로젝트는 삭제할 수 없습니다.");
-        if(slot==1)write(file,settings(1,"","","","meeting"));else new AtomicFile(file).delete();
-    }
-    void savePreset(int slot,JSONObject value) throws Exception {
-        if(SettingsExchange.trim(value.optString("name")).isEmpty())throw new IOException("프로젝트 이름을 입력하세요.");
-        if(value.optString("name").length()>100||value.optString("context").length()>4000)throw new IOException("프로젝트 이름은 100자, 설명은 4,000자 이내로 입력하세요.");
-        if(value.optString("title").length()>160)throw new IOException("기본 회의명은 160자 이내로 입력하세요.");
-        String format=value.optString("outputFormat","meeting");if(!SettingsExchange.OUTPUT_FORMATS.contains(format))throw new IOException("출력 형식을 다시 선택하세요.");
-        write(new File(project(slot),"설정.json"),settings(slot,SettingsExchange.trim(value.getString("name")),SettingsExchange.trim(value.optString("title")),value.optString("context"),format));
-    }
-    static String settings(int slot,String name,String title,String context,String format) throws Exception {return new JSONObject().put("slot",slot).put("name",name).put("title",title).put("context",context).put("outputFormat",format).toString(2);}
-    byte[] exportSettings() throws Exception {
-        // 화면에서 고친 값이 아니라 저장된 설정 파일(없으면 빈 기본값)만 내보낸다.
-        List<SettingsExchange.Project> all=new ArrayList<>();
-        for(int i=1;i<=SettingsExchange.SLOTS;i++){
-            if(i>SettingsExchange.MAX_PROJECTS){all.add(new SettingsExchange.Project(i,"","","","meeting"));continue;}
-            JSONObject p=preset(i);all.add(new SettingsExchange.Project(i,p.optString("name"),p.optString("title"),p.optString("context"),p.optString("outputFormat")));
-        }
-        return SettingsExchange.write(all);
+    byte[] exportSettings()throws Exception{
+        JSONObject current=settings(),custom=customFormat();
+        return SettingsFile.write(new SettingsFile.Value(current.getString("summaryModel"),current.getString("defaultOutputFormat"),custom==null?null:CustomFormat.parse(custom.toString())));
     }
     static volatile int failImportAfter=-1;
-    synchronized void importSettings(List<SettingsExchange.Project> projects) throws Exception {
-        // 3개 제한을 통과한 설정을 한꺼번에 바꾼다. 중간에 실패하면 이미 바꾼 슬롯을 원래 내용으로 되돌린다. 회의 기록과 녹음은 건드리지 않는다.
-        int count=SettingsExchange.MAX_PROJECTS;
-        if(projects.size()!=count)throw new IOException("프로젝트 설정 "+count+"개가 필요합니다.");
-        String[] before=new String[count];
-        for(int i=0;i<count;i++){File file=new File(project(i+1),"설정.json");before[i]=file.exists()?read(file):null;}
-        int written=0;
-        try{
-            for(SettingsExchange.Project p:projects){
-                if(failImportAfter>=0&&written>=failImportAfter)throw new IOException("시험용 쓰기 실패");
-                write(new File(project(p.slot),"설정.json"),settings(p.slot,p.name,p.title,p.context,p.outputFormat));written++;
+    JSONObject settingsPreview(SettingsFile.Value value)throws Exception{
+        boolean model=AiModels.find(value.summaryModel)!=null;
+        JSONObject preview=new JSONObject().put("summaryModel",new JSONObject().put("value",value.summaryModel).put("apply",model))
+            .put("defaultOutputFormat",new JSONObject().put("value",value.defaultOutputFormat).put("apply",true))
+            .put("customFormat",new JSONObject().put("name",value.customFormat==null?JSONObject.NULL:value.customFormat.name).put("apply",true))
+            .put("storage",JSONObject.NULL).put("storageIgnored",value.hasStorage);
+        if(!model)preview.getJSONObject("summaryModel").put("reason","이 앱의 요약 모델 목록에 없어 적용하지 않습니다.");
+        return preview;
+    }
+    JSONObject importSettings(SettingsFile.Value value)throws Exception{
+        synchronized(Store.class){
+            // 저장 전 바이트와 두 설정 칸을 보관한다. 실패 주입은 실제 사용자 자료와 무관한 기기 시험에서만 쓴다.
+            android.content.SharedPreferences prefs=context.getSharedPreferences("connection",0);
+            String oldModel=prefs.getString("summaryModel",null),oldFormat=prefs.getString("defaultOutputFormat",null);
+            File file=customFile();byte[] before=file.exists()?bytes(file):null;
+            boolean known=AiModels.find(value.summaryModel)!=null;JSONArray skipped=new JSONArray();
+            if(!known)skipped.put("요약 모델: 이 앱의 요약 모델 목록에 없어 적용하지 않습니다.");
+            if(value.hasStorage)skipped.put("저장 위치: Android에서는 적용하지 않습니다.");
+            try{
+                if(failImportAfter==0)throw new IOException("시험용 설정 저장 실패");
+                android.content.SharedPreferences.Editor next=prefs.edit().putString("defaultOutputFormat",value.defaultOutputFormat);
+                if(known)next.putString("summaryModel",value.summaryModel);
+                if(!next.commit())throw new IOException("설정을 저장하지 못했습니다.");
+                if(failImportAfter==1)throw new IOException("시험용 내 형식 저장 실패");
+                if(value.customFormat==null)deleteCustomFormat();else saveCustomFormat(new JSONObject(value.customFormat.json()));
+                if(failImportAfter==2)throw new IOException("시험용 저장 완료 전 실패");
+                return new JSONObject().put("settings",settings()).put("customFormat",customFormat()==null?JSONObject.NULL:customFormat()).put("skipped",skipped);
+            }catch(Exception ex){
+                boolean restored=true;
+                try{android.content.SharedPreferences.Editor previous=prefs.edit();
+                    if(oldModel==null)previous.remove("summaryModel");else previous.putString("summaryModel",oldModel);
+                    if(oldFormat==null)previous.remove("defaultOutputFormat");else previous.putString("defaultOutputFormat",oldFormat);
+                    if(!previous.commit())restored=false;
+                }catch(Exception restore){restored=false;}
+                try{if(before==null)deleteCustomFormat();else writeBytes(file,before);}catch(Exception restore){restored=false;}
+                throw new IOException(restored?"설정을 바꾸지 못해 이전 값으로 되돌렸습니다. 회의자료 폴더의 쓰기 권한과 디스크 공간을 확인하세요.":"설정을 바꾸지 못했고 이전 값으로 되돌리지도 못했습니다. 설정에서 값을 다시 확인하세요.",ex);
             }
-        }catch(Exception ex){
-            for(int i=0;i<written;i++){int slot=projects.get(i).slot;File file=new File(project(slot),"설정.json");
-                try{if(before[slot-1]!=null)write(file,before[slot-1]);else new AtomicFile(file).delete();}catch(Exception ignored){}}
-            throw new IOException("설정을 저장하지 못해 이전 설정으로 되돌렸습니다. 회의 기록은 그대로입니다.");
+        }
+    }
+    JSONObject saveSettings(JSONObject value)throws Exception{
+        synchronized(Store.class){
+            if(value.length()!=1||!value.has("defaultOutputFormat"))throw new IOException("기본 출력 형식을 확인하세요.");
+            Object format=value.opt("defaultOutputFormat");if(!(format instanceof String)||!SettingsFile.OUTPUT_FORMATS.contains(format))throw new IOException("기본 출력 형식을 확인하세요.");
+            android.content.SharedPreferences prefs=context.getSharedPreferences("connection",0);String before=prefs.getString("defaultOutputFormat",null);
+            if(!prefs.edit().putString("defaultOutputFormat",(String)format).commit()){
+                android.content.SharedPreferences.Editor previous=prefs.edit();if(before==null)previous.remove("defaultOutputFormat");else previous.putString("defaultOutputFormat",before);previous.commit();
+                throw new IOException("기본 출력 형식을 저장하지 못했습니다.");
+            }
+            return settings();
         }
     }
     static final String[] LOCATIONS={"main","p1","p2","p3"};
@@ -103,8 +115,13 @@ final class Store {
             if(input.has("location")&&!"main".equals(input.optString("location")))throw new IOException("새 녹음은 기본 보관함에만 만들 수 있습니다.");
             String date=input.optString("date");if(!date.matches("\\d{4}-\\d{2}-\\d{2}"))throw new IOException("회의 날짜를 확인하세요.");
             String format=input.optString("outputFormat",defaultOutputFormat());
-            if(!SettingsExchange.OUTPUT_FORMATS.contains(format)&&!"custom".equals(format))throw new IOException("출력 형식을 다시 선택하세요.");
-            JSONObject custom="custom".equals(format)?new JSONObject(CustomFormat.parse(String.valueOf(input.opt("customFormat"))).json()):null;
+            if(!SettingsFile.OUTPUT_FORMATS.contains(format)&&!"custom".equals(format))throw new IOException("출력 형식을 다시 선택하세요.");
+            JSONObject custom=null;
+            if("custom".equals(format)){
+                if(input.has("customFormat"))custom=new JSONObject(CustomFormat.parse(String.valueOf(input.opt("customFormat"))).json());
+                else if(input.has("outputFormat"))throw new IOException("내 형식 내용을 확인하세요.");
+                else{custom=customFormat();if(custom==null)format="meeting";}
+            }
             int sequence=1;File[] dirs=locationDirectory("main").listFiles(File::isDirectory);
             if(dirs!=null)for(File dir:dirs){try{JSONObject item=load("main",dir.getName());if(date.equals(item.optString("date")))sequence=Math.max(sequence,item.optInt("dailySequence")+1);}catch(Exception ignored){}}
             JSONObject record=new JSONObject().put("id",UUID.randomUUID().toString()).put("location","main").put("date",date).put("dailySequence",sequence)
@@ -113,7 +130,7 @@ final class Store {
             if(custom!=null)record.put("customFormat",custom);save(record);return record;
         }
     }
-    String defaultOutputFormat(){return context.getSharedPreferences("connection",0).getString("defaultOutputFormat","meeting");}
+    String defaultOutputFormat(){String value=context.getSharedPreferences("connection",0).getString("defaultOutputFormat","meeting");return SettingsFile.OUTPUT_FORMATS.contains(value)?value:"meeting";}
     JSONObject history()throws Exception {
         List<JSONObject> records=new ArrayList<>();int skipped=0;
         for(String location:LOCATIONS){
@@ -265,7 +282,7 @@ final class Store {
     }
     static String meetingFormat(JSONObject record){
         if("custom".equals(record.optString("outputFormat"))&&record.optJSONObject("customFormat")!=null){try{custom(record);return "custom";}catch(Exception ignored){}}
-        return SettingsExchange.outputFormat(record.opt("outputFormat"));
+        return SettingsFile.outputFormat(record.opt("outputFormat"));
     }
     static CustomFormat custom(JSONObject record) throws Exception {return CustomFormat.parse(record.getJSONObject("customFormat").toString());}
     static String documentLabel(JSONObject record) throws Exception {return "custom".equals(meetingFormat(record))?custom(record).name:label(meetingFormat(record));}
@@ -275,7 +292,7 @@ final class Store {
         try{return new JSONObject(CustomFormat.parse(read(file)).json());}catch(IOException ex){throw new IOException("내 형식 파일을 읽지 못했습니다. 기존 파일은 보존합니다.");}
     }
     JSONObject saveCustomFormat(JSONObject value) throws Exception {CustomFormat format=CustomFormat.parse(value.toString());write(customFile(),format.json());return new JSONObject(format.json());}
-    void deleteCustomFormat(){new AtomicFile(customFile()).delete();}
+    void deleteCustomFormat()throws IOException{File file=customFile();new AtomicFile(file).delete();if(file.exists())throw new IOException("내 형식을 지우지 못했습니다.");}
     static String label(String format){return "summary".equals(format)?"핵심 요약":"tasks".equals(format)?"업무 정리":"회의록";}
     static String format(JSONObject record,JSONObject minutes) throws Exception {
         String kind=meetingFormat(record);

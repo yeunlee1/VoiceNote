@@ -20,7 +20,7 @@ public final class MainActivity extends Activity {
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private static final int EXPORT_SETTINGS=21,IMPORT_SETTINGS=22;
     // 파일 선택 창이 열린 요청, 내보낼 내용, 확인을 기다리는 불러온 설정이다. 확인 전에는 아무것도 저장하지 않는다.
-    private volatile String fileRequest; private volatile byte[] exportBytes; private volatile List<SettingsExchange.Project> importPending; private volatile String importToken;
+    private volatile String fileRequest; private volatile byte[] exportBytes; private volatile SettingsFile.Value importPending; private volatile String importToken;
     @Override public void onCreate(Bundle state){super.onCreate(state);store=new Store(this);view=new WebView(this);FrameLayout container=new FrameLayout(this);container.addView(view,new FrameLayout.LayoutParams(-1,-1));setContentView(container);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         container.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets.consumeSystemWindowInsets();});
@@ -42,7 +42,7 @@ public final class MainActivity extends Activity {
     private void dispatch(String id,String method,JSONObject data)throws Exception {
         String location=data.optString("location","main");
         switch(method){
-            case "init":{JSONObject custom=store.customFormat();answer(id,new JSONObject().put("connection",connection()).put("settings",new JSONObject().put("defaultOutputFormat",store.defaultOutputFormat())).put("customFormat",custom==null?JSONObject.NULL:custom),null);break;}
+            case "init":{JSONObject custom=store.customFormat();answer(id,new JSONObject().put("connection",connection()).put("settings",store.settings()).put("customFormat",custom==null?JSONObject.NULL:custom),null);break;}
             case "saveCustomFormat": settingsIdle();answer(id,store.saveCustomFormat(data.getJSONObject("customFormat")),null);break;
             case "deleteCustomFormat": settingsIdle();store.deleteCustomFormat();answer(id,JSONObject.NULL,null);break;
             case "status": answer(id,new JSONObject().put("active",MeetingService.active).put("meeting",new JSONObject(MeetingService.snapshot)).put("connection",connection()),null);break;
@@ -57,11 +57,12 @@ public final class MainActivity extends Activity {
             case "exportSettings": settingsIdle();exportBytes=store.exportSettings();pick(id,EXPORT_SETTINGS);break;
             case "importSettings": settingsIdle();importPending=null;importToken=null;pick(id,IMPORT_SETTINGS);break;
             case "applySettings":{
-                List<SettingsExchange.Project> pending=importPending;
+                SettingsFile.Value pending=importPending;
                 if(pending==null||!data.optString("token").equals(importToken))throw new IOException("불러온 설정이 없습니다. 설정 파일을 다시 선택하세요.");
-                if(MeetingService.active||permissionId!=null)throw new IOException("녹음, 분석, 권한 요청이 끝난 뒤 설정을 바꿀 수 있습니다. 기존 설정은 그대로입니다.");
-                importPending=null;importToken=null;store.importSettings(pending);answer(id,store.presets(),null);break;
+                settingsIdle();importPending=null;importToken=null;
+                answer(id,store.importSettings(pending).put("connection",connection()),null);break;
             }
+            case "saveSettings":settingsIdle();answer(id,new JSONObject().put("settings",store.saveSettings(data)).put("connection",connection()),null);break;
             case "cancelSettings": importPending=null;importToken=null;answer(id,true,null);break;
             case "draft": answer(id,store.draft(),null);break;
             case "saveDraft": if(!MeetingService.active&&permissionId==null)store.saveDraft(data);answer(id,true,null);break;
@@ -126,7 +127,7 @@ public final class MainActivity extends Activity {
         fileRequest=id;
         runOnUiThread(()->{try{
             Intent intent=new Intent(code==EXPORT_SETTINGS?Intent.ACTION_CREATE_DOCUMENT:Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE);
-            if(code==EXPORT_SETTINGS)intent.setType("application/json").putExtra(Intent.EXTRA_TITLE,new java.text.SimpleDateFormat("yyyy-MM-dd",Locale.ROOT).format(new Date())+"-VoiceNote-프로젝트설정.json");
+            if(code==EXPORT_SETTINGS)intent.setType("application/json").putExtra(Intent.EXTRA_TITLE,new java.text.SimpleDateFormat("yyyy-MM-dd",Locale.ROOT).format(new Date())+"-VoiceNote-설정.json");
             else intent.setType("*/*").putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/json","text/plain","application/octet-stream"});
             startActivityForResult(intent,code);
         }catch(Exception ex){fileRequest=null;exportBytes=null;answer(id,null,"파일 선택 창을 열지 못했습니다.");}});
@@ -144,9 +145,9 @@ public final class MainActivity extends Activity {
                 try(OutputStream out=opened){if(out==null)throw new IOException("선택한 위치에 쓸 수 없습니다.");out.write(bytes);}
                 answer(id,new JSONObject().put("saved",true).put("file",displayName(uri)),null);
             }else{
-                List<SettingsExchange.Project> projects=SettingsExchange.limit(SettingsExchange.read(readLimited(uri)));
-                String token=UUID.randomUUID().toString();importPending=projects;importToken=token;
-                answer(id,preview(token,displayName(uri),projects),null);
+                SettingsFile.Value value=SettingsFile.read(readLimited(uri));
+                String token=UUID.randomUUID().toString();importPending=value;importToken=token;
+                answer(id,preview(token,displayName(uri),value),null);
             }
         }catch(Exception ex){answer(id,null,ex instanceof IOException?ex.getMessage():"설정 파일을 처리하지 못했습니다. 기존 설정은 그대로입니다.");}
         finally{fileRequest=null;exportBytes=null;}});
@@ -156,7 +157,7 @@ public final class MainActivity extends Activity {
         try(InputStream in=getContentResolver().openInputStream(uri)){
             if(in==null)throw new IOException("선택한 파일을 열 수 없습니다.");
             ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] b=new byte[8192];
-            for(int n;(n=in.read(b))!=-1;){out.write(b,0,n);if(out.size()>SettingsExchange.MAX_BYTES)throw new IOException("설정 파일을 불러올 수 없습니다. 설정 파일이 128KiB보다 큽니다. 기존 설정은 바뀌지 않았습니다.");}
+            for(int n;(n=in.read(b))!=-1;){out.write(b,0,n);if(out.size()>SettingsFile.MAX_BYTES)throw new IOException("설정 파일이 128KiB를 넘었습니다.");}
             return out.toByteArray();
         }
     }
@@ -166,12 +167,8 @@ public final class MainActivity extends Activity {
         }catch(Exception ignored){}
         return "";
     }
-    private JSONObject preview(String token,String file,List<SettingsExchange.Project> projects)throws Exception {
-        JSONArray rows=new JSONArray();JSONArray current=store.presets();
-        for(SettingsExchange.Project p:projects){JSONObject now=current.getJSONObject(p.slot-1);
-            rows.put(new JSONObject().put("slot",p.slot).put("name",p.name).put("title",p.title).put("contextLength",p.context.length()).put("outputFormat",p.outputFormat)
-                .put("currentName",now.optString("name")).put("changed",!p.name.equals(now.optString("name"))||!p.title.equals(now.optString("title"))||!p.context.equals(now.optString("context"))||!p.outputFormat.equals(now.optString("outputFormat"))));}
-        return new JSONObject().put("token",token).put("file",file).put("projects",rows);
+    private JSONObject preview(String token,String file,SettingsFile.Value value)throws Exception {
+        return new JSONObject().put("token",token).put("file",file).put("preview",store.settingsPreview(value));
     }
     private void begin(String id,JSONObject data)throws Exception {
         JSONObject record=store.create(data);store.clearDraft();launch(id,"record","main",record.getString("id"));

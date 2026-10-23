@@ -1,13 +1,21 @@
 // 네이티브 녹음 상태와 보관함별 지난 회의 및 AI 설정을 연결한다.
 (() => {
   const $ = id => document.getElementById(id), pending = new Map(), Flow = window.VoiceFlow;
-  const state = { settings: {}, connection: { keyConfigured: false, keySource: 'none', models: [], summaryModel: '' }, active: false, recording: false, busy: false, opened: null, lastState: '', lastHistory: '', lastMeetingState: '', removeArmed: false, deleteArmed: false, opener: null, importToken: null };
+  const state = { settings: {}, connection: { keyConfigured: false, keySource: 'none', models: [], summaryModel: '' }, active: false, recording: false, busy: false, opened: null, lastState: '', lastHistory: '', lastMeetingState: '', removeArmed: false, deleteArmed: false, opener: null };
   let serial = 0, draftTimer = 0;
   window.receive = (id, payload) => { const task = pending.get(id); if (!task) return; pending.delete(id); payload.error ? task.reject(new Error(payload.error)) : task.resolve(payload.value); };
   function call(method, data = {}) {
     return new Promise((resolve, reject) => {
       const id = String(++serial); pending.set(id, { resolve, reject });
       try { window.Native.request(id, method, JSON.stringify(data)); } catch (error) { pending.delete(id); reject(new Error('앱 연결을 확인하세요.')); }
+    }).then(value => {
+      if ((method === 'applySettings' || method === 'saveSettings') && value?.settings) {
+        state.settings = value.settings;
+        if (value.connection) state.connection = value.connection;
+        if (Object.prototype.hasOwnProperty.call(value, 'customFormat')) state.customFormat = value.customFormat;
+        updateCustomOption(); loadEditor(); renderConnection(); renderFormatExample(); lock();
+      }
+      return value;
     });
   }
   function message(text) { $('message').textContent = text; $('message').hidden = false; clearTimeout(message.timer); message.timer = setTimeout(() => { $('message').hidden = true; }, 6000); }
