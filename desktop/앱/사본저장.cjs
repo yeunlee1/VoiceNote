@@ -45,19 +45,23 @@ function createCopyWriter({ store, storage, fs = realFs }) {
       if (!fs.existsSync(path.join(folder, candidate))) return candidate;
     }
   }
-  // 임시 파일을 최종 이름에 붙인다. 하드 링크와 배타적 복사는 대상이 이미 있으면 EEXIST로 실패하므로 남의 파일을 덮지 않는다.
-  // 하드 링크를 못 쓰는 드라이브(FAT·exFAT 등)는 배타적 복사로 대신하고, 복사하다 실패하면 방금 만든 대상을 지운다.
-  function place(from, to) {
+  // 임시 파일을 최종 이름에 붙인다. 하드 링크는 대상이 이미 있으면 EEXIST로 실패하므로 남의 파일을 덮지 않는다.
+  // 하드 링크를 못 쓰는 드라이브(FAT·exFAT 등)는 대상을 배타적으로 새로 만들어 쓴다. 실패하면 이 함수가 만든 파일일 때만 지운다.
+  function place(from, to, data) {
     try {
       fs.linkSync(from, to);
+      return;
     } catch (error) {
       if (error.code === 'EEXIST') throw error;
-      try {
-        fs.copyFileSync(from, to, realFs.constants.COPYFILE_EXCL);
-      } catch (copyError) {
-        if (copyError.code !== 'EEXIST') try { fs.unlinkSync(to); } catch {}
-        throw copyError;
-      }
+    }
+    const descriptor = fs.openSync(to, 'wx');
+    try {
+      fs.writeFileSync(descriptor, data);
+      fs.closeSync(descriptor);
+    } catch (error) {
+      try { fs.closeSync(descriptor); } catch {}
+      try { fs.unlinkSync(to); } catch {}
+      throw error;
     }
   }
   // 임시 이름으로 다 쓴 뒤 최종 이름을 붙인다. 그 사이 같은 이름 파일이 생기면 다음 이름을 쓴다. 임시 파일은 언제나 지운다.
@@ -68,7 +72,7 @@ function createCopyWriter({ store, storage, fs = realFs }) {
       for (;;) {
         const name = freeName(folder, base);
         try {
-          place(temporary, path.join(folder, name));
+          place(temporary, path.join(folder, name), data);
           return name;
         } catch (error) {
           if (error.code !== 'EEXIST') throw error;

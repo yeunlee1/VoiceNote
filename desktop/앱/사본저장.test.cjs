@@ -44,6 +44,7 @@ const log = (store, name) => JSON.parse(fs.readFileSync(path.join(store, name), 
 const eperm = () => Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
 const failPlace = when => ({ ...fs,
   linkSync(from, to) { if (when(to)) throw eperm(); return fs.linkSync(from, to); },
+  openSync(file, flags, mode) { if (when(file)) throw eperm(); return fs.openSync(file, flags, mode); },
   copyFileSync(from, to, mode) { if (when(to)) throw eperm(); return fs.copyFileSync(from, to, mode); },
   renameSync(from, to) { if (when(to)) throw eperm(); return fs.renameSync(from, to); } });
 
@@ -180,7 +181,7 @@ test('최종 이름을 붙이기 직전에 같은 이름 파일이 생겨도 덮
   assert.equal(files(summary).some(name => name.endsWith('.tmp')), false);
 });
 
-test('하드 링크를 못 쓰는 드라이브에서는 배타적 복사로 쓴다', async t => {
+test('하드 링크를 못 쓰는 드라이브에서는 대상 파일을 배타적으로 새로 만들어 쓴다', async t => {
   const noLink = { ...fs, linkSync() { throw Object.assign(new Error('EPERM: hard links not supported'), { code: 'EPERM' }); } };
   const { request } = await start(t, { copyFs: noLink });
   const summary = folder(t);
@@ -192,6 +193,23 @@ test('하드 링크를 못 쓰는 드라이브에서는 배타적 복사로 쓴�
   assert.equal(copies.ok, true);
   assert.equal(fs.readFileSync(path.join(summary, `${prefix}-요약.md`), 'utf8'), '사용자가 따로 둔 파일');
   assert.equal(fs.readFileSync(path.join(summary, `${prefix}-요약 (2).md`), 'utf8'), markdown(meeting));
+  assert.equal(fs.readFileSync(path.join(summary, `${prefix}-요약.txt`), 'utf8'), plainText(meeting));
+  assert.equal(files(summary).some(name => name.endsWith('.tmp')), false);
+});
+
+test('하드 링크를 못 쓰는 드라이브에서 대상 만들기가 실패해도 그 이름의 남의 파일은 지우지 않는다', async t => {
+  const summary = folder(t);
+  // 링크를 못 쓰고, 대상을 만들려는 순간 다른 프로그램이 같은 이름 파일을 만든 뒤 권한 오류가 난다.
+  const raced = file => { fs.writeFileSync(file, '다른 프로그램이 만든 파일'); throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }); };
+  const racing = { ...fs, linkSync() { throw eperm(); },
+    copyFileSync(from, to, mode) { if (to.endsWith('-요약.md')) raced(to); return fs.copyFileSync(from, to, mode); },
+    openSync(file, flags, mode) { if (String(file).endsWith('-요약.md')) raced(file); return fs.openSync(file, flags, mode); } };
+  const { request } = await start(t, { copyFs: racing });
+  await request('/api/settings', { storage: { summary } });
+  const { meeting, copies } = (await request('/api/meetings/main', result())).body;
+  const prefix = artifactPrefix(meeting);
+  assert.equal(fs.readFileSync(path.join(summary, `${prefix}-요약.md`), 'utf8'), '다른 프로그램이 만든 파일');
+  assert.deepEqual(copies.failed.map(item => item.kind), ['summaryMd']);
   assert.equal(fs.readFileSync(path.join(summary, `${prefix}-요약.txt`), 'utf8'), plainText(meeting));
   assert.equal(files(summary).some(name => name.endsWith('.tmp')), false);
 });
