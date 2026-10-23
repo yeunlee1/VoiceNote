@@ -97,7 +97,8 @@
   }
 
   async function applyDraft() {
-    const draft = await call('draft');
+    let draft;
+    try { draft = await call('draft'); } catch { draft = {}; message('작성 중 메모를 읽지 못했습니다. 빈 메모로 계속합니다.'); }
     $('title').value = draft.title || ''; $('date').value = draft.date || today(); $('participants').value = draft.participants || ''; $('notes').value = draft.notes || '';
     const format = Flow.outputFormat(state.settings?.defaultOutputFormat);
     $('output-format').value = format === 'custom' && !state.customFormat ? 'meeting' : format; renderFormatExample(); lock();
@@ -135,7 +136,8 @@
     table.append(head, body); host.append(table);
   }
   async function open(location, id, opener, resultId = null) {
-    const { record, minutes, transcript } = await call('open', { location, id, resultId }); state.opened = { location, id, resultId: record.resultId || resultId }; state.opener = opener || null;
+    const { record, minutes, transcript } = await call('open', { location, id, ...(resultId == null ? {} : { resultId }) });
+    const selected = record.resultId || resultId; state.opened = { location, id, ...(selected == null ? {} : { resultId: selected }) }; state.opener = opener || null;
     $('meeting-date').textContent = `${record.date} · ${record.dailySequence}차 회의`;
     $('meeting-title').textContent = record.title || '회의';
     $('meeting-status').textContent = record.message || '녹음 파일을 보관했습니다.';

@@ -12,9 +12,10 @@ public final class AndroidChecks extends Instrumentation {
     static final Queue<String> replies=new ArrayDeque<>();
     static final List<String> requests=new ArrayList<>();
     static int code=200,checks;
+    String probe="";
     static volatile String lastAuth;
     static final List<String> auths=new ArrayList<>();
-    @Override public void onCreate(Bundle args){super.onCreate(args);start();}
+    @Override public void onCreate(Bundle args){super.onCreate(args);probe=args==null?"":args.getString("probe","");start();}
     static void expect(boolean value,String label){if(!value)throw new AssertionError(label);checks++;}
     static JSONObject minutes()throws Exception{return new JSONObject().put("suggestedTitle","표준 문서 구현 준비").put("overview","전체 방향 | 제조지시서를 먼저 구현합니다.\n주요 결정 | 기존 DB를 사용합니다.").put("topics",new JSONArray().put(new JSONObject().put("title","문서 연결").put("points",new JSONArray().put("생산 중 문서를 반복해서 확인하므로 이동을 단순하게 합니다.")))).put("decisions",new JSONArray().put("기존 DB 활용")).put("actions",new JSONArray().put(new JSONObject().put("task","화면 기획").put("owner",JSONObject.NULL).put("due",JSONObject.NULL))).put("openQuestions",new JSONArray().put("탭 방식은 미정"));}
     static String completed()throws Exception{return new JSONObject().put("status","completed").put("output",new JSONArray().put(new JSONObject().put("type","message").put("content",new JSONArray().put(new JSONObject().put("type","output_text").put("text",minutes().toString()))))).toString();}
@@ -28,7 +29,8 @@ public final class AndroidChecks extends Instrumentation {
     static String firstSystem(String body)throws Exception{return new JSONObject(body).getJSONArray("input").getJSONObject(0).getString("content");}
     static void settingsChecks(Store store)throws Exception{
         android.content.SharedPreferences prefs=store.context.getSharedPreferences("connection",0);
-        prefs.edit().putString("summaryModel","gpt-6-luna").putString("defaultOutputFormat","summary").putString("storage.audio","content://합성/옛폴더").commit();
+        String syntheticKey="sk-only-synthetic-settings-check-0000";
+        prefs.edit().putString("key",syntheticKey).putString("summaryModel","gpt-6-luna").putString("defaultOutputFormat","summary").putString("storage.audio","content://합성/옛폴더").commit();
         JSONObject custom=new JSONObject().put("name","기존 형식").put("sections",new JSONArray().put(new JSONObject().put("key","overview").put("title","요약"))).put("instruction","");
         store.saveCustomFormat(custom);Store.write(store.customFile()," \n"+custom.toString()+" \n");
         String before=Store.read(store.customFile());JSONObject record=legacy(store,1,"2099-03-01","설정과 무관한 기록","100");
@@ -55,7 +57,13 @@ public final class AndroidChecks extends Instrumentation {
         store.importSettings(SettingsFile.read(imported.getBytes(StandardCharsets.UTF_8)));
         expect(prefs.getString("storage.audio","").equals("content://합성/옛폴더"),"Windows 저장 위치가 Android 기기 설정을 바꾸지 않는다");
         String exported=new String(store.exportSettings(),StandardCharsets.UTF_8);
-        expect(!exported.contains("\"storage\"")&&!exported.contains("\"key\"")&&!exported.contains("trial")&&SettingsFile.read(store.exportSettings()).defaultOutputFormat.equals("tasks"),"2판 내보내기는 키·체험·저장 위치를 빼고 현재 설정만 담는다");
+        JSONObject exportedFile=new JSONObject(exported);
+        Set<String> exportedKeys=new HashSet<>();for(Iterator<String> keys=exportedFile.keys();keys.hasNext();)exportedKeys.add(keys.next());
+        expect(exportedKeys.equals(new HashSet<>(Arrays.asList("format","version","summaryModel","defaultOutputFormat","customFormat")))&&!exported.contains(syntheticKey)&&!exportedFile.has("apiKey")&&!exportedFile.has("trial")&&SettingsFile.read(store.exportSettings()).defaultOutputFormat.equals("tasks"),"2판 내보내기는 키·체험·저장 위치를 빼고 현재 설정 다섯 칸만 담는다");
+        expect(prefs.getString("key","").equals(syntheticKey),"설정 교환이 등록된 시험용 키를 바꾸지 않는다");
+        for(byte[] invalid:new byte[][]{{(byte)0xC3,0x28},{(byte)0xC0,(byte)0xAF},{(byte)0xED,(byte)0xA0,(byte)0x80},{(byte)0xF0,(byte)0x9F,(byte)0x98},{(byte)0xFF,(byte)0xFE}}){
+            try{SettingsFile.read(invalid);throw new AssertionError("기기 UTF-8 해석기는 잘못된 바이트를 거절해야 합니다.");}catch(IOException expected){expect(expected.getMessage().contains("UTF-8"),"기기의 엄격한 UTF-8 검사");}
+        }
         expect(Store.read(new File(store.directory("p1",record.getString("id")),"회의정보.json")).equals(metadata),"설정 불러오기는 옛 회의 파일을 고치지 않는다");
         store.saveSettings(new JSONObject().put("defaultOutputFormat","summary"));
         expect(store.defaultOutputFormat().equals("summary"),"기본 출력 형식만 저장할 수 있다");
@@ -191,7 +199,54 @@ public final class AndroidChecks extends Instrumentation {
         try{store.draft();throw new AssertionError("새 초안을 저장하지 못했으면 이관 성공으로 처리하지 않는다");}catch(IOException expected){}
         expect(!store.context.getSharedPreferences("connection",0).getBoolean("draftMigrated",false),"초안 쓰기 실패 뒤에도 다음 실행에 이관을 다시 시도한다");
     }
+    static void firstResultCheck(Store store)throws Exception{
+        JSONObject fresh=store.create(new JSONObject().put("date","2099-04-01"));String id=fresh.getString("id");
+        fresh.put("state","analyzing");store.save(fresh);store.finish(fresh,minutes(),null);
+        expect(store.results("main",id).length()==1&&!new File(store.directory("main",id),"결과-legacy.json").exists(),"새 회의 첫 분석은 가짜 legacy 없이 결과 하나다");
+        store.finish(fresh,minutes(),null);expect(store.results("main",id).length()==2,"새 회의 두 번 분석은 결과 둘이다");
+        JSONObject old=legacy(store,1,"2099-04-01","요약 없던 옛 회의",null);File dir=store.directory("p1",old.getString("id"));new File(dir,"요약.json").delete();
+        store.finish(old,minutes(),null);expect(store.results("p1",old.getString("id")).length()==1,"요약 없던 옛 회의도 첫 결과는 하나다");
+    }
+    static void nullResultCheck(Store store)throws Exception{
+        JSONObject nil=new JSONObject().put("resultId",JSONObject.NULL);
+        expect("null".equals(nil.optString("resultId",null)),"실제 Android optString은 JSON null을 글자 null로 바꾼다");
+        expect(MainActivity.nullableString(nil,"resultId")==null,"브리지는 JSON null을 Java null로 바꾼다");
+        JSONObject fresh=store.create(new JSONObject().put("date","2099-04-02"));String id=fresh.getString("id");
+        JSONObject opened=store.result("main",id,MainActivity.nullableString(nil,"resultId"));
+        expect(opened.getString("id").equals(id)&&!opened.has("minutes"),"결과 없는 회의도 null 결과 선택으로 열린다");
+    }
+    static void nullReviewCheck(Store store)throws Exception{
+        JSONObject fresh=store.create(new JSONObject().put("date","2099-04-03"));store.finish(fresh,minutes(),null);String id=fresh.getString("id"),rid=fresh.getString("resultId");
+        JSONObject nil=new JSONObject().put("comment",JSONObject.NULL).put("resultId",JSONObject.NULL);
+        try{store.saveReview("main",id,rid,null,MainActivity.nullableString(nil,"comment"));throw new AssertionError("별점과 JSON null 의견이 둘 다 비면 거절해야 합니다.");}catch(IOException expected){}
+        expect(store.loadReview("main",id,rid)==null,"빈 평가 파일을 만들지 않는다");
+        JSONObject saved=store.saveReview("main",id,MainActivity.nullableString(nil,"resultId"),4,MainActivity.nullableString(nil,"comment"));
+        expect(saved.getString("comment").isEmpty()&&saved.getInt("stars")==4,"별점만 줄 때 null 의견은 빈 값이고 최신 결과에 저장한다");
+    }
+    static void brokenDraftCheck(Store store)throws Exception{
+        store.draft();File file=new File(store.locationDirectory("main"),"작성중.json");String broken="{\"title\":\"쓰다 만";
+        Store.write(file,broken);expect(store.draft().length()==0,"손상된 기본 메모는 빈 값으로 읽는다");
+        File[] backups=store.locationDirectory("main").listFiles((dir,name)->name.startsWith("작성중-읽기실패-"));
+        expect(backups!=null&&backups.length==1&&Store.read(backups[0]).equals(broken),"손상 메모 원문을 별도 파일로 보존한다");
+        store.saveDraft(new JSONObject().put("title","복구한 메모"));expect(store.draft().getString("title").equals("복구한 메모"),"손상 메모 뒤에도 새 메모를 저장한다");
+        Store.write(file,broken);store.draft();JSONObject fresh=store.create(new JSONObject().put("date","2099-04-04"));store.clearDraft();
+        expect(store.history().getJSONArray("meetings").length()==1&&fresh.getString("location").equals("main"),"손상 메모 뒤 시작해도 빈 실패 기록을 남기지 않는다");
+    }
+    static void failedFinishCheck(Store store)throws Exception{
+        JSONObject fresh=store.create(new JSONObject().put("date","2099-04-05"));store.finish(fresh,minutes(),null);String id=fresh.getString("id"),before=fresh.getString("resultId");
+        try{store.finish(fresh,minutes(),String.join("",Collections.nCopies(1001,"가")));throw new AssertionError("긴 의견은 거절해야 합니다.");}catch(IOException expected){}
+        expect(fresh.getString("resultId").equals(before),"의견 검사 실패가 호출자의 최신 결과 id를 바꾸지 않는다");
+        File blocked=new File(store.directory("main",id),"회의록.txt.new");blocked.mkdir();Store.write(new File(blocked,"유지.txt"),"합성 쓰기 차단");
+        try{store.finish(fresh,minutes(),null);throw new AssertionError("파일 쓰기 실패가 필요합니다.");}catch(IOException expected){}
+        expect(fresh.getString("resultId").equals(before)&&store.result("main",id,null).getString("resultId").equals(before),"쓰기 실패 뒤에도 기존 최신 결과를 열 수 있다");
+    }
+    void regressionCheck(String name)throws Exception{
+        Store store=new Store(testContext());
+        if(name.equals("first"))firstResultCheck(store);else if(name.equals("open"))nullResultCheck(store);else if(name.equals("review"))nullReviewCheck(store);else if(name.equals("draft"))brokenDraftCheck(store);else if(name.equals("finish"))failedFinishCheck(store);else throw new AssertionError("모르는 회귀 시험");
+    }
     @Override public void onStart(){Bundle result=new Bundle();try{
+        if(!probe.isEmpty()){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
+        for(String name:new String[]{"first","open","review","draft","finish"})regressionCheck(name);
         archiveChecks(new Store(testContext()));
         settingsChecks(new Store(testContext()));
         draftFailureCheck();

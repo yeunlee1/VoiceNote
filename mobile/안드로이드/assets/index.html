@@ -50,7 +50,7 @@
       <svg class="icon chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
     </button>
     <div id="prep" class="prep" hidden>
-<label class="field">회의명<input id="title" maxlength="160" placeholder="비워 두면 AI가 회의 내용을 보고 정합니다" autocomplete="off"></label>
+      <label class="field">회의명<small id="title-hint" class="field-note">선택 · 비워 두면 AI가 회의 내용을 보고 정합니다</small><input id="title" maxlength="160" placeholder="선택" aria-describedby="title-hint" autocomplete="off"></label>
       <div class="pair">
         <label class="field">날짜<input id="date" type="date"></label>
         <label class="field">참석자<input id="participants" maxlength="1000" placeholder="선택" autocomplete="off"></label>

@@ -52,7 +52,7 @@ public final class MainActivity extends Activity {
                 settingsIdle();fileIdle();Object value=data.opt("stars");Integer stars=null;
                 if(value!=null&&value!=JSONObject.NULL){if(!(value instanceof Number)||((Number)value).doubleValue()!=((Number)value).intValue())throw new IOException("별점은 1~5 정수로 입력하세요.");stars=((Number)value).intValue();}
                 Object comment=data.opt("comment");if(comment!=null&&comment!=JSONObject.NULL&&!(comment instanceof String))throw new IOException("의견을 글로 입력하세요.");
-                answer(id,store.saveReview(location,data.getString("id"),data.optString("resultId",null),stars,data.optString("comment","")),null);break;
+                answer(id,store.saveReview(location,data.getString("id"),nullableString(data,"resultId"),stars,nullableString(data,"comment")),null);break;
             }
             case "exportSettings": settingsIdle();exportBytes=store.exportSettings();pick(id,EXPORT_SETTINGS);break;
             case "importSettings": settingsIdle();importPending=null;importToken=null;pick(id,IMPORT_SETTINGS);break;
@@ -92,15 +92,15 @@ public final class MainActivity extends Activity {
                 String meetingId=data.getString("id");store.load(location,meetingId);launch(id,"analyze",location,meetingId);break;
             }
             case "open":{
-                String meetingId=data.getString("id");JSONObject record=store.result(location,meetingId,data.optString("resultId",null));
+                String meetingId=data.getString("id");JSONObject record=store.result(location,meetingId,nullableString(data,"resultId"));
                 File transcript=new File(store.directory(location,meetingId),"전사.txt");String resultId=record.optString("resultId",null);
                 answer(id,new JSONObject().put("record",record).put("minutes",record.optJSONObject("minutes")==null?JSONObject.NULL:record.getJSONObject("minutes"))
                     .put("transcript",transcript.exists()?Store.read(transcript):"").put("resultId",resultId==null?JSONObject.NULL:resultId)
                     .put("versions",store.results(location,meetingId)).put("review",resultId==null?JSONObject.NULL:store.loadReview(location,meetingId,resultId)),null);break;
             }
-            case "share":share(id,location,data.getString("id"),data.optString("resultId",null),data.optString("kind","summary"));break;
+            case "share":share(id,location,data.getString("id"),nullableString(data,"resultId"),data.optString("kind","summary"));break;
             case "copy":{
-                String kind=data.optString("kind","summary"),text=resultText(location,data.getString("id"),data.optString("resultId",null),kind);
+                String kind=data.optString("kind","summary"),text=resultText(location,data.getString("id"),nullableString(data,"resultId"),kind);
                 if(text.length()>300000)throw new IOException("글이 너무 길어 복사할 수 없습니다. 공유를 이용하세요.");
                 runOnUiThread(()->((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("transcript".equals(kind)?"전사문":"회의 정리본",text)));
                 answer(id,true,null);break;
@@ -108,6 +108,7 @@ public final class MainActivity extends Activity {
             default:throw new IOException("지원하지 않는 요청입니다.");
         }
     }
+    static String nullableString(JSONObject data,String key){return !data.has(key)||data.isNull(key)?null:data.optString(key,null);}
     private JSONObject connection()throws Exception {
         JSONArray models=new JSONArray();
         for(AiModels.Model model:AiModels.ALL)models.put(new JSONObject().put("id",model.id).put("label",model.label).put("description",model.description).put("maxOutputTokens",model.maxOutputTokens).put("modelMaxOutputTokens",model.modelMaxOutputTokens));
@@ -171,7 +172,7 @@ public final class MainActivity extends Activity {
         return new JSONObject().put("token",token).put("file",file).put("preview",store.settingsPreview(value));
     }
     private void begin(String id,JSONObject data)throws Exception {
-        JSONObject record=store.create(data);store.clearDraft();launch(id,"record","main",record.getString("id"));
+        store.draft();JSONObject record=store.create(data);store.clearDraft();launch(id,"record","main",record.getString("id"));
     }
     private void launch(String id,String action,String location,String meetingId){runOnUiThread(()->{try{startForegroundService(new Intent(this,MeetingService.class).setAction(action).putExtra("location",location).putExtra("id",meetingId));answer(id,new JSONObject().put("id",meetingId),null);}catch(Exception ex){answer(id,null,"녹음 또는 분석 서비스를 시작하지 못했습니다. 마이크 권한을 확인하세요.");}});}
     @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){super.onRequestPermissionsResult(code,permissions,results);if(code==12){String id=permissionId;JSONObject data=permissionInput;permissionId=null;permissionInput=null;if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)worker.submit(()->{try{begin(id,data);}catch(Exception ex){answer(id,null,MeetingService.safeMessage(ex));}});else answer(id,null,"녹음하려면 마이크 권한이 필요합니다.");}}

@@ -168,7 +168,7 @@ final class Store {
     }
     void preserveLegacy(String location,String id)throws Exception {
         File dir=directory(location,id),metadata=new File(dir,"회의정보.json");if(!metadata.exists())return;
-        JSONObject before=new JSONObject(read(metadata));if(before.has("resultId")&&!before.isNull("resultId"))return;
+        JSONObject before=new JSONObject(read(metadata));if(before.has("location")||(before.has("resultId")&&!before.isNull("resultId")))return;
         JSONObject legacy=legacyResult(location,id);if(legacy==null)return;File file=new File(dir,"결과-"+legacy.getString("resultId")+".json");
         if(!file.exists())write(file,legacy.toString(2));
     }
@@ -258,7 +258,12 @@ final class Store {
                 }
                 if(!prefs.edit().putBoolean("draftMigrated",true).commit())throw new IOException("작성 중 메모 이관 상태를 저장하지 못했습니다.");
             }
-            return file.exists()?draftValue(new JSONObject(read(file))):new JSONObject();
+            try{return file.exists()?draftValue(new JSONObject(read(file))):new JSONObject();}
+            catch(JSONException|IOException ex){
+                // 손상된 새 초안은 따로 보존하고 빈 메모로 이어 간다. 보존 쓰기마저 실패하면 원본을 남긴다.
+                try{File backup=new File(locationDirectory("main"),"작성중-읽기실패-"+System.currentTimeMillis()+"-"+UUID.randomUUID()+".json");writeBytes(backup,bytes(file));new AtomicFile(file).delete();}catch(IOException ignored){}
+                return new JSONObject();
+            }
         }
     }
     JSONObject draftValue(JSONObject input)throws Exception {
@@ -270,14 +275,21 @@ final class Store {
     void clearDraft()throws Exception {synchronized(Store.class){draft();new AtomicFile(new File(locationDirectory("main"),"작성중.json")).delete();}}
     void finish(JSONObject record,JSONObject minutes,String feedback)throws Exception {
         synchronized(Store.class){
+            if(feedback!=null&&feedback.length()>1000)throw new IOException("의견은 1,000자 이하로 입력하세요.");
             String location=location(record),id=record.getString("id");File dir=directory(location,id);preserveLegacy(location,id);
-            String title=minutes.optString("suggestedTitle","").trim();if(title.isEmpty())title=record.optString("title","").trim();if(title.isEmpty())title="회의";
+            // 입력·쓰기 실패가 서비스의 현재 결과를 망가뜨리지 않게 사본을 완성한 뒤 호출자에 돌려준다.
+            JSONObject next=new JSONObject(record.toString());next.remove("minutes");
+            String title=minutes.optString("suggestedTitle","").trim();if(title.isEmpty())title=next.optString("title","").trim();if(title.isEmpty())title="회의";
             long version=System.currentTimeMillis();while(new File(dir,"결과-"+version+".json").exists())version++;
-            record.put("location",location).put("resultId",Long.toString(version)).put("title",title).put("state","complete").put("message","회의록 저장 완료").put("savedAt",version);record.remove("slot");
-            if(feedback!=null&&!feedback.trim().isEmpty()){if(feedback.length()>1000)throw new IOException("의견은 1,000자 이하로 입력하세요.");record.put("feedback",feedback);}else record.remove("feedback");
-            JSONObject snapshot=new JSONObject(record.toString()).put("minutes",new JSONObject(minutes.toString()));
+            next.put("location",location).put("resultId",Long.toString(version)).put("title",title).put("state","complete").put("message","회의록 저장 완료").put("savedAt",version);next.remove("slot");
+            if(feedback!=null&&!feedback.trim().isEmpty())next.put("feedback",feedback);else next.remove("feedback");
+            JSONObject snapshot=new JSONObject(next.toString()).put("minutes",new JSONObject(minutes.toString()));
             write(new File(dir,"결과-"+version+".json"),snapshot.toString(2));
-            write(new File(dir,"요약.json"),minutes.toString(2));write(new File(dir,"회의록.txt"),format(record,minutes));save(record);
+            write(new File(dir,"요약.json"),minutes.toString(2));write(new File(dir,"회의록.txt"),format(next,minutes));
+            // 보존은 위에서 이미 끝냈다. 새 요약을 옛 요약으로 다시 보존하지 않는다.
+            write(new File(dir,"회의정보.json"),next.toString(2));
+            List<String> oldKeys=new ArrayList<>();for(Iterator<String> keys=record.keys();keys.hasNext();)oldKeys.add(keys.next());for(String key:oldKeys)record.remove(key);
+            for(Iterator<String> keys=next.keys();keys.hasNext();){String key=keys.next();record.put(key,next.get(key));}
         }
     }
     static String meetingFormat(JSONObject record){

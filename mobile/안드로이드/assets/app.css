@@ -237,3 +237,6 @@ body.typing .toast { bottom: 12px; }
 .result-panel { padding-top: 8px; }
 .transcript-view { max-height: none; background: #fff; font-size: 15px; line-height: 1.8; }
 details.more { margin-top: 20px; border-top: 1px solid var(--rule); padding-top: 4px; }
+
+.field-note { display: block; color: var(--ink-soft); font-size: 12px; font-weight: 400; line-height: 1.6; word-break: keep-all; }
+#workflow { word-break: keep-all; overflow-wrap: break-word; }
