@@ -20126,7 +20126,7 @@ openQuestions는 '미확정 사항'입니다. 다음 회의에서 실제로 확�
 // tools/회의록/server.ts
 var maxAudioBytes = 23068672;
 var maxJsonBytes = 512e3;
-var settingsExchange = require("./프로젝트설정교환.cjs");
+var settingsFormat = require("./설정파일.cjs");
 var meetingFormats = require("./출력형식.js");
 var { createTrialAccess, isUnlockCode } = require("./체험권한.cjs");
 var fail = (code, message, status) => new MeetingError(code, message, status);
@@ -20231,7 +20231,8 @@ function createMeetingServer(options = {}) {
       const result = minutesSchema.safeParse(value);
       if (!result.success) throw Object.assign(new Error("회의록 형식을 확인하세요."), { status: 400 });
       return result.data;
-    }
+    },
+    { atomicWrite: options.atomicWrite }
   );
   const microphoneControl = options.microphoneControl ?? require("./마이크제어.cjs").setMicrophoneVolume;
   let microphoneBusy = false;
@@ -20269,6 +20270,10 @@ function createMeetingServer(options = {}) {
   const settingsFile = options.settingsFile ?? (options.keyFile ? (0, import_node_path.join)((0, import_node_path.dirname)(options.keyFile), "AI설정.json") : null);
   let summaryModel = aiModels.DEFAULT_SUMMARY_MODEL;
   let summaryModelError = "";
+  // 파일에 적힌 요약 모델 원문이다. 사용자가 고른 적이 없으면 비워 두어 앱 기본값을 계속 따른다.
+  let storedSummaryModel;
+  let defaultOutputFormat = "meeting";
+  let storage = { audio: "", transcript: "", summary: "" };
   if (settingsFile) {
     // 저장된 모델이 목록에 없으면 다른 모델로 바꾸지 않고 다시 선택하도록 알린다.
     try {
@@ -20277,6 +20282,13 @@ function createMeetingServer(options = {}) {
         summaryModel = null;
         summaryModelError = "저장된 요약 모델은 지원 목록에 없습니다. AI 설정에서 요약 모델을 다시 선택하세요.";
       } else if (stored?.summaryModel !== void 0) summaryModel = stored.summaryModel;
+      storedSummaryModel = stored?.summaryModel;
+      // 기본 출력 형식과 저장 위치가 없는 옛 파일은 회의록 형식, 저장 위치 없음으로 읽는다.
+      defaultOutputFormat = meetingFormats.format(stored?.defaultOutputFormat) || "meeting";
+      storage = Object.fromEntries(settingsFormat.STORAGE_KINDS.map((kind) => {
+        const value = object3(stored?.storage)?.[kind];
+        return [kind, typeof value === "string" && value.length <= settingsFormat.MAX_FOLDER ? value : ""];
+      }));
     } catch (error62) {
       if (error62.code !== "ENOENT") {
         summaryModel = null;
@@ -20284,11 +20296,12 @@ function createMeetingServer(options = {}) {
       }
     }
   }
-  function saveSettings(model) {
-    if (!settingsFile) return;
+  const settings = () => ({ summaryModel, defaultOutputFormat, storage: { ...storage } });
+  const currentSettings = () => ({ storedSummaryModel, defaultOutputFormat, storage: { ...storage } });
+  function writeSettingsFile(content) {
     const temporary = `${settingsFile}.${(0, import_node_crypto.randomBytes)(8).toString("hex")}.tmp`;
     try {
-      (0, import_node_fs.writeFileSync)(temporary, JSON.stringify({ summaryModel: model }), { flag: "wx", mode: 384 });
+      (0, import_node_fs.writeFileSync)(temporary, content, { flag: "wx", mode: 384 });
       (0, import_node_fs.renameSync)(temporary, settingsFile);
     } catch {
       throw fail("SETTINGS_STORAGE_FAILED", "AI 설정 파일을 저장하지 못했습니다. 폴더의 쓰기 권한을 확인해 주세요.", 500);
@@ -20298,6 +20311,94 @@ function createMeetingServer(options = {}) {
       } catch {
       }
     }
+  }
+  function saveSettings(next) {
+    if (!settingsFile) return;
+    writeSettingsFile(JSON.stringify({ ...next.storedSummaryModel !== void 0 ? { summaryModel: next.storedSummaryModel } : {}, defaultOutputFormat: next.defaultOutputFormat, storage: next.storage }));
+  }
+  // 저장에 성공한 값만 메모리에 반영한다. 요약 모델은 바뀐 경우에만 다시 정한다.
+  function applySettings(next) {
+    if (next.storedSummaryModel !== storedSummaryModel) {
+      summaryModel = next.storedSummaryModel;
+      summaryModelError = "";
+    }
+    storedSummaryModel = next.storedSummaryModel;
+    defaultOutputFormat = next.defaultOutputFormat;
+    storage = { ...next.storage };
+  }
+  // 화면이 보낸 일부 값만 바꾼다. 저장 위치는 실제로 파일을 쓸 수 있는 폴더일 때만 받는다.
+  function changedSettings(data) {
+    if (!object3(data)) throw fail("INVALID_SETTINGS", "설정 값을 확인하세요.", 400);
+    const extra = Object.keys(data).find((key) => !["summaryModel", "defaultOutputFormat", "storage"].includes(key));
+    if (extra !== void 0) throw fail("INVALID_SETTINGS", `설정에 알 수 없는 항목(${extra.slice(0, 40)})이 있습니다.`, 400);
+    const next = currentSettings();
+    if (data.summaryModel !== void 0) {
+      if (!aiModels.findSummaryModel(data.summaryModel)) throw fail("INVALID_MODEL", "지원하지 않는 요약 모델입니다. 목록의 모델을 선택하세요.", 400);
+      next.storedSummaryModel = data.summaryModel;
+    }
+    if (data.defaultOutputFormat !== void 0) {
+      next.defaultOutputFormat = meetingFormats.format(data.defaultOutputFormat);
+      if (!next.defaultOutputFormat) throw fail("INVALID_SETTINGS", "기본 출력 형식을 확인하세요.", 400);
+    }
+    if (data.storage !== void 0) {
+      const folders = object3(data.storage);
+      if (!folders || Object.entries(folders).some(([kind, value]) => !settingsFormat.STORAGE_KINDS.includes(kind) || typeof value !== "string" || value.length > settingsFormat.MAX_FOLDER))
+        throw fail("INVALID_SETTINGS", "저장 위치를 확인하세요.", 400);
+      for (const [kind, value] of Object.entries(folders)) {
+        const folder = value.trim();
+        const check = folder ? settingsFormat.checkFolder(folder) : { ok: true };
+        if (!check.ok) throw fail("INVALID_FOLDER", check.message, 400);
+        next.storage[kind] = folder;
+      }
+    }
+    return next;
+  }
+  // 미리보기와 적용이 같은 판단을 쓰도록 항목마다 적용 여부와 이유를 한 번에 정한다.
+  function settingsPreview(parsed) {
+    const model = aiModels.findSummaryModel(parsed.summaryModel);
+    return {
+      summaryModel: { value: parsed.summaryModel, apply: Boolean(model), ...model ? {} : { reason: "이 앱의 요약 모델 목록에 없어 적용하지 않습니다." } },
+      defaultOutputFormat: { value: parsed.defaultOutputFormat, apply: true },
+      customFormat: { name: parsed.customFormat?.name ?? null, apply: parsed.customFormat !== null },
+      storage: parsed.storage ? Object.fromEntries(settingsFormat.STORAGE_KINDS.map((kind) => {
+        const value = parsed.storage[kind];
+        const check = value ? settingsFormat.checkFolder(value) : { ok: true };
+        return [kind, { value, apply: check.ok, ...check.ok ? {} : { reason: check.message } }];
+      })) : null
+    };
+  }
+  // 적용할 값만 바꾸고, 내 형식 저장이 실패하면 AI 설정 파일을 원래 바이트로 되돌린다.
+  function importSettings(parsed) {
+    const preview = settingsPreview(parsed);
+    const labels = { audio: "오디오 저장 위치", transcript: "전사문 저장 위치", summary: "요약본 저장 위치" };
+    const skipped = [];
+    const next = currentSettings();
+    if (preview.summaryModel.apply) next.storedSummaryModel = parsed.summaryModel;
+    else skipped.push(`요약 모델: ${preview.summaryModel.reason}`);
+    next.defaultOutputFormat = parsed.defaultOutputFormat;
+    for (const kind of settingsFormat.STORAGE_KINDS) {
+      const item = preview.storage?.[kind];
+      if (item?.apply) next.storage[kind] = item.value;
+      else if (item) skipped.push(`${labels[kind]}: ${item.reason}`);
+    }
+    const before = settingsFile && (0, import_node_fs.existsSync)(settingsFile) ? (0, import_node_fs.readFileSync)(settingsFile) : null;
+    saveSettings(next);
+    if (parsed.customFormat) {
+      try {
+        projectStore.saveCustomFormat(parsed.customFormat);
+      } catch {
+        let restored = true;
+        try {
+          if (before) writeSettingsFile(before);
+          else if (settingsFile) (0, import_node_fs.rmSync)(settingsFile, { force: true });
+        } catch {
+          restored = false;
+        }
+        throw fail("SETTINGS_IMPORT_FAILED", restored ? "설정을 바꾸지 못해 이전 값으로 되돌렸습니다. 회의자료 폴더의 쓰기 권한과 디스크 공간을 확인하세요." : "설정을 바꾸지 못했고 이전 값으로 되돌리지도 못했습니다. 설정에서 값을 다시 확인하세요.", 503);
+      }
+    }
+    applySettings(next);
+    return { settings: settings(), customFormat: projectStore.customFormat(), skipped };
   }
   function saveKeyFile(key, persist) {
     if (!options.keyFile) {
@@ -20349,24 +20450,24 @@ function createMeetingServer(options = {}) {
           throw fail("UNAUTHORIZED", "\uB3C4\uAD6C \uC778\uC99D\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", 401);
         if (request.method !== "GET" && request.headers.origin !== `http://127.0.0.1:${address.port}`)
           throw fail("FORBIDDEN", "\uC694\uCCAD \uCD9C\uCC98\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694.", 403);
-        if (path.startsWith("/api/project-settings/")) {
+        if (path.startsWith("/api/settings/")) {
           // 설정 파일은 미리보기와 적용 모두 서버에서 같은 규칙으로 검증하고, 적용은 검증이 끝난 뒤에만 쓴다.
           try {
-            if (path === "/api/project-settings/export" && request.method === "GET") {
-              json2(response, 200, { file: settingsExchange.buildSettingsFile(settingsExchange.padProjects(projectStore.projects())) });
-            } else if ((path === "/api/project-settings/preview" || path === "/api/project-settings/import") && request.method === "POST") {
-              const data = await jsonBody(request);
-              const projects = settingsExchange.limitProjects(settingsExchange.parseSettingsFile(data.file));
-              if (path === "/api/project-settings/preview") {
-                json2(response, 200, { projects: projects.map(({ slot, name, outputFormat }) => ({ slot, name, outputFormat })) });
-              } else {
+            if (path === "/api/settings/export" && request.method === "GET") {
+              json2(response, 200, { file: settingsFormat.buildSettingsFile({ summaryModel: summaryModel || aiModels.DEFAULT_SUMMARY_MODEL, defaultOutputFormat, customFormat: projectStore.customFormat(), storage }) });
+            } else if ((path === "/api/settings/preview" || path === "/api/settings/import") && request.method === "POST") {
+              const importing = path === "/api/settings/import";
+              if (importing && active) throw fail("BUSY", "진행 중인 AI 요청이 끝난 뒤 설정 파일을 불러오세요.", 409);
+              const parsed = settingsFormat.parseSettingsFile((await jsonBody(request)).file);
+              if (!importing) json2(response, 200, { preview: settingsPreview(parsed) });
+              else {
                 if (active) throw fail("BUSY", "진행 중인 AI 요청이 끝난 뒤 설정 파일을 불러오세요.", 409);
-                json2(response, 200, { projects: projectStore.replacePresets(projects, data.revisions) });
+                json2(response, 200, importSettings(parsed));
               }
             } else throw fail("NOT_FOUND", "설정 경로를 확인하세요.", 404);
           } catch (error) {
             if (error instanceof MeetingError) throw error;
-            throw fail("PROJECT_SETTINGS_ERROR", error.status ? error.message : "프로젝트 설정 파일을 처리하지 못했습니다. 회의자료 폴더의 쓰기 권한과 디스크 공간을 확인하세요.", error.status || 503);
+            throw fail("SETTINGS_FILE_ERROR", error.status ? error.message : "설정 파일을 처리하지 못했습니다. 회의자료 폴더의 쓰기 권한과 디스크 공간을 확인하세요.", error.status || 503);
           }
           return;
         }
@@ -20455,6 +20556,7 @@ function createMeetingServer(options = {}) {
             defaultSummaryModel: aiModels.DEFAULT_SUMMARY_MODEL,
             summaryModelError,
             transcriptionModel: aiModels.TRANSCRIPTION_MODEL,
+            settings: settings(),
             ...trial.status(access())
           });
           return;
@@ -20470,16 +20572,17 @@ function createMeetingServer(options = {}) {
           json2(response, 200, { ...result, ...trial.status(access()) });
           return;
         }
+        if (path === "/api/settings" && request.method === "GET") {
+          json2(response, 200, { settings: settings() });
+          return;
+        }
         if (path === "/api/settings" && request.method === "POST") {
-          if (active) throw fail("BUSY", "진행 중인 AI 요청이 끝난 뒤 요약 모델을 바꿔 주세요.", 409);
-          const data = await jsonBody(request);
-          if (!aiModels.findSummaryModel(data.summaryModel))
-            throw fail("INVALID_MODEL", "지원하지 않는 요약 모델입니다. 목록의 모델을 선택하세요.", 400);
-          if (active) throw fail("BUSY", "진행 중인 AI 요청이 끝난 뒤 요약 모델을 바꿔 주세요.", 409);
-          saveSettings(data.summaryModel);
-          summaryModel = data.summaryModel;
-          summaryModelError = "";
-          json2(response, 200, { summaryModel });
+          if (active) throw fail("BUSY", "진행 중인 AI 요청이 끝난 뒤 설정을 바꿔 주세요.", 409);
+          const next = changedSettings(await jsonBody(request));
+          if (active) throw fail("BUSY", "진행 중인 AI 요청이 끝난 뒤 설정을 바꿔 주세요.", 409);
+          saveSettings(next);
+          applySettings(next);
+          json2(response, 200, { settings: settings() });
           return;
         }
         if (path === "/api/key" && request.method === "POST") {

@@ -1,4 +1,4 @@
-// 화면의 설정 내보내기·불러오기 확인 흐름, 출력 형식 선택, 기본 키 체험 안내가 상태와 요청에 맞게 이어지는지 검증한다.
+// 화면의 출력 형식 선택과 기본 키 체험 안내가 상태와 요청에 맞게 이어지는지 검증한다.
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
@@ -36,7 +36,7 @@ function fixture({ routes = {}, confirmAnswer = true } = {}) {
     } };
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
   const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/,
-    '  globalThis.review = { state, ui, bind, refresh, applyProject, renderMinutes, lines, exportDocument, summarize, openMeeting, startBlockers, applyAccess, exportSettings, chooseSettingsFile, previewSettings, stale, presetChanged, savePreset };\n})();');
+    '  globalThis.review = { state, ui, bind, refresh, applyProject, renderMinutes, lines, exportDocument, summarize, openMeeting, startBlockers, applyAccess, stale, presetChanged, savePreset };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const review = sandbox.review;
@@ -47,105 +47,7 @@ function fixture({ routes = {}, confirmAnswer = true } = {}) {
   review.applyProject(1);
   return { ...review, calls, downloads, announce, messages, nodes };
 }
-const file = (text, name = '설정.json', bytes = new TextEncoder().encode(text)) => ({ name, size: bytes.length, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length) });
-const pick = async (review, value) => review.previewSettings({ target: { files: [value], value: 'C:\\fakepath\\설정.json' } });
-const previewRoute = (names) => () => Response.json({ projects: Array.from({ length: 9 }, (_, i) => ({ slot: i + 1, name: names[i] || '', outputFormat: i === 1 ? 'tasks' : 'meeting' })) });
 const texts = (node) => [node.textContent, ...(node.children || []).flatMap(texts)].filter(Boolean);
-
-test('미리보기는 이름을 글자로만 보여 주고 취소하면 설정을 바꾸지 않는다', async () => {
-  const xss = '<img src=x onerror=alert(1)>';
-  const review = fixture({ routes: { '/api/project-settings/preview': previewRoute(['예시 프로젝트 문서 표준화', xss]) } });
-  const before = JSON.stringify(review.state.projects);
-  await pick(review, file('{"format":"voicenote-project-settings"}'));
-  const preview = review.calls.find((call) => call.url === '/api/project-settings/preview');
-  assert.equal(preview.body.file, '{"format":"voicenote-project-settings"}');
-  assert.equal(review.ui['settings-import'].open, true);
-  const rows = review.ui['settings-preview'].children;
-  assert.equal(rows.length, 9);
-  assert.deepEqual(texts(rows[1]), ['2', xss, '업무 정리']);
-  assert.deepEqual(texts(rows[2]), ['3', '비어 있음']);
-  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8'), /innerHTML|insertAdjacentHTML|outerHTML/);
-  review.ui['settings-import'].close();
-  review.ui['confirm-import'].click();
-  assert.equal(review.calls.some((call) => call.url === '/api/project-settings/import'), false);
-  assert.equal(JSON.stringify(review.state.projects), before);
-});
-
-test('확인하면 미리보기 때의 revision과 같은 파일로 9개를 교체하고 화면 목록을 새로 그린다', async () => {
-  const replaced = Array.from({ length: 9 }, (_, i) => project(i + 1, i === 0 ? '예시 프로젝트 문서 표준화' : '', { revision: 3 }));
-  const review = fixture({ routes: { '/api/project-settings/preview': previewRoute(['예시 프로젝트 문서 표준화']), '/api/project-settings/import': () => Response.json({ projects: replaced }) } });
-  await pick(review, file('파일 내용'));
-  review.ui['confirm-import'].click();
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  const applied = review.calls.find((call) => call.url === '/api/project-settings/import');
-  assert.deepEqual(applied.body, { file: '파일 내용', revisions: [2, 0, 0, 0, 0, 0, 0, 0, 0] });
-  assert.equal(review.state.projects[0].name, '예시 프로젝트 문서 표준화');
-  assert.equal(review.ui['header-project'].textContent, '예시 프로젝트 문서 표준화');
-  assert.equal(review.ui['settings-import'].open, false);
-  assert.match(review.announce(), /회의와 녹음은 그대로/);
-});
-
-test('서버 검증 실패나 동시 수정 거절이면 현재 설정을 그대로 둔다', async () => {
-  const rejected = fixture({ routes: { '/api/project-settings/preview': () => Response.json({ error: { message: '5번 프로젝트가 중복됐습니다.' } }, { status: 400 }) } });
-  await pick(rejected, file('{}'));
-  assert.equal(rejected.ui['settings-import'].open, false);
-  assert.match(rejected.announce(), /중복됐습니다.*현재 설정은 바뀌지 않았습니다/);
-  assert.equal(rejected.state.pendingImport, null);
-
-  const conflict = fixture({ routes: { '/api/project-settings/preview': previewRoute(['새 이름']),
-    '/api/project-settings/import': () => Response.json({ error: { message: '다른 창에서 프로젝트 설정이 바뀌었습니다.' } }, { status: 409 }) } });
-  const before = JSON.stringify(conflict.state.projects);
-  await pick(conflict, file('{}'));
-  conflict.ui['confirm-import'].click();
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(JSON.stringify(conflict.state.projects), before);
-  assert.match(conflict.announce(), /바꾸지 못했습니다.*다른 창/);
-});
-
-test('원본 바이트가 128KiB를 넘거나 UTF-8이 손상된 파일은 서버로 보내지 않는다', async () => {
-  const review = fixture();
-  const bom = new Uint8Array(131073); bom.set([0xef, 0xbb, 0xbf]);
-  await pick(review, file('', 'bom.json', bom));
-  assert.match(review.announce(), /128KiB/);
-  const lying = { name: 'x.json', size: 10, arrayBuffer: async () => new Uint8Array(131073).buffer };
-  await pick(review, lying);
-  assert.match(review.announce(), /128KiB/);
-  await pick(review, file('', 'broken.json', new Uint8Array([0x7b, 0xff, 0x7d])));
-  assert.match(review.announce(), /UTF-8 설정 파일이 아닙니다/);
-  assert.equal(review.calls.some((call) => call.url.startsWith('/api/project-settings/')), false);
-});
-
-test('녹음·마이크 허가·AI 분석 중에는 설정 파일 선택과 내보내기를 막는다', async () => {
-  const review = fixture();
-  review.state.recorders.add({});
-  review.refresh();
-  assert.equal(review.ui['import-settings'].disabled, true);
-  review.chooseSettingsFile();
-  assert.equal(review.ui['settings-file'].clicked || 0, 0);
-  review.state.recorders.clear();
-  review.state.aiController = new AbortController();
-  await pick(review, file('{}'));
-  await review.exportSettings();
-  assert.equal(review.calls.length, 0);
-  review.state.aiController = null;
-  review.state.permissionPending = true;
-  review.refresh();
-  assert.equal(review.ui['export-settings'].disabled, true);
-});
-
-test('저장하지 않은 프리셋 입력이 있으면 내보내기 전에 묻고 취소하면 아무것도 받지 않는다', async () => {
-  const exported = { format: 'voicenote-project-settings', version: 1, projects: [] };
-  const cancelled = fixture({ confirmAnswer: false, routes: { '/api/project-settings/export': () => Response.json({ file: exported }) } });
-  cancelled.ui['project-name'].value = '아직 저장 안 한 이름';
-  await cancelled.exportSettings();
-  assert.equal(cancelled.calls.length, 0);
-  assert.equal(cancelled.ui['project-name'].value, '아직 저장 안 한 이름');
-  const accepted = fixture({ routes: { '/api/project-settings/export': () => Response.json({ file: exported }) } });
-  accepted.ui['output-format'].value = 'summary';
-  await accepted.exportSettings();
-  assert.deepEqual(JSON.parse(await accepted.downloads[0].text()), exported);
-  assert.equal(accepted.ui['output-format'].value, 'summary');
-});
 
 test('선택한 출력 형식을 요청·저장·내보내기·화면에 쓰고 분석 식별자로 체험을 확정한다', async () => {
   const review = fixture();
