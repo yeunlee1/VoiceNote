@@ -20297,6 +20297,15 @@ function createMeetingServer(options = {}) {
     }
   }
   const settings = () => ({ summaryModel, defaultOutputFormat, storage: { ...storage } });
+  const copyWriter = require("./사본저장.cjs").createCopyWriter({ store: meetingStore, storage: () => ({ ...storage }), fs: options.copyFs });
+  // 사본 저장이 실패해도 회의 결과 저장은 성공으로 두고, 실패 내용만 응답에 담는다.
+  function copiesAfterSave(location, id) {
+    try {
+      return copyWriter.copyResult(location, id);
+    } catch {
+      return { ok: false, written: [], skipped: [], failed: [{ kind: "all", message: "고른 폴더에 사본을 쓰지 못했습니다. 설정에서 저장 위치를 확인하세요." }] };
+    }
+  }
   const currentSettings = () => ({ storedSummaryModel, defaultOutputFormat, storage: { ...storage } });
   function writeSettingsFile(content) {
     const temporary = `${settingsFile}.${(0, import_node_crypto.randomBytes)(8).toString("hex")}.tmp`;
@@ -20510,6 +20519,11 @@ function createMeetingServer(options = {}) {
               } else throw fail("NOT_FOUND", "녹음 경로를 확인하세요.", 404);
               return;
             }
+            const copiesRoute = /^\/api\/meetings\/([a-z0-9]+)\/([0-9a-f-]{36})\/copies$/.exec(path);
+            if (copiesRoute && request.method === "POST") {
+              json2(response, 200, { copies: copyWriter.copyResult(copiesRoute[1], copiesRoute[2]) });
+              return;
+            }
             const reviewRoute = /^\/api\/meetings\/([a-z0-9]+)\/([0-9a-f-]{36})\/review$/.exec(path);
             if (reviewRoute && request.method === "POST") {
               json2(response, 200, { review: meetingStore.saveReview(reviewRoute[1], reviewRoute[2], await jsonBody(request)) });
@@ -20527,7 +20541,8 @@ function createMeetingServer(options = {}) {
               try { data = JSON.parse((await bodyBytes(request, 8 * 1024 * 1024)).toString("utf8")); }
               catch (error) { if (error instanceof MeetingError) throw error; throw fail("INVALID_INPUT", "입력 형식을 확인하세요.", 400); }
               if (!object3(data)) throw fail("INVALID_INPUT", "입력 형식을 확인하세요.", 400);
-              json2(response, 200, { meeting: meetingStore.saveMeeting(match[1], data) });
+              const meeting = meetingStore.saveMeeting(match[1], data);
+              json2(response, 200, { meeting, copies: copiesAfterSave(match[1], meeting.id) });
             } else throw fail("NOT_FOUND", "회의 경로를 확인하세요.", 404);
           } catch (error) {
             if (error instanceof MeetingError) throw error;

@@ -51,9 +51,9 @@ function storedFormat(record) {
   return { outputFormat: format && format !== 'custom' ? format : 'meeting' };
 }
 const formatFields = value => ({ ...(value.outputFormat !== 'meeting' ? { outputFormat: value.outputFormat } : {}), ...(value.customFormat ? { customFormat: value.customFormat } : {}) });
-// 결과 파일 이름의 앞부분이다. 고른 폴더에 쓰는 사본도 같은 앞부분을 쓴다.
+// 결과 파일 이름의 앞부분이다. 고른 폴더에 쓰는 사본도 같은 앞부분을 쓴다. 제목은 이모지가 반쪽으로 잘리지 않게 글자 단위로 80자까지 쓴다.
 function artifactPrefix(record) {
-  const safe = value => value.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 80);
+  const safe = value => Array.from(value.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '')).slice(0, 80).join('');
   return `${safe(record.date) || '날짜미입력'}-${String(record.dailySequence).padStart(2, '0')}차-${safe(record.title)}-${record.id.slice(0, 8)}`;
 }
 // 옛 기록은 slot 번호로, 새 기록은 location 이름으로 자기 보관함을 밝힌다. 다른 폴더로 옮겨진 기록은 읽지 않는다.
@@ -309,7 +309,15 @@ function createMeetingStore(root, validateMinutes, options = {}) {
       atomicWrite(reviewPath(location, id), JSON.stringify(review, null, 2));
       return review;
     },
-    loadReview
+    loadReview,
+    // 고른 폴더에 쓸 사본의 재료다. 결과 기록과 그 녹음의 원음 파일 위치, 사본 기록을 둘 보관함 폴더를 함께 돌려준다.
+    resultFiles(location, id) {
+      if (!fs.existsSync(recordPath(location, id))) throw fail(404, '사본을 저장할 회의 결과를 찾지 못했습니다.');
+      const record = load(location, id);
+      const dir = directory(location);
+      const audio = record.recordingId ? (record.audio || []).map(part => ({ index: part.index, type: part.type, file: path.join(dir, part.file) })) : [];
+      return { record, transcript: record.transcript, recordingId: record.recordingId || null, audio, directory: dir };
+    }
   };
 }
 module.exports = { createMeetingStore, LOCATIONS, artifactPrefix };
