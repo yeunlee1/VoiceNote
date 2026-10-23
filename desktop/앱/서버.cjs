@@ -20232,7 +20232,7 @@ function createMeetingServer(options = {}) {
       if (!result.success) throw Object.assign(new Error("회의록 형식을 확인하세요."), { status: 400 });
       return result.data;
     },
-    { atomicWrite: options.atomicWrite }
+    { atomicWrite: options.atomicWrite, removeFile: options.removeFile }
   );
   const microphoneControl = options.microphoneControl ?? require("./마이크제어.cjs").setMicrophoneVolume;
   let microphoneBusy = false;
@@ -20359,7 +20359,7 @@ function createMeetingServer(options = {}) {
     return {
       summaryModel: { value: parsed.summaryModel, apply: Boolean(model), ...model ? {} : { reason: "이 앱의 요약 모델 목록에 없어 적용하지 않습니다." } },
       defaultOutputFormat: { value: parsed.defaultOutputFormat, apply: true },
-      customFormat: { name: parsed.customFormat?.name ?? null, apply: parsed.customFormat !== null },
+      customFormat: { name: parsed.customFormat?.name ?? null, apply: true },
       storage: parsed.storage ? Object.fromEntries(settingsFormat.STORAGE_KINDS.map((kind) => {
         const value = parsed.storage[kind];
         const check = value ? settingsFormat.checkFolder(value) : { ok: true };
@@ -20367,7 +20367,7 @@ function createMeetingServer(options = {}) {
       })) : null
     };
   }
-  // 적용할 값만 바꾸고, 내 형식 저장이 실패하면 AI 설정 파일을 원래 바이트로 되돌린다.
+  // 적용할 값만 바꾸고, 내 형식 저장·삭제가 실패하면 AI 설정 파일을 원래 바이트로 되돌린다. 파일의 내 형식이 null이면 지금 내 형식을 지운다.
   function importSettings(parsed) {
     const preview = settingsPreview(parsed);
     const labels = { audio: "오디오 저장 위치", transcript: "전사문 저장 위치", summary: "요약본 저장 위치" };
@@ -20383,19 +20383,18 @@ function createMeetingServer(options = {}) {
     }
     const before = settingsFile && (0, import_node_fs.existsSync)(settingsFile) ? (0, import_node_fs.readFileSync)(settingsFile) : null;
     saveSettings(next);
-    if (parsed.customFormat) {
+    try {
+      if (parsed.customFormat) projectStore.saveCustomFormat(parsed.customFormat);
+      else projectStore.deleteCustomFormat();
+    } catch {
+      let restored = true;
       try {
-        projectStore.saveCustomFormat(parsed.customFormat);
+        if (before) writeSettingsFile(before);
+        else if (settingsFile) (0, import_node_fs.rmSync)(settingsFile, { force: true });
       } catch {
-        let restored = true;
-        try {
-          if (before) writeSettingsFile(before);
-          else if (settingsFile) (0, import_node_fs.rmSync)(settingsFile, { force: true });
-        } catch {
-          restored = false;
-        }
-        throw fail("SETTINGS_IMPORT_FAILED", restored ? "설정을 바꾸지 못해 이전 값으로 되돌렸습니다. 회의자료 폴더의 쓰기 권한과 디스크 공간을 확인하세요." : "설정을 바꾸지 못했고 이전 값으로 되돌리지도 못했습니다. 설정에서 값을 다시 확인하세요.", 503);
+        restored = false;
       }
+      throw fail("SETTINGS_IMPORT_FAILED", restored ? "설정을 바꾸지 못해 이전 값으로 되돌렸습니다. 회의자료 폴더의 쓰기 권한과 디스크 공간을 확인하세요." : "설정을 바꾸지 못했고 이전 값으로 되돌리지도 못했습니다. 설정에서 값을 다시 확인하세요.", 503);
     }
     applySettings(next);
     return { settings: settings(), customFormat: projectStore.customFormat(), skipped };

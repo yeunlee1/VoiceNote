@@ -161,7 +161,7 @@ test('목록에 없는 요약 모델은 적용하지 않는다', async t => {
   const file = fileText({ summaryModel: 'gpt-없는-모델', defaultOutputFormat: 'tasks', customFormat: null });
   const preview = await server.request('/api/settings/preview', { file });
   assert.deepEqual(preview.body.preview.summaryModel, { value: 'gpt-없는-모델', apply: false, reason: '이 앱의 요약 모델 목록에 없어 적용하지 않습니다.' });
-  assert.deepEqual(preview.body.preview.customFormat, { name: null, apply: false });
+  assert.deepEqual(preview.body.preview.customFormat, { name: null, apply: true });
   const imported = await server.request('/api/settings/import', { file });
   assert.equal(imported.body.settings.summaryModel, SECOND);
   assert.equal(imported.body.settings.defaultOutputFormat, 'tasks');
@@ -169,13 +169,26 @@ test('목록에 없는 요약 모델은 적용하지 않는다', async t => {
   assert.equal((await server.request('/api/config')).body.summaryModel, SECOND);
 });
 
-test('파일에 내 형식이 없으면 지금 내 형식을 지우지 않는다', async t => {
+test('파일에 내 형식이 없으면 지금 내 형식을 지우고, 지우지 못하면 다른 값도 되돌린다', async t => {
   const server = await start(t);
   assert.equal((await server.request('/api/custom-format', custom)).status, 200);
-  const imported = await server.request('/api/settings/import', { file: fileText({ summaryModel: FIRST, defaultOutputFormat: 'meeting', customFormat: null }) });
+  const file = fileText({ summaryModel: FIRST, defaultOutputFormat: 'custom', customFormat: null });
+  assert.deepEqual((await server.request('/api/settings/preview', { file })).body.preview.customFormat, { name: null, apply: true });
+  const imported = await server.request('/api/settings/import', { file });
   assert.equal(imported.status, 200);
-  assert.deepEqual(imported.body.customFormat, custom);
-  assert.deepEqual((await server.request('/api/custom-format')).body.customFormat, custom);
+  assert.equal(imported.body.customFormat, null);
+  assert.equal(imported.body.settings.defaultOutputFormat, 'custom');
+  assert.deepEqual((await server.request('/api/custom-format')).body, { customFormat: null });
+  const locked = await start(t, { removeFile: () => { throw new Error('다른 프로그램이 파일을 쓰고 있습니다.'); } });
+  await locked.request('/api/settings', { summaryModel: SECOND });
+  assert.equal((await locked.request('/api/custom-format', custom)).status, 200);
+  const bytes = fs.readFileSync(locked.settingsFile);
+  const failed = await locked.request('/api/settings/import', { file: fileText({ summaryModel: FIRST, defaultOutputFormat: 'tasks', customFormat: null }) });
+  assert.equal(failed.status, 503);
+  assert.equal(failed.body.error.code, 'SETTINGS_IMPORT_FAILED');
+  assert.deepEqual(fs.readFileSync(locked.settingsFile), bytes);
+  assert.deepEqual((await locked.request('/api/custom-format')).body.customFormat, custom);
+  assert.deepEqual((await locked.request('/api/settings')).body.settings, { summaryModel: SECOND, defaultOutputFormat: 'meeting', storage: emptyStorage });
 });
 
 test('내 형식 저장이 실패하면 다른 값도 이전으로 되돌린다', async t => {

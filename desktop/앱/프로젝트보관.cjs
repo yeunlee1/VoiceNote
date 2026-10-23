@@ -56,6 +56,7 @@ function storedFormat(record) {
 const formatFields = value => ({ ...(value.outputFormat !== 'meeting' ? { outputFormat: value.outputFormat } : {}), ...(value.customFormat ? { customFormat: value.customFormat } : {}) });
 function createProjectStore(root, validateMinutes, options = {}) {
   const write = options.atomicWrite ?? atomicWrite;
+  const remove = options.removeFile ?? (file => fs.unlinkSync(file));
   function directory(slot) {
     // 이전 버전의 4~9번 폴더는 지우지 않고 남겨 두되 읽거나 쓰지 않는다.
     if (!Number.isInteger(slot) || slot < 1 || slot > MAX_PROJECTS) throw fail(404, '프로젝트 번호를 확인하세요.');
@@ -145,7 +146,7 @@ function createProjectStore(root, validateMinutes, options = {}) {
       return value;
     },
     deleteCustomFormat() {
-      if (fs.existsSync(customFile)) fs.unlinkSync(customFile);
+      if (fs.existsSync(customFile)) remove(customFile);
       return null;
     },
     savePreset(slot, data) {
