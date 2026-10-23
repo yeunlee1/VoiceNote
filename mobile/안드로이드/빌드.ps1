@@ -29,6 +29,7 @@ try {
   $dex=Join-Path $stage 'dex'
   New-Item -ItemType Directory -Path $assets,$classes,$dex -Force | Out-Null
   Copy-Item -Path (Join-Path $PSScriptRoot 'assets\*') -Destination $assets
+  if($DebugBuild){Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\..\desktop\tests\fixtures\회의문서-예시.json') -Destination (Join-Path $assets 'meeting-document-cases.json')}
   & node (Join-Path $PSScriptRoot '요약계약추출.cjs') $assets $ServerScript
   if($LASTEXITCODE -ne 0){throw '요약 계약 추출 실패'}
   Remove-Item -LiteralPath (Join-Path $assets '임시검증') -Recurse -Force -ErrorAction SilentlyContinue

@@ -26,7 +26,7 @@ final class Store {
     JSONObject asset(String name) throws Exception {try(InputStream in=context.getAssets().open(name)){return new JSONObject(read(in));}}
     JSONObject settings()throws Exception{
         String model=summaryModel();if(AiModels.find(model)==null)model=AiModels.DEFAULT_MODEL;
-        return new JSONObject().put("summaryModel",model).put("defaultOutputFormat",defaultOutputFormat());
+        return new JSONObject().put("summaryModel",model).put("defaultOutputFormat",defaultOutputFormat()).put("storage",Copies.storage(context));
     }
     byte[] exportSettings()throws Exception{
         JSONObject current=settings(),custom=customFormat();
@@ -289,7 +289,7 @@ final class Store {
             // 실제 결과와 최신 포인터를 먼저 확정한다. 부속 파일 쓰기가 실패해도 새 요약을 가짜 옛 결과로 읽지 않는다.
             List<String> oldKeys=new ArrayList<>();for(Iterator<String> keys=record.keys();keys.hasNext();)oldKeys.add(keys.next());for(String key:oldKeys)record.remove(key);
             for(Iterator<String> keys=next.keys();keys.hasNext();){String key=keys.next();record.put(key,next.get(key));}
-            write(new File(dir,"요약.json"),minutes.toString(2));write(new File(dir,"회의록.txt"),format(next,minutes));
+            write(new File(dir,"요약.json"),minutes.toString(2));write(new File(dir,"회의록.txt"),MeetingDocument.text(next,minutes));
         }
     }
     static String meetingFormat(JSONObject record){
@@ -306,45 +306,6 @@ final class Store {
     JSONObject saveCustomFormat(JSONObject value) throws Exception {CustomFormat format=CustomFormat.parse(value.toString());write(customFile(),format.json());return new JSONObject(format.json());}
     void deleteCustomFormat()throws IOException{File file=customFile();new AtomicFile(file).delete();if(file.exists())throw new IOException("내 형식을 지우지 못했습니다.");}
     static String label(String format){return "summary".equals(format)?"핵심 요약":"tasks".equals(format)?"업무 정리":"회의록";}
-    static String format(JSONObject record,JSONObject minutes) throws Exception {
-        String kind=meetingFormat(record);
-        StringBuilder out=new StringBuilder(record.optString("title")).append("\n\n").append(record.optString("date")).append(" · ").append(record.optInt("dailySequence")).append("차 회의");
-        if("custom".equals(kind)){
-            // 내 형식은 고른 항목만 고른 순서와 이름으로 쓰고, 내용이 없는 항목은 없음으로 남긴다.
-            CustomFormat custom=custom(record);out.append(" · ").append(custom.name);
-            for(CustomFormat.Section section:custom.sections){
-                out.append("\n\n").append(section.title).append("\n");
-                if("overview".equals(section.key)){out.append(minutes.getString("overview")).append("\n");continue;}
-                if("topics".equals(section.key)){if(minutes.getJSONArray("topics").length()==0)out.append("없음\n");else topics(out,minutes);continue;}
-                if("actions".equals(section.key)){if(minutes.getJSONArray("actions").length()==0)out.append("- 없음\n");else actions(out,minutes,true);continue;}
-                JSONArray items=minutes.getJSONArray(section.key);if(items.length()==0)out.append("- 없음\n");
-                for(int i=0;i<items.length();i++)out.append("- ").append(items.getString(i)).append("\n");
-            }
-            return out.toString();
-        }
-        if("summary".equals(kind)){
-            out.append(" · 핵심 요약\n\n핵심 요약\n").append(minutes.getString("overview")).append("\n\n주요 내용\n");topics(out,minutes);
-            out.append("\n합의된 방향\n");append(out,minutes.getJSONArray("decisions"));out.append("\n다음 할 일\n");actions(out,minutes,false);
-            out.append("\n미확정 사항\n");append(out,minutes.getJSONArray("openQuestions"));return out.toString();
-        }
-        if("tasks".equals(kind)){
-            // 업무 정리는 담당과 기한이 없으면 지어내지 않고 미정으로 보여 준다.
-            out.append(" · 업무 정리\n\n업무 요약\n").append(minutes.getString("overview")).append("\n\n할 일\n");actions(out,minutes,true);
-            out.append("\n확인 필요\n");append(out,minutes.getJSONArray("openQuestions"));out.append("\n결정 사항\n");append(out,minutes.getJSONArray("decisions"));
-            out.append("\n관련 논의\n");topics(out,minutes);return out.toString();
-        }
-        out.append("\n\n핵심 요약\n").append(minutes.getString("overview")).append("\n\n상세 회의 내용\n\n합의된 방향\n");
-        append(out,minutes.getJSONArray("decisions"));topics(out,minutes);
-        out.append("\n다음 할 일\n");actions(out,minutes,false);
-        out.append("\n미확정 사항\n");append(out,minutes.getJSONArray("openQuestions"));return out.toString();
-    }
-    static void topics(StringBuilder out,JSONObject minutes) throws Exception {JSONArray topics=minutes.getJSONArray("topics");for(int i=0;i<topics.length();i++){JSONObject topic=topics.getJSONObject(i);out.append("\n").append(topic.getString("title")).append("\n");append(out,topic.getJSONArray("points"));}}
-    static void actions(StringBuilder out,JSONObject minutes,boolean undecided) throws Exception {
-        JSONArray actions=minutes.getJSONArray("actions");
-        for(int i=0;i<actions.length();i++){JSONObject a=actions.getJSONObject(i);out.append("- ").append(a.getString("task"));
-            if(!a.isNull("owner")&&!a.optString("owner").isEmpty())out.append(" · 담당 ").append(a.optString("owner"));else if(undecided)out.append(" · 담당 미정");
-            if(!a.isNull("due")&&!a.optString("due").isEmpty())out.append(" · 기한 ").append(a.optString("due"));else if(undecided)out.append(" · 기한 미정");
-            out.append("\n");}
-    }
-    static void append(StringBuilder out,JSONArray entries) throws Exception {for(int i=0;i<entries.length();i++)out.append(entries.getString(i)).append("\n\n");}
+    static String format(JSONObject record,JSONObject minutes)throws Exception{return MeetingDocument.text(record,minutes);}
+
 }

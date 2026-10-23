@@ -71,6 +71,7 @@ final class Ai {
         // 회의록까지 저장하면 체험 1회로 확정하고, 실패·취소면 예약만 돌려준다.
         try{analyze(record);}catch(Exception ex){store.trial().release(analysisId);throw ex;}
         finishAccess(record);
+        copyResult(record);
     }
     void finishAccess(JSONObject record)throws Exception {
         for(int attempt=0;;attempt++){
@@ -101,7 +102,14 @@ final class Ai {
                 }
             }
         }catch(Exception ex){store.trial().release(analysisId);throw ex;}finally{usageTarget=null;}
-        finishAccess(record);return record;
+        finishAccess(record);copyResult(record);return record;
+    }
+    void copyResult(JSONObject record)throws Exception {
+        JSONObject copies;
+        try{copies=Copies.copyResult(store.context,store,Store.location(record),record.getString("id"),record.getString("resultId"));}
+        catch(Exception ex){copies=new JSONObject().put("ok",false).put("written",new JSONArray()).put("skipped",new JSONArray()).put("failed",new JSONArray().put(new JSONObject().put("kind","all").put("message","사본 저장을 마치지 못했습니다. 폴더를 확인한 뒤 다시 저장하세요.")));}
+        record.put("copies",copies);
+        if(!copies.optBoolean("ok"))record.put("message",record.optString("message")+" · 고른 폴더에 저장하지 못했습니다. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.");
     }
     void analyze(JSONObject record) throws Exception {
         File dir=store.directory(Store.location(record),record.getString("id"));JSONArray audio=record.getJSONArray("audio");StringBuilder transcript=new StringBuilder();

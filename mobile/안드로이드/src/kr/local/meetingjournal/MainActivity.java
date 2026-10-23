@@ -18,7 +18,8 @@ import java.util.zip.*;
 public final class MainActivity extends Activity {
     private WebView view; private Store store; private String permissionId; private JSONObject permissionInput;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
-    private static final int EXPORT_SETTINGS=21,IMPORT_SETTINGS=22;
+    private static final int EXPORT_SETTINGS=21,IMPORT_SETTINGS=22,PICK_FOLDER=23;
+    private volatile String folderKind;
     // 파일 선택 창이 열린 요청, 내보낼 내용, 확인을 기다리는 불러온 설정이다. 확인 전에는 아무것도 저장하지 않는다.
     private volatile String fileRequest; private volatile byte[] exportBytes; private volatile SettingsFile.Value importPending; private volatile String importToken;
     @Override public void onCreate(Bundle state){super.onCreate(state);store=new Store(this);view=new WebView(this);FrameLayout container=new FrameLayout(this);container.addView(view,new FrameLayout.LayoutParams(-1,-1));setContentView(container);
@@ -63,6 +64,14 @@ public final class MainActivity extends Activity {
                 answer(id,store.importSettings(pending).put("connection",connection()),null);break;
             }
             case "saveSettings":settingsIdle();answer(id,new JSONObject().put("settings",store.saveSettings(data)).put("connection",connection()),null);break;
+            case "pickFolder":{
+                fileIdle();settingsIdle();String kind=data.getString("kind");Copies.kind(kind);folderKind=kind;fileRequest=id;
+                runOnUiThread(()->{try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION|Intent.FLAG_GRANT_PREFIX_URI_PERMISSION),PICK_FOLDER);}catch(Exception ex){fileRequest=null;folderKind=null;answer(id,null,"폴더 선택 창을 열지 못했습니다.");}});break;
+            }
+            case "clearFolder":settingsIdle();fileIdle();Copies.clearFolder(this,data.getString("kind"));answer(id,new JSONObject().put("settings",store.settings()),null);break;
+            case "copies":{
+                if(MeetingService.active)throw new IOException("녹음이나 분석이 끝난 뒤 사본을 저장할 수 있습니다.");fileIdle();answer(id,Copies.copyResult(this,store,location,data.getString("id"),nullableString(data,"resultId")),null);break;
+            }
             case "cancelSettings": importPending=null;importToken=null;answer(id,true,null);break;
             case "draft": answer(id,store.draft(),null);break;
             case "saveDraft": if(!MeetingService.active&&permissionId==null)store.saveDraft(data);answer(id,true,null);break;
@@ -106,7 +115,8 @@ public final class MainActivity extends Activity {
                 File transcript=new File(store.directory(location,meetingId),"전사.txt");String resultId=record.optString("resultId",null);
                 answer(id,new JSONObject().put("record",record).put("minutes",record.optJSONObject("minutes")==null?JSONObject.NULL:record.getJSONObject("minutes"))
                     .put("transcript",transcript.exists()?Store.read(transcript):"").put("resultId",resultId==null?JSONObject.NULL:resultId)
-                    .put("versions",store.results(location,meetingId)).put("review",resultId==null?JSONObject.NULL:store.loadReview(location,meetingId,resultId)),null);break;
+                    .put("versions",store.results(location,meetingId)).put("review",resultId==null?JSONObject.NULL:store.loadReview(location,meetingId,resultId))
+                    .put("copies",resultId==null?JSONObject.NULL:Copies.status(this,store,location,meetingId,resultId)),null);break;
             }
             case "share":share(id,location,data.getString("id"),nullableString(data,"resultId"),data.optString("kind","summary"));break;
             case "copy":{
@@ -145,6 +155,7 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int code,int result,Intent intent){
         super.onActivityResult(code,result,intent);
+        if(code==PICK_FOLDER){folderResult(result,intent);return;}
         if(code!=EXPORT_SETTINGS&&code!=IMPORT_SETTINGS)return;
         String id=fileRequest;byte[] bytes=exportBytes;Uri uri=result==RESULT_OK&&intent!=null?intent.getData():null;
         if(id==null)return;
@@ -162,6 +173,17 @@ public final class MainActivity extends Activity {
             }
         }catch(Exception ex){answer(id,null,ex instanceof IOException?ex.getMessage():"설정 파일을 처리하지 못했습니다. 기존 설정은 그대로입니다.");}
         finally{fileRequest=null;exportBytes=null;}});
+    }
+    private void folderResult(int result,Intent intent){
+        String id=fileRequest,kind=folderKind;if(id==null||kind==null)return;Uri uri=result==RESULT_OK&&intent!=null?intent.getData():null;
+        worker.submit(()->{try{
+            if(uri==null){answer(id,new JSONObject().put("cancelled",true).put("settings",store.settings()),null);return;}
+            int required=Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+            if((intent.getFlags()&required)!=required)throw new IOException("폴더의 읽기·쓰기 권한을 받을 수 없습니다. 다른 폴더를 골라 주세요.");
+            Uri tree=Copies.TreeSink.tree(uri.toString()),document=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,android.provider.DocumentsContract.getTreeDocumentId(tree));
+            String name=new Copies.TreeSink(this).name(document);Copies.changeFolder(this,kind,uri.toString(),name,new Copies.TreePermissions(this));
+            answer(id,new JSONObject().put("settings",store.settings()),null);
+        }catch(Exception ex){answer(id,null,"저장 위치를 바꾸지 못했습니다. 폴더를 다시 골라 주세요.");}finally{fileRequest=null;folderKind=null;}});
     }
     private byte[] readLimited(Uri uri)throws IOException {
         // 128KiB를 넘는 파일은 끝까지 읽지 않고 거절한다.
@@ -194,7 +216,7 @@ public final class MainActivity extends Activity {
         if("all".equals(kind)){
             output=new File(cache,prefix+".zip");try(ZipOutputStream zip=new ZipOutputStream(new FileOutputStream(output))){
                 File transcript=new File(dir,"전사.txt");if(transcript.exists())zipText(zip,"전사.txt",Store.read(transcript));
-                if(record.optJSONObject("minutes")!=null){zipText(zip,document,Store.format(record,record.getJSONObject("minutes")));zipText(zip,"요약.json",record.getJSONObject("minutes").toString(2));}
+                if(record.optJSONObject("minutes")!=null){zipText(zip,document,MeetingDocument.text(record,record.getJSONObject("minutes")));zipText(zip,"요약.json",record.getJSONObject("minutes").toString(2));}
                 JSONArray audio=record.getJSONArray("audio");for(int i=0;i<audio.length();i++){String name=audio.getString(i);File file=new File(dir,name);if(!file.exists())continue;
                     zip.putNextEntry(new ZipEntry(name));try(InputStream in=new FileInputStream(file)){byte[] b=new byte[8192];for(int n;(n=in.read(b))!=-1;)zip.write(b,0,n);}zip.closeEntry();}
             }
@@ -209,7 +231,7 @@ public final class MainActivity extends Activity {
     private String resultText(String location,String id,String resultId,String kind)throws Exception {
         if("transcript".equals(kind)){File file=new File(store.directory(location,id),"전사.txt");if(!file.exists())throw new IOException("아직 저장된 전사문이 없습니다.");return Store.read(file);}
         JSONObject record=store.result(location,id,resultId);if(record.optJSONObject("minutes")==null)throw new IOException("아직 정리된 결과가 없습니다. 분석이 끝난 뒤 다시 시도하세요.");
-        return Store.format(record,record.getJSONObject("minutes"));
+        return MeetingDocument.text(record,record.getJSONObject("minutes"));
     }
     @Override public void onBackPressed(){view.evaluateJavascript("!!(window.handleBack&&window.handleBack())",handled->{if(!"true".equals(handled)&&!isFinishing())super.onBackPressed();});}
     @Override public void onDestroy(){view.removeJavascriptInterface("Native");view.destroy();worker.shutdown();super.onDestroy();}

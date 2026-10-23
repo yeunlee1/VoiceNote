@@ -327,6 +327,59 @@ public final class AndroidChecks extends Instrumentation {
         new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인");expect(requests.size()==before+4,"의견 지시문 내용이 바뀌면 이전 캐시를 쓰지 않는다");
         JSONArray messages=new JSONObject(requests.get(before+3)).getJSONArray("input");expect(messages.getJSONObject(messages.length()-2).getString("content").equals("의견은 전사에서 다시 확인하세요."),"변경한 실제 의견 지시문으로 요청한다");
     }
+    static void documentChecks(Store store)throws Exception{
+        JSONArray cases=store.asset("meeting-document-cases.json").getJSONArray("cases");
+        for(int i=0;i<cases.length();i++){
+            JSONObject example=cases.getJSONObject(i),record=example.getJSONObject("record"),minutes=record.getJSONObject("minutes");
+            expect(MeetingDocument.text(record,minutes).equals(example.getString("text")),"공통 텍스트 예시 일치: "+example.getString("name"));
+            expect(MeetingDocument.markdown(record,minutes).equals(example.getString("markdown")),"공통 Markdown 예시 일치: "+example.getString("name"));
+        }
+    }
+    static boolean hasKind(JSONArray items,String kind)throws Exception{for(int i=0;i<items.length();i++)if(items.getJSONObject(i).optString("kind").equals(kind))return true;return false;}
+    static void copyChecks(Store store)throws Exception{
+        JSONObject record=analyzable(store,"사본 회의");String id=record.getString("id");File dir=store.directory("main",id);
+        Store.write(new File(dir,"전사.txt"),"사본 전사");Store.write(new File(dir,"원음-001.m4a"),"합성 원음");store.finish(record,minutes(),null);String rid=record.getString("resultId");
+        String metadata=Store.read(new File(dir,"회의정보.json"));File target=new File(store.context.getCacheDir(),"고른 폴더");target.mkdir();
+        Map<String,String> folders=new HashMap<>();for(String kind:new String[]{"audio","transcript","summary"})folders.put(kind,target.toURI().toString());
+        Copies.FileSink files=new Copies.FileSink();Copies.Sink failText=new Copies.Sink(){
+            public Copies.Created write(String folder,String name,String mime,Copies.Source source)throws Exception{if(name.endsWith("-요약.txt"))throw new IOException("합성 txt 실패");return files.write(folder,name,mime,source);}
+            public boolean exists(String uri)throws Exception{return files.exists(uri);}
+        };
+        JSONObject first=new Copies(store,folders,failText).copyResult("main",id,rid);
+        expect(first.getJSONArray("written").length()==3&&hasKind(first.getJSONArray("failed"),"summaryTxt")&&!first.getBoolean("ok"),"md 성공·txt 실패가 종류별 사본 기록으로 남는다");
+        expect(Store.read(new File(dir,"회의정보.json")).equals(metadata),"사본 실패가 저장된 회의 결과를 바꾸지 않는다");
+        JSONObject second=new Copies(store,folders,files).copyResult("main",id,rid);
+        expect(second.getJSONArray("written").length()==1&&hasKind(second.getJSONArray("written"),"summaryTxt")&&target.list().length==4,"다시 저장하면 txt만 쓰고 다른 사본은 중복하지 않는다");
+        String longTitle=new String(new char[300]).replace('\0','가')+"😀/검토:*";
+        record.put("title",longTitle);store.finish(record,minutes().put("suggestedTitle",longTitle),null);String next=record.getString("resultId");
+        JSONObject renamed=new Copies(store,folders,files).copyResult("main",id,next);
+        expect(renamed.getJSONArray("written").length()==3&&!hasKind(renamed.getJSONArray("written"),"audio")&&target.list().length==7,"다시 분석해 제목이 달라도 원음은 한 번만 복사한다");
+        JSONArray longNames=renamed.getJSONArray("written");for(int i=0;i<longNames.length();i++)expect(longNames.getJSONObject(i).getString("name").getBytes(StandardCharsets.UTF_8).length<=240,"300자 제목도 실제 사본 이름의 바이트 한도를 지킨다");
+        File other=new File(store.context.getCacheDir(),"새 폴더");other.mkdir();folders.put("summary",other.toURI().toString());JSONObject moved=new Copies(store,folders,files).copyResult("main",id,next);
+        expect(moved.getJSONArray("written").length()==2&&other.list().length==2&&target.list().length==7,"폴더를 바꾸면 새 요약 두 파일만 쓰고 옛 사본을 남긴다");
+        String md=null;JSONArray written=moved.getJSONArray("written");for(int i=0;i<written.length();i++)if(written.getJSONObject(i).getString("kind").equals("summaryMd"))md=written.getJSONObject(i).getString("uri");
+        new File(java.net.URI.create(md)).delete();JSONObject missing=new Copies(store,folders,files).copyResult("main",id,next);
+        expect(missing.getJSONArray("written").length()==1&&hasKind(missing.getJSONArray("written"),"summaryMd"),"성공했던 문서가 지워지면 그 문서만 다시 쓴다");
+        JSONObject log=new JSONObject(Store.read(new File(dir,"사본기록-"+next+".json")));JSONArray items=log.getJSONArray("items");
+        expect(log.getInt("version")==1&&items.length()==5,"종류별·폴더별 사본 기록을 함께 남긴다");
+        JSONObject legacy=legacy(store,2,"2099-04-08","옛 사본","9876");String oldId=legacy.getString("id");new Copies(store,folders,files).copyResult("p2",oldId,"9876");
+        File oldLog=new File(store.directory("p2",oldId),"사본기록-9876.json");String before=Store.read(oldLog);store.finish(legacy,minutes(),"다시 확인");
+        new Copies(store,folders,files).copyResult("p2",oldId,legacy.getString("resultId"));
+        expect(Store.read(oldLog).equals(before),"옛 회의에서 다시 정리해도 앞선 결과의 사본 기록이 남는다");
+    }
+    static void folderPermissionChecks(Store store)throws Exception{
+        List<String> released=new ArrayList<>();Copies.Permissions permissions=new Copies.Permissions(){public void grant(String uri){}public void release(String uri){released.add(uri);}};
+        String uri="content://example/tree/shared";
+        Copies.changeFolder(store.context,"audio",uri,"같은 폴더",permissions);Copies.changeFolder(store.context,"summary",uri,"같은 폴더",permissions);
+        Copies.changeFolder(store.context,"audio","","",permissions);expect(released.isEmpty(),"다른 종류가 같은 폴더를 쓰면 권한을 놓지 않는다");
+        Copies.changeFolder(store.context,"summary","","",permissions);expect(released.equals(Arrays.asList(uri)),"마지막 종류를 비우면 권한을 한 번 놓는다");
+    }
+    static void copyFailureKeepsResult(Store store)throws Exception{
+        store.context.getSharedPreferences("connection",0).edit().putString("storage.summary","file:///합성-잘못된-트리").commit();
+        JSONObject record=analyzable(store,"사본 실패와 결과 보존");replies.add(completed());new Ai(store,message->{}).run(record);
+        expect(record.getString("state").equals("complete")&&store.load("main",record.getString("id")).getString("state").equals("complete"),"자동 사본 실패가 AI 결과 저장 성공을 뒤집지 않는다");
+        expect(!record.getJSONObject("copies").getBoolean("ok")&&record.getJSONObject("copies").getJSONArray("failed").length()==2,"자동 사본 실패의 종류를 상태 응답으로 돌려준다");
+    }
     @Override public void onStart(){Bundle result=new Bundle();try{
         if(!probe.isEmpty()){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
         for(String name:new String[]{"first","open","review","draft","finish","n1new","n1old","n1meta"})regressionCheck(name);
@@ -395,6 +448,10 @@ public final class AndroidChecks extends Instrumentation {
         requestContract(new Store(testContext()));
         refinementChecks(new Store(testContext()));
         templateCacheChecks(new Store(testContext()));
+        documentChecks(new Store(testContext()));
+        copyChecks(new Store(testContext()));
+        folderPermissionChecks(new Store(testContext()));
+        copyFailureKeepsResult(new Store(testContext()));
         store.summaryModel(previousModel);
         result.putString("stream","PASS "+checks+" native storage and recovery checks; real API calls=0\n");finish(-1,result);
     }catch(Throwable ex){result.putString("stream","FAIL "+ex.toString()+"\n");finish(0,result);}}
