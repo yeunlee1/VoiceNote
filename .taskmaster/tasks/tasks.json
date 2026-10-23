@@ -225,6 +225,15 @@
             "status": "pending",
             "dependencies": [],
             "parentTaskId": 5
+          },
+          {
+            "id": 12,
+            "title": "Android Task 12 교차 검토 지적 M1 고치기",
+            "description": "검토(1587f5d) 결과 반드시 고칠 것 1건. 분석·의견 반영 뒤 사본 저장이 실패하면 Android 상태 줄에 실패 이유와 실패한 종류가 빠진다. Windows처럼 '고른 폴더에 저장하지 못했습니다: <종류> — <이유>. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.'로 맞춘다.",
+            "details": "근거: Ai.java:112(문구 생성), assets/app.js:223·230(상태 줄에 그대로 표시). Windows 기준 desktop/앱/화면/app.js의 copyMessage. 고치는 길: Ai가 같은 규칙으로 문구를 만들거나 Task 13 화면이 copies로 문구를 만든다. 나머지 사본 규칙·문서 변환(공통 예시 16개 글자 일치)·파일 이름·권한 공유는 Windows와 같음, AndroidChecks 187 PASS, 변이 13종 모두 잡힘. 선택 개선: 차수 0 기록 text('0차' vs '1차'), Android 제목 120바이트 자르기를 설계에 적기 등. 보고서: 작업기록/2026-10-23-첫묶음/짝작업/검토-Task12.md.",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 5
           }
         ],
         "updatedAt": "2026-10-23T08:09:44.376Z"
