@@ -24,6 +24,8 @@ test('저장된 내 형식이 없는 선택과 모델 오류는 여전히 시작
   const ready = { ...base, keyConfigured: true };
   assert.equal(Flow.canStart({ ...ready, customMissing: true }), false);
   assert.equal(Flow.canStart({ ...ready, modelError: true }), false);
+  assert.equal(Flow.startBlockers({ ...ready, customMissing: true }).find(r => r.id === 'format').text, '설정 › 출력 형식에서 내 형식을 먼저 만드세요.');
+  assert.equal(Flow.startBlockers(base)[0].text, '설정의 AI 연결에서 API 키를 등록하세요.');
 });
 
 test('사용량은 모델별로 표시하고 값이 없으면 미제공으로 쓴다', () => {
