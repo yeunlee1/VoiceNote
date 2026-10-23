@@ -1,4 +1,4 @@
-// 프로젝트 설정과 녹음 및 회의 기록을 휴대폰 내부 파일로 보관한다.
+// 보관함별 녹음과 결과 버전 및 설정을 휴대폰 내부 파일에 보관한다.
 package kr.local.meetingjournal;
 
 import android.content.Context;
@@ -24,7 +24,7 @@ final class Store {
     File project(int slot) {if(slot<1||slot>SettingsExchange.MAX_PROJECTS)throw new IllegalArgumentException("프로젝트 번호 오류"); File dir=new File(root,String.format(Locale.ROOT,"프로젝트-%02d",slot));dir.mkdirs();return dir;}
     JSONObject preset(int slot) throws Exception {
         File file=new File(project(slot),"설정.json");
-        JSONObject value=file.exists()?new JSONObject(read(file)):slot==1?asset("preset.json"):new JSONObject().put("name","").put("title","").put("context","");
+        JSONObject value=file.exists()?new JSONObject(read(file)):new JSONObject().put("name","").put("title","").put("context","");
         return value.put("slot",slot).put("outputFormat",SettingsExchange.outputFormat(value.opt("outputFormat")));
     }
     JSONArray presets() throws Exception {JSONArray all=new JSONArray();for(int i=1;i<=SettingsExchange.MAX_PROJECTS;i++)all.put(preset(i));return all;}
@@ -72,26 +72,122 @@ final class Store {
             throw new IOException("설정을 저장하지 못해 이전 설정으로 되돌렸습니다. 회의 기록은 그대로입니다.");
         }
     }
-    File directory(int slot,String id) {if(!id.matches("[0-9a-f-]{36}"))throw new IllegalArgumentException("회의 번호 오류");return new File(project(slot),id);}
-    JSONObject load(int slot,String id) throws Exception {return new JSONObject(read(new File(directory(slot,id),"회의정보.json")));}
-    void save(JSONObject record) throws Exception {write(new File(directory(record.getInt("slot"),record.getString("id")),"회의정보.json"),record.toString(2));}
-    synchronized JSONObject create(int slot,JSONObject input) throws Exception {
-        String date=input.optString("date"); if(!date.matches("\\d{4}-\\d{2}-\\d{2}"))throw new IOException("회의 날짜를 확인하세요.");
-        // 출력 형식은 회의마다 고른 값을 쓰고, 고르지 않았으면 프로젝트 값을 쓴다. 내 형식은 당시 정의를 기록에 남긴다.
-        String format=input.optString("outputFormat",preset(slot).getString("outputFormat"));
-        if(!SettingsExchange.OUTPUT_FORMATS.contains(format)&&!"custom".equals(format))throw new IOException("출력 형식을 다시 선택하세요.");
-        JSONObject custom="custom".equals(format)?new JSONObject(CustomFormat.parse(String.valueOf(input.opt("customFormat"))).json()):null;
-        int sequence=1; JSONArray all=history(slot);for(int i=0;i<all.length();i++){JSONObject item=all.getJSONObject(i);if(date.equals(item.optString("date")))sequence=Math.max(sequence,item.optInt("dailySequence")+1);}
-        JSONObject record=new JSONObject().put("id",UUID.randomUUID().toString()).put("slot",slot).put("date",date).put("dailySequence",sequence).put("title",input.optString("title","회의"))
-            .put("projectName",preset(slot).getString("name")).put("context",preset(slot).optString("context")).put("outputFormat",format).put("participants",input.optString("participants")).put("notes",notes(input))
-            .put("createdAt",System.currentTimeMillis()).put("state","recording").put("audio",new JSONArray());
-        if(custom!=null)record.put("customFormat",custom);
-        save(record);lastFormat(slot,format);return record;
+    static final String[] LOCATIONS={"main","p1","p2","p3"};
+    File locationDirectory(String location) {
+        for(int i=0;i<LOCATIONS.length;i++)if(LOCATIONS[i].equals(location))return new File(root,i==0?"회의기록":String.format(Locale.ROOT,"프로젝트-%02d",i));
+        throw new IllegalArgumentException("보관함 이름을 확인하세요.");
     }
-    JSONArray history(int slot) throws Exception {
-        List<JSONObject> records=new ArrayList<>();File[] dirs=project(slot).listFiles(File::isDirectory);
-        if(dirs!=null)for(File dir:dirs){File file=new File(dir,"회의정보.json");if(file.exists())records.add(new JSONObject(read(file)));}
-        records.sort((a,b)->Long.compare(b.optLong("createdAt"),a.optLong("createdAt")));JSONArray result=new JSONArray();for(JSONObject record:records)result.put(record);return result;
+    static String location(JSONObject record)throws JSONException {
+        if(record.has("location"))return record.getString("location");
+        int slot=record.getInt("slot");if(slot<1||slot>3)throw new IllegalArgumentException("보관함 번호를 확인하세요.");return "p"+slot;
+    }
+    File directory(String location,String id) {
+        if(id==null||!id.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"))throw new IllegalArgumentException("회의 번호를 확인하세요.");
+        return new File(locationDirectory(location),id);
+    }
+    JSONObject load(String location,String id)throws Exception {
+        JSONObject record=new JSONObject(read(new File(directory(location,id),"회의정보.json")));
+        if(!id.equals(record.optString("id"))||!location.equals(location(record)))throw new IOException("보관함과 회의 기록이 일치하지 않습니다.");
+        return record.put("location",location);
+    }
+    void save(JSONObject record)throws Exception {
+        synchronized(Store.class){
+            String location=location(record),id=record.getString("id");File dir=directory(location,id);
+            preserveLegacy(location,id);
+            // 옛 최신 결과는 상태·사용량 갱신보다 먼저 별도 파일로 보존한다.
+            record.put("location",location);write(new File(dir,"회의정보.json"),record.toString(2));
+        }
+    }
+    JSONObject create(JSONObject input)throws Exception {
+        synchronized(Store.class){
+            if(input.has("location")&&!"main".equals(input.optString("location")))throw new IOException("새 녹음은 기본 보관함에만 만들 수 있습니다.");
+            String date=input.optString("date");if(!date.matches("\\d{4}-\\d{2}-\\d{2}"))throw new IOException("회의 날짜를 확인하세요.");
+            String format=input.optString("outputFormat",defaultOutputFormat());
+            if(!SettingsExchange.OUTPUT_FORMATS.contains(format)&&!"custom".equals(format))throw new IOException("출력 형식을 다시 선택하세요.");
+            JSONObject custom="custom".equals(format)?new JSONObject(CustomFormat.parse(String.valueOf(input.opt("customFormat"))).json()):null;
+            int sequence=1;File[] dirs=locationDirectory("main").listFiles(File::isDirectory);
+            if(dirs!=null)for(File dir:dirs){try{JSONObject item=load("main",dir.getName());if(date.equals(item.optString("date")))sequence=Math.max(sequence,item.optInt("dailySequence")+1);}catch(Exception ignored){}}
+            JSONObject record=new JSONObject().put("id",UUID.randomUUID().toString()).put("location","main").put("date",date).put("dailySequence",sequence)
+                .put("title",input.optString("title","")).put("outputFormat",format).put("participants",input.optString("participants")).put("notes",notes(input))
+                .put("createdAt",System.currentTimeMillis()).put("state","recording").put("audio",new JSONArray());
+            if(custom!=null)record.put("customFormat",custom);save(record);return record;
+        }
+    }
+    String defaultOutputFormat(){return context.getSharedPreferences("connection",0).getString("defaultOutputFormat","meeting");}
+    JSONObject history()throws Exception {
+        List<JSONObject> records=new ArrayList<>();int skipped=0;
+        for(String location:LOCATIONS){
+            File[] dirs=locationDirectory(location).listFiles(File::isDirectory);if(dirs==null)continue;
+            for(File dir:dirs){File file=new File(dir,"회의정보.json");if(!file.exists())continue;
+                try{JSONObject record=load(location,dir.getName());String resultId=latestResultId(location,record);
+                    if(resultId!=null){record.put("resultId",resultId);JSONObject result=result(location,record.getString("id"),resultId);
+                        record.put("title",result.optString("title")).put("outputFormat",meetingFormat(result)).put("refined",!result.optString("feedback").isEmpty());
+                        JSONObject review=loadReview(location,record.getString("id"),resultId);if(review!=null&&!review.isNull("stars"))record.put("stars",review.getInt("stars"));}
+                    records.add(record);
+                }catch(Exception ex){skipped++;}
+            }
+        }
+        records.sort((a,b)->{int order=b.optString("date").compareTo(a.optString("date"));return order!=0?order:Long.compare(b.optLong("createdAt"),a.optLong("createdAt"));});
+        JSONArray all=new JSONArray();for(JSONObject record:records)all.put(record);return new JSONObject().put("meetings",all).put("skipped",skipped);
+    }
+    static String checkedResultId(String id) {
+        if(id==null||!id.matches("(?:[0-9]{1,19}|legacy)"))throw new IllegalArgumentException("결과 번호를 확인하세요.");return id;
+    }
+    String legacyId(File dir) {
+        String latest=null;File[] files=dir.listFiles();if(files!=null)for(File file:files){
+            String name=file.getName();if(file.isFile()&&name.matches("요약-[0-9]{1,18}\\.json")){
+                String value=name.substring(3,name.length()-5);if(latest==null||Long.parseLong(value)>Long.parseLong(latest))latest=value;}
+        }return latest==null?"legacy":latest;
+    }
+    String latestResultId(String location,JSONObject record)throws Exception {
+        String id=record.getString("id");File dir=directory(location,id);
+        if(record.has("resultId")&&!record.isNull("resultId"))return checkedResultId(record.getString("resultId"));
+        return new File(dir,"요약.json").exists()?legacyId(dir):null;
+    }
+    JSONObject legacyResult(String location,String id)throws Exception {
+        JSONObject record=load(location,id);File dir=directory(location,id),summary=new File(dir,"요약.json");
+        if(!summary.exists())return null;
+        return record.put("resultId",legacyId(dir)).put("savedAt",summary.lastModified()).put("minutes",new JSONObject(read(summary)));
+    }
+    void preserveLegacy(String location,String id)throws Exception {
+        File dir=directory(location,id),metadata=new File(dir,"회의정보.json");if(!metadata.exists())return;
+        JSONObject before=new JSONObject(read(metadata));if(before.has("resultId")&&!before.isNull("resultId"))return;
+        JSONObject legacy=legacyResult(location,id);if(legacy==null)return;File file=new File(dir,"결과-"+legacy.getString("resultId")+".json");
+        if(!file.exists())write(file,legacy.toString(2));
+    }
+    JSONObject result(String location,String id,String resultId)throws Exception {
+        JSONObject meeting=load(location,id);String selected=resultId==null?latestResultId(location,meeting):checkedResultId(resultId);
+        if(selected==null)return meeting;
+        File dir=directory(location,id),file=new File(dir,"결과-"+selected+".json");JSONObject result;
+        if(file.exists())result=new JSONObject(read(file));
+        else{result=legacyResult(location,id);if(result==null||!selected.equals(result.optString("resultId")))throw new IOException("저장된 결과를 찾을 수 없습니다.");}
+        if(!location.equals(location(result))||!id.equals(result.optString("id"))||!selected.equals(result.optString("resultId")))throw new IOException("보관함과 결과 기록이 일치하지 않습니다.");
+        return result.put("location",location);
+    }
+    JSONArray results(String location,String id)throws Exception {
+        JSONObject meeting=load(location,id);File dir=directory(location,id);List<JSONObject> all=new ArrayList<>();
+        Set<String> ids=new HashSet<>();File[] files=dir.listFiles();
+        if(files!=null)for(File file:files){String name=file.getName();if(!file.isFile()||!name.matches("결과-(?:[0-9]{1,19}|legacy)\\.json"))continue;
+            String resultId=name.substring(3,name.length()-5);try{JSONObject record=result(location,id,resultId);all.add(version(location,id,record));ids.add(resultId);}catch(Exception ignored){}}
+        String latest=latestResultId(location,meeting);if(latest!=null&&!ids.contains(latest))all.add(version(location,id,result(location,id,latest)));
+        all.sort((a,b)->Long.compare(a.optLong("savedAt"),b.optLong("savedAt")));JSONArray values=new JSONArray();for(JSONObject value:all)values.put(value);return values;
+    }
+    JSONObject version(String location,String id,JSONObject record)throws Exception {
+        String resultId=record.getString("resultId");JSONObject value=new JSONObject().put("id",resultId).put("savedAt",record.optLong("savedAt"))
+            .put("outputFormat",meetingFormat(record)).put("refined",!record.optString("feedback").isEmpty());JSONObject review=loadReview(location,id,resultId);
+        if(review!=null&&!review.isNull("stars"))value.put("stars",review.getInt("stars"));return value;
+    }
+    JSONObject loadReview(String location,String id,String resultId)throws Exception {
+        File file=new File(directory(location,id),"평가-"+checkedResultId(resultId)+".json");return file.exists()?new JSONObject(read(file)):null;
+    }
+    JSONObject saveReview(String location,String id,String resultId,Integer stars,String comment)throws Exception {
+        if(stars!=null&&(stars<1||stars>5))throw new IOException("별점은 1~5 중에서 골라 주세요.");
+        if(comment==null)comment="";if(comment.length()>1000)throw new IOException("의견은 1,000자 이하로 입력하세요.");
+        if(stars==null&&comment.trim().isEmpty())throw new IOException("별점이나 의견을 입력하세요.");
+        JSONObject target=result(location,id,resultId);if(!target.has("minutes"))throw new IOException("정리된 결과에만 평가를 남길 수 있습니다.");
+        String selected=target.getString("resultId");java.text.SimpleDateFormat date=new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.ROOT);date.setTimeZone(TimeZone.getTimeZone("UTC"));
+        JSONObject review=new JSONObject().put("version",1).put("stars",stars==null?JSONObject.NULL:stars).put("comment",comment).put("savedAt",date.format(new Date()));
+        write(new File(directory(location,id),"평가-"+selected+".json"),review.toString(2));return review;
     }
     static String notes(JSONObject input) throws IOException {
         String value=input.optString("notes","");if(value.length()>4000)throw new IOException("회의별 상세 내용은 4,000자 이내로 입력하세요.");return value;
@@ -131,17 +227,41 @@ final class Store {
     void removeKey(){sessionKey=null;context.getSharedPreferences("connection",0).edit().remove("key").commit();}
     String summaryModel(){return context.getSharedPreferences("connection",0).getString("summaryModel",null);}
     void summaryModel(String id){context.getSharedPreferences("connection",0).edit().putString("summaryModel",id).commit();}
-    JSONObject draft(int slot) throws Exception {File file=new File(project(slot),"작성중.json");return file.exists()?new JSONObject(read(file)):new JSONObject();}
-    void draft(int slot,JSONObject value) throws Exception {
-        notes(value);JSONObject saved=new JSONObject();for(String name:new String[]{"title","date","participants","notes"})saved.put(name,value.optString(name));
-        write(new File(project(slot),"작성중.json"),saved.toString(2));
+    JSONObject draft()throws Exception {
+        synchronized(Store.class){
+            android.content.SharedPreferences prefs=context.getSharedPreferences("connection",0);File file=new File(locationDirectory("main"),"작성중.json");
+            if(!prefs.getBoolean("draftMigrated",false)){
+                if(!file.exists()){
+                    List<File> candidates=new ArrayList<>();for(int i=1;i<=3;i++){File old=new File(locationDirectory("p"+i),"작성중.json");if(old.exists())candidates.add(old);}
+                    candidates.sort((a,b)->Long.compare(b.lastModified(),a.lastModified()));
+                    for(File old:candidates){
+                        JSONObject value;try{value=draftValue(new JSONObject(read(old)));}catch(JSONException|IOException ignored){continue;}
+                        write(file,value.toString(2));break;
+                    }
+                }
+                if(!prefs.edit().putBoolean("draftMigrated",true).commit())throw new IOException("작성 중 메모 이관 상태를 저장하지 못했습니다.");
+            }
+            return file.exists()?draftValue(new JSONObject(read(file))):new JSONObject();
+        }
     }
-    void clearDraft(int slot){new File(project(slot),"작성중.json").delete();}
-    void finish(JSONObject record,JSONObject minutes) throws Exception {
-        String title=minutes.optString("suggestedTitle",record.optString("title"));record.put("title",title).put("state","complete").put("message","회의록 저장 완료");
-        File dir=directory(record.getInt("slot"),record.getString("id"));long version=System.currentTimeMillis();
-        write(new File(dir,"요약-"+version+".json"),minutes.toString(2));write(new File(dir,"요약.json"),minutes.toString(2));
-        write(new File(dir,"회의록.txt"),format(record,minutes));save(record);
+    JSONObject draftValue(JSONObject input)throws Exception {
+        notes(input);JSONObject value=new JSONObject();for(String name:new String[]{"title","date","participants","notes"}){
+            Object field=input.opt(name);if(field!=null&&field!=JSONObject.NULL&&!(field instanceof String))throw new IOException("작성 중 메모 형식을 확인하세요.");value.put(name,input.optString(name,""));}
+        return value;
+    }
+    void saveDraft(JSONObject value)throws Exception {synchronized(Store.class){draft();write(new File(locationDirectory("main"),"작성중.json"),draftValue(value).toString(2));}}
+    void clearDraft()throws Exception {synchronized(Store.class){draft();new AtomicFile(new File(locationDirectory("main"),"작성중.json")).delete();}}
+    void finish(JSONObject record,JSONObject minutes,String feedback)throws Exception {
+        synchronized(Store.class){
+            String location=location(record),id=record.getString("id");File dir=directory(location,id);preserveLegacy(location,id);
+            String title=minutes.optString("suggestedTitle","").trim();if(title.isEmpty())title=record.optString("title","").trim();if(title.isEmpty())title="회의";
+            long version=System.currentTimeMillis();while(new File(dir,"결과-"+version+".json").exists())version++;
+            record.put("location",location).put("resultId",Long.toString(version)).put("title",title).put("state","complete").put("message","회의록 저장 완료").put("savedAt",version);record.remove("slot");
+            if(feedback!=null&&!feedback.trim().isEmpty()){if(feedback.length()>1000)throw new IOException("의견은 1,000자 이하로 입력하세요.");record.put("feedback",feedback);}else record.remove("feedback");
+            JSONObject snapshot=new JSONObject(record.toString()).put("minutes",new JSONObject(minutes.toString()));
+            write(new File(dir,"결과-"+version+".json"),snapshot.toString(2));
+            write(new File(dir,"요약.json"),minutes.toString(2));write(new File(dir,"회의록.txt"),format(record,minutes));save(record);
+        }
     }
     static String meetingFormat(JSONObject record){
         if("custom".equals(record.optString("outputFormat"))&&record.optJSONObject("customFormat")!=null){try{custom(record);return "custom";}catch(Exception ignored){}}
@@ -156,8 +276,6 @@ final class Store {
     }
     JSONObject saveCustomFormat(JSONObject value) throws Exception {CustomFormat format=CustomFormat.parse(value.toString());write(customFile(),format.json());return new JSONObject(format.json());}
     void deleteCustomFormat(){new AtomicFile(customFile()).delete();}
-    String lastFormat(int slot){return context.getSharedPreferences("formats",0).getString("slot-"+slot,null);}
-    void lastFormat(int slot,String format){context.getSharedPreferences("formats",0).edit().putString("slot-"+slot,format).commit();}
     static String label(String format){return "summary".equals(format)?"핵심 요약":"tasks".equals(format)?"업무 정리":"회의록";}
     static String format(JSONObject record,JSONObject minutes) throws Exception {
         String kind=meetingFormat(record);

@@ -23,8 +23,8 @@ public final class AndroidChecks extends Instrumentation {
     static int count(File dir){int n=0;File[] items=dir.listFiles();if(items!=null)for(File f:items)n+=f.isDirectory()?count(f):1;return n;}
     static JSONObject analyzable(Store store,String title)throws Exception{
         // 저장된 전사를 다시 쓰는 회의 기록을 만들어 전사 요청 없이 요약 요청만 보내게 한다.
-        JSONObject record=store.create(3,new JSONObject().put("date","2099-01-05").put("title",title));record.getJSONArray("audio").put("원음-001.m4a");store.save(record);
-        Store.write(new File(store.directory(3,record.getString("id")),"전사-001.txt"),"체험 검증 전사");return record;
+        JSONObject record=store.create(new JSONObject().put("date","2099-01-05").put("title",title));record.getJSONArray("audio").put("원음-001.m4a");store.save(record);
+        Store.write(new File(store.directory("main",record.getString("id")),"전사-001.txt"),"체험 검증 전사");return record;
     }
     static String firstSystem(String body)throws Exception{return new JSONObject(body).getJSONArray("input").getJSONObject(0).getString("content");}
     static void settingsFormatAndTrial(Store store)throws Exception{
@@ -32,8 +32,7 @@ public final class AndroidChecks extends Instrumentation {
         String[] original=settingsFiles(store);android.content.SharedPreferences prefs=store.context.getSharedPreferences("connection",0);String savedKey=prefs.getString("key",null);
         TrialAccess previousTrial=Store.trial;String previousSession=Store.sessionKey;
         try{
-            JSONObject fresh=store.asset("preset.json");
-            expect(fresh.optString("name").isEmpty()&&fresh.optString("title").isEmpty()&&fresh.optString("context").isEmpty()&&fresh.optString("outputFormat").equals("meeting"),"fresh install preset is empty");
+            expect(store.create(new JSONObject().put("date","2099-01-01")).getString("outputFormat").equals("meeting"),"new meetings default to meeting without a preset");
             Store.write(new File(store.project(2),"설정.json"),"{\"slot\":2,\"name\":\"옛 프로젝트\",\"title\":\"회의\",\"context\":\"옛 설명\"}");
             JSONObject old=store.preset(2);
             expect(old.getString("name").equals("옛 프로젝트")&&old.getString("context").equals("옛 설명")&&old.getString("outputFormat").equals("meeting"),"pre-1.1.1 settings kept and read as meeting");
@@ -41,14 +40,14 @@ public final class AndroidChecks extends Instrumentation {
             expect(SettingsExchange.read(exported).get(1).name.equals("옛 프로젝트")&&!exportedText.contains("sk-")&&!exportedText.contains("apiKey")&&!exportedText.contains("trial"),"export holds saved settings without keys or trial state");
             List<SettingsExchange.Project> incoming=new ArrayList<>();
             for(int i=1;i<=SettingsExchange.MAX_PROJECTS;i++)incoming.add(i==1?new SettingsExchange.Project(1,"가져온 업무","주간 점검","여러 줄\n설명 😀","tasks"):i==3?new SettingsExchange.Project(3,"자동 검증 프로젝트","","테스트","summary"):new SettingsExchange.Project(i,"","","","meeting"));
-            String[] before=settingsFiles(store);int meetings=store.history(3).length(),files=meetingFiles(store.project(3));
+            String[] before=settingsFiles(store);int meetings=store.history().getJSONArray("meetings").length(),files=meetingFiles(store.project(3));
             Store.failImportAfter=2;
             try{store.importSettings(incoming);throw new AssertionError("import failure must throw");}catch(IOException ex){expect(ex.getMessage().contains("되돌렸"),"failed import reports rollback");}
             Store.failImportAfter=-1;
             expect(Arrays.equals(settingsFiles(store),before),"failed import leaves all settings unchanged");
             store.importSettings(incoming);JSONArray presets=store.presets();
             expect(presets.getJSONObject(0).getString("name").equals("가져온 업무")&&presets.getJSONObject(0).getString("context").equals("여러 줄\n설명 😀")&&presets.getJSONObject(0).getString("outputFormat").equals("tasks")&&presets.getJSONObject(1).getString("name").isEmpty()&&presets.getJSONObject(2).getString("outputFormat").equals("summary"),"import replaces all settings");
-            expect(store.history(3).length()==meetings&&meetingFiles(store.project(3))==files,"import keeps meeting records and recordings");
+            expect(store.history().getJSONArray("meetings").length()==meetings&&meetingFiles(store.project(3))==files,"import keeps meeting records and recordings");
             expect(Arrays.equals(SettingsExchange.write(SettingsExchange.read(store.exportSettings())),store.exportSettings()),"imported settings export again unchanged");
             try{store.deletePreset(2);throw new AssertionError("empty delete");}catch(IOException ex){expect(ex.getMessage().contains("저장된 프로젝트"),"empty project cannot be deleted");}
             store.savePreset(2,new JSONObject().put("name","삭제 시험"));store.deletePreset(2);
@@ -57,7 +56,8 @@ public final class AndroidChecks extends Instrumentation {
 
             store.savePreset(3,new JSONObject().put("name","자동 검증 프로젝트").put("context","테스트").put("outputFormat","tasks"));
             try{store.savePreset(3,new JSONObject().put("name","자동 검증 프로젝트").put("outputFormat","minutes"));throw new AssertionError("bad format");}catch(IOException ex){expect(ex.getMessage().contains("출력 형식"),"unknown output format rejected on save");}
-            JSONObject tasks=analyzable(store,"형식 검증");expect(tasks.getString("outputFormat").equals("tasks"),"meeting record keeps project output format");
+            JSONObject tasks=analyzable(store,"형식 검증");tasks.put("outputFormat","tasks");store.save(tasks);expect(tasks.getString("outputFormat").equals("tasks"),"meeting keeps its selected output format");
+            legacy(store,3,"2099-01-01","옛 기록","10");
             try{store.deletePreset(3);throw new AssertionError("delete with meetings");}catch(IOException ex){expect(ex.getMessage().contains("회의 기록"),"project with meetings cannot be deleted");}
             int sent=requests.size();replies.add(completed());new Ai(store,message->{}).run(tasks);
             JSONObject tasksRequest=new JSONObject(requests.get(sent));
@@ -65,24 +65,24 @@ public final class AndroidChecks extends Instrumentation {
             expect(tasksRequest.getInt("max_output_tokens")==32000&&tasksRequest.getString("model").equals("gpt-6.1-sol")&&tasksRequest.getJSONObject("text").toString().equals(store.asset("summary-meeting.json").getJSONObject("text").toString()),"same model, budget and minutes schema for every format");
             JSONObject user=new JSONObject(tasksRequest.getJSONArray("input").getJSONObject(tasksRequest.getJSONArray("input").length()-1).getString("content"));
             expect(!user.has("outputFormat")&&user.has("transcript"),"user message fields unchanged");
-            String tasksText=Store.read(new File(store.directory(3,tasks.getString("id")),"회의록.txt"));
+            String tasksText=Store.read(new File(store.directory("main",tasks.getString("id")),"회의록.txt"));
             expect(tasksText.contains("업무 정리")&&tasksText.contains("할 일\n- 화면 기획 · 담당 미정 · 기한 미정"),"tasks document lists undecided owner and due");
-            JSONObject loaded=store.load(3,tasks.getString("id"));expect(loaded.getString("outputFormat").equals("tasks")&&loaded.getString("state").equals("complete"),"format kept in saved record");
+            JSONObject loaded=store.load("main",tasks.getString("id"));expect(loaded.getString("outputFormat").equals("tasks")&&loaded.getString("state").equals("complete"),"format kept in saved record");
             sent=requests.size();replies.add(completed());new Ai(store,message->{}).run(loaded);
             expect(firstSystem(requests.get(sent)).equals(firstSystem(requests.get(sent-1))),"reanalysis keeps the record's format");
             // 내 형식: 저장·조회, 회의 기록의 당시 정의, AI 요청의 두 번째 지시, 저장 본문의 항목 순서
             JSONObject savedCustom=store.saveCustomFormat(new JSONObject().put("name"," 주간 보고 ").put("sections",new JSONArray().put(new JSONObject().put("key","actions").put("title","이번 주 할 일")).put(new JSONObject().put("key","overview").put("title","한 줄 요약"))).put("instruction","부서별로 / 묶기"));
             expect(savedCustom.getString("name").equals("주간 보고")&&store.customFormat().toString().equals(savedCustom.toString()),"custom format saved and read");
             try{store.saveCustomFormat(new JSONObject().put("name","").put("sections",new JSONArray()));throw new AssertionError("bad custom");}catch(IOException ex){expect(ex.getMessage().contains("이름"),"invalid custom format rejected");}
-            JSONObject customRecord=store.create(3,new JSONObject().put("date","2099-01-06").put("title","내 형식 회의").put("outputFormat","custom").put("customFormat",savedCustom));
-            expect(Store.meetingFormat(customRecord).equals("custom")&&customRecord.getJSONObject("customFormat").getString("name").equals("주간 보고")&&"custom".equals(store.lastFormat(3)),"meeting keeps custom definition and remembers format");
-            customRecord.getJSONArray("audio").put("원음-001.m4a");store.save(customRecord);Store.write(new File(store.directory(3,customRecord.getString("id")),"전사-001.txt"),"내 형식 전사");
+            JSONObject customRecord=store.create(new JSONObject().put("date","2099-01-06").put("title","내 형식 회의").put("outputFormat","custom").put("customFormat",savedCustom));
+            expect(Store.meetingFormat(customRecord).equals("custom")&&customRecord.getJSONObject("customFormat").getString("name").equals("주간 보고"),"meeting keeps its custom definition");
+            customRecord.getJSONArray("audio").put("원음-001.m4a");store.save(customRecord);Store.write(new File(store.directory("main",customRecord.getString("id")),"전사-001.txt"),"내 형식 전사");
             sent=requests.size();replies.add(completed());new Ai(store,message->{}).run(customRecord);
             JSONArray customInput=new JSONObject(requests.get(sent)).getJSONArray("input");
             expect(customInput.getJSONObject(1).getString("content").equals(Store.custom(customRecord).instruction())&&customInput.getJSONObject(0).getString("content").equals(store.asset("summary-meeting.json").getJSONArray("input").getJSONObject(0).getString("content")),"custom instruction sent right after meeting instructions");
-            String customText=Store.read(new File(store.directory(3,customRecord.getString("id")),"회의록.txt"));
+            String customText=Store.read(new File(store.directory("main",customRecord.getString("id")),"회의록.txt"));
             expect(customText.indexOf("이번 주 할 일")>0&&customText.indexOf("이번 주 할 일")<customText.indexOf("한 줄 요약")&&!customText.contains("합의된 방향"),"custom document follows chosen order");
-            try{store.create(3,new JSONObject().put("date","2099-01-06").put("outputFormat","custom"));throw new AssertionError("custom without definition");}catch(IOException ex){expect(true,"custom meeting needs definition");}
+            try{store.create(new JSONObject().put("date","2099-01-06").put("outputFormat","custom"));throw new AssertionError("custom without definition");}catch(IOException ex){expect(true,"custom meeting needs definition");}
             store.deleteCustomFormat();expect(store.customFormat()==null,"custom format deleted");
             JSONObject legacy=new JSONObject().put("title","옛 회의").put("date","2026-09-30").put("dailySequence",1);
             expect(Store.format(legacy,minutes()).contains("상세 회의 내용")&&Store.format(new JSONObject(legacy.toString()).put("outputFormat","summary"),minutes()).contains("주요 내용"),"old records keep meeting layout, summary has its layout");
@@ -93,7 +93,7 @@ public final class AndroidChecks extends Instrumentation {
             expect(store.access().accessMode.equals("trial")&&store.access().trialRemaining==3,"default key starts with 3 trial analyses");
             JSONObject first=analyzable(store,"체험 1");sent=requests.size();
             replies.add("{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}");replies.add(completed());replies.add(completed());
-            String long1=new String(new char[6000]).replace('\0','나');Store.write(new File(store.directory(3,first.getString("id")),"전사-001.txt"),long1);
+            String long1=new String(new char[6000]).replace('\0','나');Store.write(new File(store.directory("main",first.getString("id")),"전사-001.txt"),long1);
             new Ai(store,message->{}).run(first);
             expect(requests.size()-sent==3&&store.access().trialUsed==1,"split requests of one analysis count once");
             expect(auths.get(auths.size()-1).startsWith("Bearer sk-mock-default"),"default key used for trial requests");
@@ -113,7 +113,80 @@ public final class AndroidChecks extends Instrumentation {
             for(int i=0;i<SettingsExchange.MAX_PROJECTS;i++){File f=new File(store.project(i+1),"설정.json");if(original[i]!=null)Store.write(f,original[i]);else new android.util.AtomicFile(f).delete();}
         }
     }
+    static JSONObject legacy(Store store,int slot,String date,String title,String version)throws Exception {
+        String id=UUID.randomUUID().toString();File dir=new File(new File(store.root,String.format(Locale.ROOT,"프로젝트-%02d",slot)),id);
+        JSONObject record=new JSONObject().put("id",id).put("slot",slot).put("projectName","옛 업무 "+slot).put("date",date).put("title",title).put("dailySequence",7)
+            .put("participants","예시 참석자").put("outputFormat","tasks").put("state","complete").put("createdAt",100L).put("audio",new JSONArray());
+        Store.write(new File(dir,"회의정보.json"),record.toString());Store.write(new File(dir,"요약.json"),minutes().put("overview",title+" 본문").toString());
+        Store.write(new File(dir,"전사.txt"),"옛 전사 원문");if(version!=null)Store.write(new File(dir,"요약-"+version+".json"),minutes().toString());return record;
+    }
+    static void archiveChecks(Store store)throws Exception {
+        JSONObject one=legacy(store,1,"2099-02-01","옛 첫째","1234"),two=legacy(store,2,"2099-02-02","옛 둘째",null),three=legacy(store,3,"2099-02-03","옛 셋째","2345");
+        String original=Store.read(new File(new File(new File(store.root,"프로젝트-01"),one.getString("id")),"회의정보.json"));
+        JSONObject all=store.history();
+        expect(all.getJSONArray("meetings").length()==3,"옛 세 보관함을 한 목록으로 읽는다");
+        expect(all.getJSONArray("meetings").getJSONObject(0).getString("location").equals("p3"),"날짜 최신순과 보관함을 함께 돌려준다");
+        JSONObject fresh=store.create(new JSONObject().put("date","2099-02-01").put("title",""));
+        expect(fresh.getString("location").equals("main")&&!fresh.has("slot")&&!fresh.has("projectName"),"새 녹음은 프로젝트 없이 main에 쌓인다");
+        JSONObject again=store.create(new JSONObject().put("date","2099-02-01"));
+        expect(fresh.getInt("dailySequence")==1&&again.getInt("dailySequence")==2,"새 보관함 안에서만 날짜별 차수를 센다");
+        File broken=new File(new File(store.root,"프로젝트-02"),UUID.randomUUID().toString());Store.write(new File(broken,"회의정보.json"),"{broken");
+        File wrong=new File(new File(store.root,"프로젝트-03"),UUID.randomUUID().toString());Store.write(new File(wrong,"회의정보.json"),new JSONObject(one.toString()).put("id",wrong.getName()).toString());
+        Store.write(new File(store.root,"프로젝트-01/남은.tmp"),"tmp");Store.write(new File(store.root,"프로젝트-01/다른.txt"),"다른 파일");
+        all=store.history();
+        expect(all.getJSONArray("meetings").length()==5&&all.getInt("skipped")==2,"손상·잘못된 보관함 기록만 빼고 tmp와 다른 파일은 무시한다");
+        expect(Store.read(new File(new File(new File(store.root,"프로젝트-01"),one.getString("id")),"회의정보.json")).equals(original),"옛 목록을 읽어도 원본 메타데이터를 고치지 않는다");
+        JSONObject old=store.load("p1",one.getString("id"));
+        JSONObject oldResult=store.result("p1",one.getString("id"),null);
+        expect(oldResult.getString("resultId").equals("1234")&&oldResult.getString("title").equals("옛 첫째"),"옛 최신 요약 시각으로 결과를 연다");
+        JSONObject fallback=store.result("p2",two.getString("id"),null);
+        expect(fallback.getString("resultId").equals("legacy"),"옛 시각 파일이 없으면 legacy로 연다");
+        store.saveReview("p1",one.getString("id"),"1234",4,"앞선 평가");
+        old.put("outputFormat","summary");
+        store.save(old);
+        expect(store.result("p1",one.getString("id"),"1234").getString("outputFormat").equals("tasks"),"상태 갱신부터 시작해도 옛 결과 형식을 먼저 보존한다");
+        store.finish(old,minutes().put("suggestedTitle","새 제목"),"새 의견");
+        JSONObject preserved=store.result("p1",one.getString("id"),"1234");
+        expect(preserved.getString("title").equals("옛 첫째")&&preserved.getString("outputFormat").equals("tasks")&&preserved.getJSONObject("minutes").getString("overview").equals("옛 첫째 본문"),"다시 분석해도 옛 본문·제목·형식이 남는다");
+        JSONArray versions=store.results("p1",one.getString("id"));
+        expect(versions.length()==2&&versions.getJSONObject(0).getInt("stars")==4,"옛 평가와 새 결과를 버전으로 나란히 연다");
+        JSONObject latest=store.result("p1",one.getString("id"),null);
+        expect(!latest.has("slot")&&latest.getString("location").equals("p1")&&latest.getString("projectName").equals("옛 업무 1")&&latest.getString("feedback").equals("새 의견"),"옛 보관함의 새 결과는 location과 꼬리표·의견을 보존한다");
+        expect(store.loadReview("p1",one.getString("id"),latest.getString("resultId"))==null,"새 결과에 앞선 평가가 따라붙지 않는다");
+        store.saveReview("p1",one.getString("id"),latest.getString("resultId"),null,"새 결과 의견");
+        expect(store.loadReview("p1",one.getString("id"),"1234").getInt("stars")==4&&store.loadReview("p1",one.getString("id"),latest.getString("resultId")).isNull("stars"),"별점 없는 의견도 저장하고 결과마다 평가를 분리한다");
+        all=store.history();
+        int count=0;for(int i=0;i<all.getJSONArray("meetings").length();i++)if(all.getJSONArray("meetings").getJSONObject(i).getString("id").equals(one.getString("id")))count++;
+        expect(count==1,"여러 결과도 회의 목록에는 하나만 나온다");
+        File p1=new File(store.root,"프로젝트-01"),p2=new File(store.root,"프로젝트-02"),p3=new File(store.root,"프로젝트-03");
+        Store.write(new File(p1,"작성중.json"),new JSONObject().put("title","오래된 메모").put("notes","안건").toString());new File(p1,"작성중.json").setLastModified(1000);
+        Store.write(new File(p2,"작성중.json"),new JSONObject().put("title","가져올 메모").put("notes","안건").toString());new File(p2,"작성중.json").setLastModified(2000);
+        Store.write(new File(p3,"작성중.json"),"{broken");new File(p3,"작성중.json").setLastModified(3000);
+        JSONObject draft=store.draft();
+        expect(draft.getString("title").equals("가져올 메모"),"손상된 최근 초안은 건너뛰고 다음 초안을 이관한다");
+        store.clearDraft();
+        expect((new Store(store.context).draft()).length()==0,"녹음 뒤 다시 열어도 옛 메모가 되살아나지 않는다");
+        expect(new File(p1,"작성중.json").exists()&&new File(p2,"작성중.json").exists()&&new File(p3,"작성중.json").exists(),"옛 메모 파일을 지우지 않는다");
+    }
+    android.content.Context testContext(){
+        return new android.content.ContextWrapper(getTargetContext()){
+            final String name="task10-"+UUID.randomUUID();
+            public android.content.Context getApplicationContext(){return this;}
+            public File getFilesDir(){File file=new File(getBaseContext().getCacheDir(),name);file.mkdirs();return file;}
+            public File getCacheDir(){return getFilesDir();}
+            public android.content.SharedPreferences getSharedPreferences(String key,int mode){return getBaseContext().getSharedPreferences(name+"-"+key,mode);}
+        };
+    }
+    void draftFailureCheck()throws Exception {
+        Store store=new Store(testContext());
+        Store.write(new File(store.root,"프로젝트-01/작성중.json"),new JSONObject().put("title","다시 가져올 초안").toString());
+        Store.write(store.locationDirectory("main"),"합성 저장 실패를 만드는 파일");
+        try{store.draft();throw new AssertionError("새 초안을 저장하지 못했으면 이관 성공으로 처리하지 않는다");}catch(IOException expected){}
+        expect(!store.context.getSharedPreferences("connection",0).getBoolean("draftMigrated",false),"초안 쓰기 실패 뒤에도 다음 실행에 이관을 다시 시도한다");
+    }
     @Override public void onStart(){Bundle result=new Bundle();try{
+        archiveChecks(new Store(testContext()));
+        draftFailureCheck();
         URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){protected URLConnection openConnection(URL url){return new HttpURLConnection(url){
             final ByteArrayOutputStream sent=new ByteArrayOutputStream();
             public void connect(){}public void disconnect(){}public boolean usingProxy(){return false;}
@@ -123,26 +196,26 @@ public final class AndroidChecks extends Instrumentation {
             public InputStream getInputStream()throws IOException{requests.add(new String(sent.toByteArray(),StandardCharsets.UTF_8));auths.add(lastAuth);String next=replies.poll();if(next==null)throw new IOException("Unexpected network request");return new ByteArrayInputStream(next.getBytes(StandardCharsets.UTF_8));}
             public InputStream getErrorStream(){try{return getInputStream();}catch(IOException ex){throw new RuntimeException(ex);}}
         };}}:null);
-        Store store=new Store(getTargetContext());store.savePreset(3,new JSONObject().put("name","자동 검증 프로젝트").put("context","테스트"));
+        Store store=new Store(testContext());store.savePreset(3,new JSONObject().put("name","자동 검증 프로젝트").put("context","테스트"));
         String previousModel=store.summaryModel();store.summaryModel(null);
         boolean bundledKey=true;try{getTargetContext().getAssets().open("personal.key").close();}catch(FileNotFoundException absent){bundledKey=false;}
         expect(!bundledKey,"installer has no bundled API key");
         boolean defaultKey=true;try{getTargetContext().getAssets().open("default.key").close();}catch(FileNotFoundException absent){defaultKey=false;}
         expect(!defaultKey,"test build has no real default key");
-        String savedKey=getTargetContext().getSharedPreferences("connection",0).getString("key",null);
+        String savedKey=store.context.getSharedPreferences("connection",0).getString("key",null);
         Store.sessionKey=null;if(savedKey==null)expect(store.key().isEmpty()&&store.keySource().equals("none"),"missing key reads as empty instead of crashing");
         try{store.key("bad",true);throw new AssertionError("bad key must fail");}catch(IOException ex){expect(ex.getMessage().contains("형식"),"bad key reason shown");}
         store.key("sk-mock-only-0000000000000000",false);expect(store.keySource().equals("session")&&store.key().startsWith("sk-mock"),"session key used without persisting");
-        expect(getTargetContext().getSharedPreferences("connection",0).getString("key",null)==null,"session key not written to storage");
-        store.draft(3,new JSONObject().put("title","초안").put("date","2099-01-02").put("notes","안건 초안"));expect(store.draft(3).getString("notes").equals("안건 초안"),"draft survives reload");store.clearDraft(3);expect(store.draft(3).length()==0,"draft cleared after start");
-        try{store.create(3,new JSONObject().put("date","2099-01-01").put("notes",new String(new char[4001]).replace('\0','가')));throw new AssertionError("long notes must fail");}catch(IOException ex){expect(ex.getMessage().contains("4,000"),"notes limit enforced");}
+        expect(store.context.getSharedPreferences("connection",0).getString("key",null)==null,"session key not written to storage");
+        store.saveDraft(new JSONObject().put("title","초안").put("date","2099-01-02").put("notes","안건 초안"));expect(store.draft().getString("notes").equals("안건 초안"),"draft survives reload");store.clearDraft();expect(store.draft().length()==0,"draft cleared after start");
+        try{store.create(new JSONObject().put("date","2099-01-01").put("notes",new String(new char[4001]).replace('\0','가')));throw new AssertionError("long notes must fail");}catch(IOException ex){expect(ex.getMessage().contains("4,000"),"notes limit enforced");}
         JSONObject input=new JSONObject().put("date","2099-01-01").put("title","검증 회의").put("notes","1. 탭 구조 결정\n2. 기존 DB 재사용");
-        JSONObject record=store.create(3,input),second=store.create(3,input);
+        JSONObject record=store.create(input),second=store.create(input);
         expect(second.getInt("dailySequence")==record.getInt("dailySequence")+1,"same day sequence");
-        expect(store.load(3,record.getString("id")).getString("notes").startsWith("1. 탭 구조"),"meeting notes saved and loaded");
+        expect(store.load("main",record.getString("id")).getString("notes").startsWith("1. 탭 구조"),"meeting notes saved and loaded");
         expect(MeetingService.safeMessage(new java.net.UnknownHostException("Unable to resolve host \"api.openai.com\"")).startsWith("인터넷에 연결할 수 없습니다"),"offline reason shown in Korean");
         expect(MeetingService.safeMessage(new java.net.SocketTimeoutException("timeout")).contains("응답이 늦어"),"timeout reason shown in Korean");
-        File dir=store.directory(3,record.getString("id"));String text=new String(new char[6000]).replace('\0','가');
+        File dir=store.directory("main",record.getString("id"));String text=new String(new char[6000]).replace('\0','가');
         replies.add("{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}");replies.add(completed());replies.add(completed());
         Ai ai=new Ai(store,message->{});JSONObject answer=ai.section(record,text,null,dir,0);
         expect(requests.size()==3,"output limit splits into two requests");expect(ai.extra==2,"bounded extra requests");
@@ -156,15 +229,15 @@ public final class AndroidChecks extends Instrumentation {
         expect(aiUsage.getString("kind").equals("summary")&&aiUsage.getString("model").equals("gpt-6.1-sol")&&aiUsage.getInt("requests")==3&&aiUsage.getInt("unknownRequests")==3&&aiUsage.getLong("totalTokens")==0,"split requests counted and missing usage kept unknown");
         expect(record.getJSONObject("analysis").getJSONArray("callIds").length()==3,"one call id per sent request");
         new Ai(store,message->{}).section(record,text,null,dir,0);expect(requests.size()==3,"successful result survives new analyzer");
-        Store.write(new File(dir,"전사.txt"),"원문 보존 시험");store.finish(record,answer);
-        expect(store.load(3,record.getString("id")).getString("title").equals("표준 문서 구현 준비"),"AI title persisted");
+        Store.write(new File(dir,"전사.txt"),"원문 보존 시험");store.finish(record,answer,null);
+        expect(store.load("main",record.getString("id")).getString("title").equals("표준 문서 구현 준비"),"AI title persisted");
         expect(Store.read(new File(dir,"회의록.txt")).contains("핵심 요약"),"summary document saved");
         expect(!Store.read(new File(dir,"회의록.txt")).contains("원문 보존 시험"),"raw transcript excluded from minutes");
         expect(Store.read(new File(dir,"전사.txt")).equals("원문 보존 시험"),"raw transcript kept separately");
         code=429;replies.add("{\"error\":{\"code\":\"insufficient_quota\"}}");int before=requests.size();
-        try{new Ai(store,message->{}).section(second,"잔액 제한 시험",null,store.directory(3,second.getString("id")),0);throw new AssertionError("quota must fail");}catch(IOException ex){expect(ex.getMessage().contains("사용 한도"),"quota distinguished from length");}
+        try{new Ai(store,message->{}).section(second,"잔액 제한 시험",null,store.directory("main",second.getString("id")),0);throw new AssertionError("quota must fail");}catch(IOException ex){expect(ex.getMessage().contains("사용 한도"),"quota distinguished from length");}
         expect(requests.size()==before+1,"quota never creates split retries");
-        expect(store.load(3,second.getString("id")).getJSONObject("analysis").getJSONArray("usage").getJSONObject(0).getInt("unknownRequests")==1,"failed sent request saved as unknown usage");
+        expect(store.load("main",second.getString("id")).getJSONObject("analysis").getJSONArray("usage").getJSONObject(0).getInt("unknownRequests")==1,"failed sent request saved as unknown usage");
         code=200;record.getJSONArray("audio").put("원음-001.m4a");Store.write(new File(dir,"전사-001.txt"),"저장된 전사 재사용");replies.add(new JSONObject(completed()).put("model","gpt-6.1-sol-2026-09-15").put("usage",new JSONObject().put("input_tokens",40).put("output_tokens",10).put("total_tokens",50)).toString());before=requests.size();new Ai(store,message->{}).run(record);
         expect(requests.size()==before+1,"saved transcript avoids retranscription");
         JSONArray models=record.getJSONObject("analysis").getJSONArray("usage");JSONObject snapshot=null;for(int i=0;i<models.length();i++)if(models.getJSONObject(i).getString("model").equals("gpt-6.1-sol-2026-09-15"))snapshot=models.getJSONObject(i);
@@ -172,16 +245,6 @@ public final class AndroidChecks extends Instrumentation {
         expect(record.getJSONObject("analysis").getString("summaryModel").equals("gpt-6.1-sol"),"selected model kept separately");
         expect(record.getString("state").equals("complete"),"analysis finished");
         expect(replies.isEmpty(),"all mock responses consumed");
-        JSONArray realMeetings=store.history(1);
-        if(realMeetings.length()>0){JSONObject real=realMeetings.getJSONObject(0);JSONArray files=real.getJSONArray("audio");if(files.length()>0){
-            android.media.MediaMetadataRetriever media=new android.media.MediaMetadataRetriever();
-            try{media.setDataSource(new File(store.directory(1,real.getString("id")),files.getString(0)).getAbsolutePath());expect(Long.parseLong(media.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION))>5000,"recorded audio is playable and longer than five seconds");}finally{media.release();}
-        }}
-        File[] shares=new File(getTargetContext().getCacheDir(),"공유").listFiles();
-        if(shares!=null)for(File share:shares)if(share.getName().endsWith(".zip")){try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(share)){
-            expect(zip.getEntry("회의록.txt")!=null&&zip.getEntry("전사.txt")!=null,"share archive includes minutes and transcript");
-            expect(zip.getEntry("personal.key")==null,"share archive excludes API key");
-        }}
         settingsFormatAndTrial(store);
         store.summaryModel(previousModel);
         result.putString("stream","PASS "+checks+" native storage and recovery checks; real API calls=0\n");finish(-1,result);

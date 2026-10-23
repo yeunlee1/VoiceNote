@@ -1,4 +1,4 @@
-<!-- 휴대폰에서 프로젝트별 회의를 준비·녹음하고 지난 회의 기록을 읽는 VoiceNote 화면이다. -->
+<!-- 휴대폰에서 회의를 준비·녹음하고 지난 회의 기록을 읽는 VoiceNote 화면이다. -->
 <!doctype html>
 <html lang="ko">
 <head>
@@ -34,13 +34,7 @@
 </header>
 
 <main id="main">
-  <button id="open-projects" class="project-line" type="button" aria-haspopup="dialog" aria-controls="projects">
-    <svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>
-    <span class="project-line-text"><small>프로젝트</small><span id="project-name">불러오는 중</span></span>
-    <svg class="icon chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
-  </button>
-
-  <section class="console" aria-labelledby="console-heading">
+<section class="console" aria-labelledby="console-heading">
     <div class="console-head">
       <h1 id="console-heading">새 회의</h1>
       <span id="timer" aria-label="녹음 시간">00:00</span>
@@ -49,19 +43,14 @@
       <li data-stage="prepare">준비</li><li data-stage="record">녹음</li><li data-stage="analyze">분석</li><li data-stage="done">완료</li>
     </ol>
     <p id="record-state" class="visually-hidden">회의 준비 전</p>
-    <p id="workflow" class="status" role="status" aria-live="polite">회의 준비를 열어 내용과 동의를 확인하세요.</p>
+    <p id="workflow" class="status" role="status" aria-live="polite">키를 등록하면 바로 회의를 시작할 수 있습니다.</p>
 
     <button id="prepare" class="prepare" type="button" aria-expanded="false" aria-controls="prep">
-      <span>회의 준비</span><span id="prepare-hint" class="prepare-hint">동의 · 회의명 · 상세 내용</span>
+      <span>회의 준비</span><span id="prepare-hint" class="prepare-hint">회의명 · 참석자 · 상세 내용</span>
       <svg class="icon chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
     </button>
     <div id="prep" class="prep" hidden>
-      <fieldset class="consents">
-        <legend>동의</legend>
-        <label class="check"><input id="record-consent" type="checkbox"><span>참석자의 녹음 동의를 확인했습니다.</span></label>
-        <label class="check"><input id="ai-consent" type="checkbox"><span>종료 후 원음과 전사를 외부 AI로 보내 분석합니다. 길면 최대 6회 나눠 요청하며 API 사용료가 발생합니다.</span></label>
-      </fieldset>
-      <label class="field">회의명<input id="title" maxlength="160" placeholder="비워 두면 분석 후 정합니다" autocomplete="off"></label>
+<label class="field">회의명<input id="title" maxlength="160" placeholder="비워 두면 AI가 회의 내용을 보고 정합니다" autocomplete="off"></label>
       <div class="pair">
         <label class="field">날짜<input id="date" type="date"></label>
         <label class="field">참석자<input id="participants" maxlength="1000" placeholder="선택" autocomplete="off"></label>
@@ -97,7 +86,7 @@
     <div id="blockers" class="needs" aria-live="polite">
       <p class="needs-title">시작 전 필요</p>
       <ul id="blocker-list"></ul>
-      <div class="needs-actions"><button id="blocker-settings" class="link" type="button" hidden>AI 설정 열기</button><button id="blocker-project" class="link" type="button" hidden>프로젝트 이름 정하기</button></div>
+      <div class="needs-actions"><button id="blocker-settings" class="link" type="button" hidden>AI 설정 열기</button></div>
     </div>
   </section>
 
@@ -111,6 +100,7 @@
 <nav class="dock" aria-label="회의 조작">
   <button id="start" class="button primary" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-mic"/></svg><span id="start-label">회의 시작</span></button>
   <button id="finish" class="button stop" type="button" disabled hidden><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg><span>회의 종료</span></button>
+  <p class="hint">녹음 전에 참석자에게 녹음과 AI 분석(OpenAI 전송)을 알려 주세요.</p>
 </nav>
 
 <section id="result" class="detail" role="dialog" aria-modal="true" aria-labelledby="meeting-title" hidden tabindex="-1">
@@ -144,7 +134,7 @@
       </section>
       <section class="block" aria-labelledby="retry-heading">
         <h3 id="retry-heading">재분석</h3>
-        <label class="check"><input id="retry-consent" type="checkbox"><span>저장된 음성과 전사를 외부 AI로 다시 보냅니다. 비용이 발생할 수 있습니다.</span></label>
+
         <button id="retry" class="button" type="button" disabled>다시 분석</button>
         <p class="hint">분할·재분석 요청의 사용량도 위 표에 합산됩니다.</p>
       </section>
@@ -152,48 +142,11 @@
   </div>
 </section>
 
-<dialog id="projects" aria-labelledby="projects-title">
-  <div class="modal">
-    <div class="modal-head"><h2 id="projects-title">프로젝트</h2><button class="link close-dialog" type="button" data-close="projects">닫기</button></div>
-    <div id="presets" class="preset-list" role="group" aria-label="프로젝트, 최대 3개"></div>
-    <details id="project-settings" class="sub">
-      <summary>프로젝트 설정</summary>
-      <label class="field">프로젝트 이름<input id="name" maxlength="100" autocomplete="off"></label>
-      <label class="field">설명 · 정리 기준<textarea id="context" rows="4" maxlength="4000"></textarea></label>
-      <div class="row form-actions">
-        <button id="save-preset" class="button primary" type="button">프로젝트 저장</button>
-        <button id="delete-preset" class="button" type="button" hidden>프로젝트 삭제</button>
-      </div>
-    </details>
-    <details id="settings-file" class="sub">
-      <summary>설정 파일</summary>
-      <p class="hint">저장된 프로젝트 설정만 주고받습니다. API 키, 모델, 회의 기록과 녹음은 넣지 않습니다.</p>
-      <div class="row">
-        <button id="export-settings" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg>내보내기</button>
-        <button id="import-settings" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>불러오기</button>
-      </div>
-    </details>
-  </div>
-</dialog>
-
-<dialog id="import-preview" aria-labelledby="import-title">
-  <div class="modal">
-    <div class="modal-head"><h2 id="import-title">설정 불러오기</h2><button id="import-close" class="link close-dialog" type="button">취소</button></div>
-    <p id="import-file" class="meta"></p>
-    <p class="notice">프로젝트 설정 전체(최대 3개)를 이 파일 내용으로 바꿉니다. 회의 기록과 녹음은 그대로 남습니다.</p>
-    <ol id="import-list" class="import-list" aria-label="불러올 프로젝트"></ol>
-    <div class="row">
-      <button id="import-cancel" class="button" type="button">취소</button>
-      <button id="import-apply" class="button primary" type="button">전체 교체</button>
-    </div>
-  </div>
-</dialog>
-
 <dialog id="settings" aria-labelledby="settings-title">
   <div class="modal">
     <div class="modal-head"><h2 id="settings-title">AI 설정</h2><button id="close-settings" class="link close-dialog" type="button" data-close="settings">닫기</button></div>
     <p id="key-status" class="status-line"></p>
-    <p id="settings-lock" class="notice" hidden>녹음이나 분석이 진행 중입니다. 키는 끝난 뒤 바꿀 수 있고, 요약 모델은 다음 분석부터 적용됩니다.</p>
+    <p id="settings-lock" class="notice" hidden>녹음이나 분석이 진행 중입니다. 설정은 끝난 뒤 바꿀 수 있습니다.</p>
     <label class="field">API 키<input id="api-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-로 시작하는 키"></label>
     <fieldset class="choice">
       <legend>보관</legend>

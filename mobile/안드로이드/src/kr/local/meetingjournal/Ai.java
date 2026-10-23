@@ -72,7 +72,7 @@ final class Ai {
         }
     }
     void analyze(JSONObject record) throws Exception {
-        File dir=store.directory(record.getInt("slot"),record.getString("id"));JSONArray audio=record.getJSONArray("audio");StringBuilder transcript=new StringBuilder();
+        File dir=store.directory(Store.location(record),record.getString("id"));JSONArray audio=record.getJSONArray("audio");StringBuilder transcript=new StringBuilder();
         for(int i=0;i<audio.length();i++){
             check();progress.update("음성을 글로 변환 중 · "+(i+1)+" / "+audio.length());File saved=new File(dir,String.format(Locale.ROOT,"전사-%03d.txt",i+1));
             String text=saved.exists()?Store.read(saved):transcribe(record,new File(dir,audio.getString(i)));
@@ -81,7 +81,7 @@ final class Ai {
         if(transcript.toString().trim().isEmpty())throw new IOException("인식된 발언이 없습니다. 원음은 보관했습니다.");
         JSONObject previous=null;List<String> chunks=TextChunks.split(transcript.toString(),24000);
         for(int i=0;i<chunks.size();i++){progress.update(model.label+" 회의록 분석 중 · "+(i+1)+" / "+chunks.size());previous=section(record,chunks.get(i),previous,dir,0);}
-        analysis(record).put("summaryModel",model.id);store.finish(record,previous);
+        analysis(record).put("summaryModel",model.id);store.finish(record,previous,null);
     }
     JSONObject section(JSONObject record,String text,JSONObject previous,File dir,int depth) throws Exception {
         check();JSONObject input=new JSONObject().put("context",record.optString("context")).put("title",record.optString("title")).put("date",record.optString("date")).put("participants",record.optString("participants")).put("transcript",text);

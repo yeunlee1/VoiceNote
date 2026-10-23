@@ -24,7 +24,7 @@ public final class MeetingService extends Service {
         try{
             if("finish".equals(action)){if(recorder!=null){stopAudio();analyze();}else if(!active)stopSelf();return START_NOT_STICKY;}
             if(active)return START_NOT_STICKY;
-            record=store.load(intent.getIntExtra("slot",1),intent.getStringExtra("id"));analyzing="analyze".equals(action);active=true;
+            record=store.load(intent.getStringExtra("location"),intent.getStringExtra("id"));analyzing="analyze".equals(action);active=true;
             show(analyzing?"회의록 분석 준비 중":"회의 녹음 중",!analyzing);
             wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"MeetingJournal:work");wake.acquire(4*60*60*1000L);
             if(analyzing)analyze();else startAudio();
@@ -39,7 +39,7 @@ public final class MeetingService extends Service {
     }
     private void status(String state,String message) throws Exception {record.put("state",state).put("message",message);store.save(record);snapshot=record.toString();}
     private void startAudio() throws Exception {
-        JSONArray audio=record.getJSONArray("audio");String name=String.format(Locale.ROOT,"원음-%03d.m4a",audio.length()+1);audioFile=new File(store.directory(record.getInt("slot"),record.getString("id")),name);
+        JSONArray audio=record.getJSONArray("audio");String name=String.format(Locale.ROOT,"원음-%03d.m4a",audio.length()+1);audioFile=new File(store.directory(Store.location(record),record.getString("id")),name);
         recorder=new MediaRecorder();recorder.setAudioSource(MediaRecorder.AudioSource.MIC);recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);recorder.setAudioChannels(1);recorder.setAudioSamplingRate(24000);recorder.setAudioEncodingBitRate(64000);recorder.setOutputFile(audioFile.getAbsolutePath());recorder.setMaxDuration(20*60*1000);recorder.setMaxFileSize(22*1024*1024);
         recorder.setOnInfoListener((r,what,extra)->{if(what==MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED||what==MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED){try{stopAudio();startAudio();}catch(Exception ex){fail(ex);}}});
         recorder.setOnErrorListener((r,what,extra)->fail(new IOException("녹음이 중단되었습니다. 저장된 파일을 확인하세요.")));
