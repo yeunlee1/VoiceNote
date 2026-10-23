@@ -4,8 +4,9 @@ const path = require('node:path');
 const { randomUUID, createHash } = require('node:crypto');
 const defaults = require('./기본프로젝트.json');
 const aiUsage = require('./AI사용량.js');
-const exchange = require('./프로젝트설정교환.cjs');
 const formats = require('./출력형식.js');
+const { markdown } = require('./회의문서.cjs');
+const MAX_PROJECTS = 3;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const fail = (status, message) => Object.assign(new Error(message), { status });
 function text(value, max, required = false) {
@@ -30,8 +31,8 @@ function atomicWrite(file, value) {
   }
 }
 function outputFormat(value) {
-  const format = exchange.outputFormat(value ?? 'meeting');
-  if (!format) throw fail(400, '출력 형식을 확인하세요.');
+  const format = formats.format(value ?? 'meeting');
+  if (!format || format === 'custom') throw fail(400, '출력 형식을 확인하세요.');
   return format;
 }
 function readJson(file) {
@@ -49,33 +50,16 @@ function storedFormat(record) {
   if (record.outputFormat === 'custom') {
     try { return { outputFormat: 'custom', customFormat: formats.validateCustom(record.customFormat) }; } catch {}
   }
-  return { outputFormat: exchange.outputFormat(record.outputFormat) || 'meeting' };
+  const format = formats.format(record.outputFormat);
+  return { outputFormat: format && format !== 'custom' ? format : 'meeting' };
 }
 const formatFields = value => ({ ...(value.outputFormat !== 'meeting' ? { outputFormat: value.outputFormat } : {}), ...(value.customFormat ? { customFormat: value.customFormat } : {}) });
-function markdown(record) {
-  const m = record.minutes;
-  const head = [`# ${record.title}`, '', `프로젝트: ${record.projectName}`, `날짜: ${record.date} · ${record.dailySequence || 1}차 회의`, `참석자: ${record.participants || '미입력'}`, ''];
-  if (record.outputFormat === 'custom' && record.customFormat) return [...head, ...formats.customText(m, record.customFormat)].join('\n');
-  const action = a => `- ${a.task} · 담당 ${a.owner || '미정'} · 기한 ${a.due || '미정'}`;
-  const list = (title, items, format = x => `- ${x}`) => items.length ? [`## ${title}`, ...items.map(format), ''] : [];
-  const topics = title => m.topics.length ? [`## ${title}`, '', ...m.topics.flatMap(t => [`### ${t.title}`, '', ...t.points.flatMap(p => [p, ''])])] : [];
-  // 핵심 요약형과 업무 정리형은 내용이 있는 절만 남기고, 회의록형은 기존 순서를 그대로 쓴다.
-  if (record.outputFormat === 'summary')
-    return [...head, '## 핵심 요약', m.overview, '', ...topics('주요 내용'), ...list('결정 사항', m.decisions), ...list('후속 작업', m.actions, action), ...list('확인 필요', m.openQuestions)].join('\n');
-  if (record.outputFormat === 'tasks')
-    return [...head, '## 업무 요약', m.overview, '', '## 할 일', ...(m.actions.length ? m.actions.map(action) : ['- 확인된 할 일 없음']), '',
-      ...list('미확정 항목', m.openQuestions), ...list('결정 사항', m.decisions), ...topics('참고 내용')].join('\n');
-  return [...head,
-    '## 핵심 요약', m.overview, '', '## 상세 회의 내용', '', '## 합의된 방향', ...m.decisions.flatMap(x => [x, '']),
-    ...m.topics.flatMap(t => [`## ${t.title}`, '', ...t.points.flatMap(p => [p, ''])]), '## 다음 할 일',
-    ...m.actions.map(a => `- ${a.task} · 담당 ${a.owner || '미정'} · 기한 ${a.due || '미정'}`), '',
-    '## 미확정 사항', ...m.openQuestions.map(x => `- ${x}`), ''].join('\n');
-}
 function createProjectStore(root, validateMinutes, options = {}) {
   const write = options.atomicWrite ?? atomicWrite;
+  const remove = options.removeFile ?? (file => fs.unlinkSync(file));
   function directory(slot) {
     // 이전 버전의 4~9번 폴더는 지우지 않고 남겨 두되 읽거나 쓰지 않는다.
-    if (!Number.isInteger(slot) || slot < 1 || slot > exchange.MAX_PROJECTS) throw fail(404, '프로젝트 번호를 확인하세요.');
+    if (!Number.isInteger(slot) || slot < 1 || slot > MAX_PROJECTS) throw fail(404, '프로젝트 번호를 확인하세요.');
     return path.join(root, `프로젝트-${String(slot).padStart(2, '0')}`);
   }
   function preset(slot) {
@@ -141,12 +125,12 @@ function createProjectStore(root, validateMinutes, options = {}) {
     if (!fs.existsSync(file)) throw fail(404, '저장된 녹음을 찾지 못했습니다.');
     return readJson(file);
   }
-  const allPresets = () => Array.from({ length: exchange.MAX_PROJECTS }, (_, i) => preset(i + 1));
+  const allPresets = () => Array.from({ length: MAX_PROJECTS }, (_, i) => preset(i + 1));
   function hasRecords(slot) {
     const dir = directory(slot);
     return fs.existsSync(dir) && fs.readdirSync(dir).some(name => /^(회의|녹음)-[0-9a-f-]{36}\.json$/.test(name));
   }
-  // 내 형식은 프로젝트와 관계없이 하나만 두고, 설정 파일 내보내기에는 넣지 않는다.
+  // 내 형식은 프로젝트와 관계없이 하나만 두고, 설정 파일 2판에 함께 담는다.
   const customFile = path.join(root, '내형식.json');
   return {
     projects: allPresets,
@@ -162,7 +146,7 @@ function createProjectStore(root, validateMinutes, options = {}) {
       return value;
     },
     deleteCustomFormat() {
-      if (fs.existsSync(customFile)) fs.unlinkSync(customFile);
+      if (fs.existsSync(customFile)) remove(customFile);
       return null;
     },
     savePreset(slot, data) {
@@ -180,42 +164,6 @@ function createProjectStore(root, validateMinutes, options = {}) {
       if (!previous.name) throw fail(400, '저장된 프로젝트가 아닙니다.');
       if (hasRecords(slot)) throw fail(409, '회의 기록이 있는 프로젝트는 삭제할 수 없습니다.');
       fs.unlinkSync(path.join(directory(slot), '설정.json'));
-      return allPresets();
-    },
-    // 검증을 마친 세 설정을 한 번에 바꾸고, 중간에 쓰기가 실패하면 원래 파일 내용으로 되돌린다.
-    replacePresets(next, revisions) {
-      const previous = allPresets();
-      if (!Array.isArray(revisions) || revisions.length !== previous.length || previous.some((project, i) => revisions[i] !== project.revision))
-        throw fail(409, '다른 창에서 프로젝트 설정이 바뀌었습니다. 화면을 다시 불러온 뒤 설정 파일을 불러오세요.');
-      const changes = previous.map((project, i) => ({ file: path.join(directory(i + 1), '설정.json'), value: { ...next[i], slot: i + 1, revision: project.revision + 1 } }))
-        .filter(change => change.value.name || fs.existsSync(change.file));
-      // 원래 바이트를 같은 폴더의 교체전 파일로도 남겨, 되돌리기까지 실패하거나 프로그램이 멈춰도 원본을 잃지 않게 한다.
-      const stamp = randomUUID().slice(0, 8);
-      const backups = changes.map(change => ({ file: change.file, bytes: fs.existsSync(change.file) ? fs.readFileSync(change.file) : null,
-        copy: path.join(path.dirname(change.file), `설정-교체전-${stamp}.json`) }));
-      const removeCopies = () => { for (const backup of backups) try { if (backup.bytes) fs.unlinkSync(backup.copy); } catch {} };
-      try { for (const backup of backups) if (backup.bytes) atomicWrite(backup.copy, backup.bytes); }
-      catch { removeCopies(); throw fail(503, '기존 설정의 교체전 사본을 만들지 못해 아무것도 바꾸지 않았습니다. 회의자료 폴더의 쓰기 권한과 디스크 공간을 확인하세요.'); }
-      let attempted = 0;
-      try {
-        for (const change of changes) {
-          attempted++;
-          write(change.file, JSON.stringify(change.value, null, 2));
-        }
-      } catch {
-        const failed = [];
-        for (const backup of backups.slice(0, attempted)) {
-          try {
-            if (backup.bytes) atomicWrite(backup.file, backup.bytes);
-            else if (fs.existsSync(backup.file)) fs.unlinkSync(backup.file);
-          } catch { failed.push(backup); }
-        }
-        if (!failed.length) removeCopies();
-        const where = item => item.bytes ? `${path.basename(path.dirname(item.file))}\\${path.basename(item.copy)}에 원래 내용` : `${path.basename(path.dirname(item.file))}은 원래 빈 설정`;
-        throw fail(503, failed.length ? `설정 교체 중 저장에 실패했고 일부 설정을 되돌리지 못했습니다. ${failed.map(where).join(', ')}입니다. 회의자료 폴더에서 확인하세요. 회의와 녹음은 그대로입니다.`
-          : '설정 교체 중 저장에 실패해 기존 설정으로 되돌렸습니다. 회의와 녹음은 그대로입니다.');
-      }
-      removeCopies();
       return allPresets();
     },
     listMeetings(slot) {

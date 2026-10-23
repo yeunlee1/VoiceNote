@@ -87,7 +87,7 @@ test('분석 하나의 여러 요청은 한 번만 세고 실패·취소는 차�
   assert.deepEqual(exhausted.body.error, { code: 'TRIAL_EXHAUSTED', message: '새로운 API키를 등록하세요.', mustRegister: true });
   assert.equal((await server.request('/api/config')).body.accessMode, 'exhausted');
   assert.equal((await server.request('/api/projects')).status, 200);
-  assert.equal((await server.request('/api/project-settings/export')).status, 200);
+  assert.equal((await server.request('/api/settings/export')).status, 200);
   const savedTrial = JSON.parse(fs.readFileSync(path.join(server.dir, '체험권한.json'), 'utf8'));
   assert.equal(savedTrial.used, 3);
   assert.doesNotMatch(JSON.stringify(savedTrial), /sk-/);
@@ -117,6 +117,6 @@ test('해제 문자는 키로 저장하거나 외부로 보내지 않고 기본 
   }
   assert.equal((await server.request('/api/config')).body.trialUsed, 0);
   assert.equal(server.calls.every(call => call.authorization === `Bearer ${DEFAULT_KEY}` && !String(call.body).includes('TEST-UNLOCK')), true);
-  const exported = await server.request('/api/project-settings/export');
+  const exported = await server.request('/api/settings/export');
   assert.doesNotMatch(exported.text, /unlock|trial|sk-/i);
 });

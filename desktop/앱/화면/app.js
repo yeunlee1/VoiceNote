@@ -47,7 +47,7 @@
       "meeting-notes", "start-hint", "stage", "header-project", "open-ai-settings", "ai-status-label",
       "summary-model", "model-help", "settings-lock", "meeting-detail", "ai-settings", "detail-title",
       "detail-meta", "usage", "open-result", "open-result-label", "setup-close", "meeting-heading", "key-form",
-      "output-format", "export-settings", "import-settings", "settings-file", "settings-import", "settings-preview", "settings-import-file", "confirm-import",
+      "output-format",
       "format-help", "format-example", "format-example-title", "format-example-text", "format-example-body", "custom-editor", "custom-name",
       "custom-section-list", "custom-instruction", "custom-save", "custom-delete", "custom-status",
       "tab-minutes", "tab-transcript", "panel-minutes", "panel-transcript", "transcript-view", "transcript-meta", "copy-result", "share-result", "save-result", "result-status",
@@ -56,7 +56,6 @@
   const Formats = window.MeetingFormats;
   const formatLabels = Formats.LABELS;
   const outputFormat = (value) => (Object.hasOwn(formatLabels, value) ? value : "meeting");
-  const maxSettingsBytes = 128 * 1024;
   const state = {
     token: "",
     projects: [], slot: 1, setupOpen: false, projectBusy: false, flowBusy: false, archiveBusy: false,
@@ -66,6 +65,7 @@
     keyStorageError: "",
     keyBusy: false,
     settingsBusy: false,
+    settings: null,
     models: [],
     summaryModel: "",
     usage: [],
@@ -94,7 +94,6 @@
     summarySource: "",
     notesSaved: true,
     aiController: null,
-    pendingImport: null,
     minutesFormat: null,
     // customFormat은 저장된 내 형식, meetingCustom은 다시 연 회의에 기록된 당시 내 형식이다.
     customFormat: null,
@@ -309,14 +308,9 @@
     return format === "custom" && currentCustom() ? { outputFormat: format, customFormat: currentCustom() } : { outputFormat: format === "custom" ? "meeting" : format };
   }
 
-  function rememberFormat(slot, value) {
-    try { localStorage.setItem(`voicenote.outputFormat.${slot}`, value); } catch {}
-  }
-
-  function rememberedFormat(project) {
-    let value = null;
-    try { value = localStorage.getItem(`voicenote.outputFormat.${project.slot}`); } catch {}
-    const format = outputFormat(value || project.outputFormat);
+  function defaultFormat() {
+    // 새 회의는 설정의 기본 출력 형식으로 시작한다. 내 형식인데 저장된 형식이 없으면 회의록으로 시작한다.
+    const format = outputFormat(state.settings?.defaultOutputFormat || "meeting");
     return format === "custom" && !state.customFormat ? "meeting" : format;
   }
 
@@ -412,7 +406,7 @@
     await api("/api/custom-format", { method: "DELETE" });
     state.customFormat = null;
     updateCustomOption();
-    if (ui["output-format"].value === "custom" && !state.meetingCustom) { ui["output-format"].value = "meeting"; rememberFormat(state.slot, "meeting"); }
+    if (ui["output-format"].value === "custom" && !state.meetingCustom) { ui["output-format"].value = "meeting"; }
     loadEditor();
     ui["custom-status"].textContent = "내 형식을 삭제했습니다.";
     renderFormatExample();
@@ -497,7 +491,6 @@
     ui.shutdown.disabled = state.flowBusy || state.archiveBusy || state.projectBusy;
     for (const id of ["project-name", "title", "date", "output-format", "participants", "meeting-notes", "meeting-context", "transcript", "audio-file"])
       ui[id].disabled = Boolean(locked);
-    for (const id of ["export-settings", "import-settings", "confirm-import"]) ui[id].disabled = settingsTransferBlocked();
     for (const button of ui["project-presets"].querySelectorAll("button")) button.disabled = Boolean(locked);
     for (const button of ui["meeting-history"].querySelectorAll("button")) button.disabled = Boolean(locked);
     const allowedAI = (canAnalyze() || needsNewKey()) && ui["ai-consent"].checked && !busy;
@@ -1602,7 +1595,7 @@
     ui.title.value = project.title;
     if (resetDate) ui.date.value = today();
     ui["meeting-context"].value = project.context;
-    ui["output-format"].value = rememberedFormat(project);
+    ui["output-format"].value = defaultFormat();
     state.meetingCustom = null;
     renderPresets();
     if (!project.name) state.setupOpen = true;
@@ -1673,7 +1666,7 @@
       state.audioStored = false;
       const project = state.projects[state.slot - 1];
       ui.title.value = project?.title || "";
-      ui["output-format"].value = project ? rememberedFormat(project) : "meeting";
+      ui["output-format"].value = defaultFormat();
       state.meetingCustom = null;
       ui.date.value = today();
       ui.participants.value = "";
@@ -1819,90 +1812,6 @@
     } finally { state.flowBusy = false; refresh(); }
   }
 
-  function settingsTransferBlocked() {
-    return Boolean(state.recorder || state.recorders.size || state.permissionPending || state.aiController || state.flowBusy || state.archiveBusy
-      || state.projectBusy || state.keyBusy || state.settingsBusy || !state.projects.length);
-  }
-
-  async function exportSettings() {
-    if (settingsTransferBlocked()) return announce("녹음·마이크 허가·AI 분석·저장이 끝난 뒤 설정을 내보내세요.");
-    if (!hasMeetingRecord() && presetChanged()
-      && !confirm("화면에서 바꾼 프로젝트 설정은 아직 저장되지 않아 파일에 들어가지 않습니다. 저장된 설정만 내보낼까요? 먼저 저장하려면 취소한 뒤 ‘프리셋 저장’을 누르세요."))
-      return;
-    state.projectBusy = true;
-    refresh();
-    try {
-      const { file } = await api("/api/project-settings/export");
-      download(new Blob([JSON.stringify(file, null, 2)], { type: "application/json;charset=utf-8" }), `${today()}-VoiceNote-프로젝트설정.json`);
-      announce("프로젝트 설정 파일 다운로드를 시작했습니다. API 키와 회의 기록은 들어가지 않습니다.");
-    } catch (error) {
-      announce(`설정을 내보내지 못했습니다. ${error.message}`);
-    } finally { state.projectBusy = false; refresh(); }
-  }
-
-  function chooseSettingsFile() {
-    if (settingsTransferBlocked()) return announce("녹음·마이크 허가·AI 분석·저장이 끝난 뒤 설정 파일을 불러오세요.");
-    ui["settings-file"].click();
-  }
-
-  async function previewSettings(event) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    if (settingsTransferBlocked()) return announce("녹음·마이크 허가·AI 분석·저장이 끝난 뒤 설정 파일을 불러오세요.");
-    if (file.size > maxSettingsBytes) return announce("설정 파일이 128KiB를 넘어 불러오지 않았습니다. 현재 설정은 바뀌지 않았습니다.");
-    state.projectBusy = true;
-    refresh();
-    try {
-      // 원본 바이트로 크기를 재고 손상된 UTF-8은 대체 문자로 바꾸지 않고 거절한다. 검증은 서버가 쓰기 없이 같은 규칙으로 한다.
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      if (bytes.length > maxSettingsBytes) throw new Error("설정 파일이 128KiB를 넘었습니다.");
-      let text;
-      try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
-      catch { throw new Error("UTF-8 설정 파일이 아닙니다."); }
-      const { projects } = await api("/api/project-settings/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: text }) });
-      state.pendingImport = { text, revisions: state.projects.map((project) => project.revision) };
-      ui["settings-preview"].replaceChildren();
-      for (const project of projects) {
-        const row = document.createElement("li");
-        row.append(element("span", project.slot, "preset-no"), element("span", project.name || "비어 있음", project.name ? "" : "empty"));
-        if (project.name) row.append(element("span", formatLabels[outputFormat(project.outputFormat)], "format"));
-        ui["settings-preview"].append(row);
-      }
-      ui["settings-import-file"].textContent = `${file.name} · 아래 프로젝트 설정으로 바꿉니다.${!hasMeetingRecord() && presetChanged() ? " 화면에서 저장하지 않은 프로젝트 입력은 사라집니다." : ""}`;
-      state.projectBusy = false;
-      openDialog(ui["settings-import"], ui["import-settings"]);
-    } catch (error) {
-      state.pendingImport = null;
-      announce(`설정 파일을 불러오지 못했습니다. ${error.message} 현재 설정은 바뀌지 않았습니다.`);
-    } finally { state.projectBusy = false; refresh(); }
-  }
-
-  async function applyImportedSettings() {
-    const pending = state.pendingImport;
-    if (!pending) return;
-    if (settingsTransferBlocked()) return announce("녹음·마이크 허가·AI 분석·저장이 끝난 뒤 설정을 바꾸세요.");
-    state.projectBusy = true;
-    refresh();
-    try {
-      const result = await api("/api/project-settings/import", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file: pending.text, revisions: pending.revisions }) });
-      state.projects = result.projects;
-      if (hasMeetingRecord()) renderPresets();
-      else applyProject(state.slot, false);
-      announce("프로젝트 설정을 파일 내용으로 바꿨습니다. 회의와 녹음은 그대로입니다.");
-      workflow("프로젝트 설정을 불러왔습니다. 프로젝트를 고르고 ‘회의 준비’를 누르세요.", true);
-      loadHistory();
-    } catch (error) {
-      announce(`설정을 바꾸지 못했습니다. ${error.message}`);
-    } finally {
-      state.pendingImport = null;
-      state.projectBusy = false;
-      if (ui["settings-import"].open) ui["settings-import"].close();
-      refresh();
-    }
-  }
-
   function focusables(dialog) {
     return Array.from(dialog.querySelectorAll("button, input, select, textarea, summary, a[href], [tabindex]:not([tabindex='-1'])"))
       .filter((node) => !node.disabled && !node.hidden && node.offsetParent !== null);
@@ -1975,7 +1884,7 @@
     refresh();
     try {
       const result = await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ summaryModel: id }) });
-      state.summaryModel = result.summaryModel || id;
+      state.summaryModel = result.settings?.summaryModel || id;
       state.modelError = "";
       announce(`요약 모델을 ${modelInfo()?.label || state.summaryModel}(으)로 저장했습니다. 다음 분석부터 적용합니다.`);
     } catch (error) {
@@ -2048,16 +1957,10 @@
       refresh();
       ui.prepare.focus();
     });
-    for (const dialog of [ui["meeting-detail"], ui["ai-settings"], ui["settings-import"]]) bindDialog(dialog);
-    ui["settings-import"].addEventListener("close", () => { state.pendingImport = null; });
-    ui["export-settings"].addEventListener("click", exportSettings);
-    ui["import-settings"].addEventListener("click", chooseSettingsFile);
-    ui["settings-file"].addEventListener("change", previewSettings);
-    ui["confirm-import"].addEventListener("click", applyImportedSettings);
+    for (const dialog of [ui["meeting-detail"], ui["ai-settings"]]) bindDialog(dialog);
     ui["output-format"].addEventListener("change", () => {
       state.resultStored = false;
       state.notesSaved = false;
-      rememberFormat(state.slot, ui["output-format"].value);
       if (ui["output-format"].value === "custom" && !currentCustom()) { ui["format-example"].hidden = false; loadEditor(); }
       renderFormatExample();
       refresh();
@@ -2103,6 +2006,7 @@
     if (!state.token) return announce("실행 도구가 제공한 주소로 창을 다시 열어 주세요.");
     try {
       const config = await api("/api/config");
+      state.settings = config.settings || null;
       state.keyConfigured = Boolean(config.keyConfigured);
       state.keySaved = Boolean(config.keySaved);
       state.keyStorageError = config.keyStorageError || "";

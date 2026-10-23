@@ -57,7 +57,7 @@ test('내 형식은 하나만 저장·조회·삭제하고 잘못된 정의는 �
   assert.deepEqual(fs.readFileSync(path.join(dir, '내형식.json')), bytes);
   assert.deepEqual((await request('/api/custom-format', 'DELETE')).body, { customFormat: null });
   assert.equal(fs.existsSync(path.join(dir, '내형식.json')), false);
-  const settings = await request('/api/project-settings/export');
+  const settings = await request('/api/settings/export');
   assert.doesNotMatch(JSON.stringify(settings.body), /주간 보고/);
 });
 

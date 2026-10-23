@@ -48,7 +48,7 @@ test('설정 조회는 모델 목록·기본값·선택값·요청 한도를 알
   assert.equal(config.summaryModels.length, 3);
   assert.ok(config.summaryModels.every(model => model.maxOutputTokens === 32000));
   const saved = await first.post('/api/settings', { summaryModel: 'gpt-6-luna' });
-  assert.deepEqual(saved.body, { summaryModel: 'gpt-6-luna' });
+  assert.deepEqual(saved.body.settings, { summaryModel: 'gpt-6-luna', defaultOutputFormat: 'meeting', storage: { audio: '', transcript: '', summary: '' } });
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'AI설정.json'), 'utf8')).summaryModel, 'gpt-6-luna');
   const rejected = await first.post('/api/settings', { summaryModel: 'gpt-made-up' });
   assert.equal(rejected.status, 400);

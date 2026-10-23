@@ -87,12 +87,6 @@ h1, h2, h3, p { margin: 0; }
 .tool-button .icon { width: 18px; height: 18px; color: var(--ink-faint); }
 .tool-button:hover:not(:disabled) { background: rgba(64, 48, 22, 0.06); color: var(--ink); }
 .tool-button:disabled { opacity: 0.5; }
-.settings-transfer { display: flex; gap: 4px; padding-top: 4px; border-top: 1px solid var(--rule); }
-.settings-transfer .tool-button { flex: 1; justify-content: center; min-height: 36px; padding: 6px 8px; font-size: 13px; text-align: center; }
-.settings-preview { list-style: none; margin: 0; padding: 0; display: grid; border-top: 1px solid var(--rule); font-size: 14px; }
-.settings-preview li { display: flex; align-items: baseline; gap: 12px; padding: 8px 4px; border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; }
-.settings-preview .empty { color: var(--ink-faint); }
-.settings-preview .format { margin-left: auto; flex: none; font-size: 12px; color: var(--ink-faint); }
 
 /* 중앙 회의 작업 영역 */
 .desk { padding: 28px 40px 48px; min-width: 0; outline: none; }
