@@ -234,7 +234,7 @@ final class Store {
     TrialAccess.Status access() throws Exception {return trial().status(!key().isEmpty(),!defaultKey().isEmpty());}
     void requireAccess() throws Exception {
         TrialAccess.Status status=access();
-        if(status.mustRegister)throw new IOException(status.accessMode.equals("exhausted")?TrialAccess.EXHAUSTED_MESSAGE:"AI 설정에서 API 키를 먼저 등록하세요.");
+        if(status.mustRegister)throw new IOException(status.accessMode.equals("exhausted")?TrialAccess.EXHAUSTED_MESSAGE:"설정의 AI 연결에서 API 키를 먼저 등록하세요.");
     }
     void key(String value,boolean persist) throws Exception {
         value=value.trim();if(!value.startsWith("sk-")||value.length()<20)throw new IOException("API 키 형식을 확인하세요. sk-로 시작하는 키 전체를 붙여 넣으세요.");

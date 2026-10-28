@@ -403,6 +403,7 @@ public final class AndroidChecks extends Instrumentation {
         expect(!defaultKey,"test build has no real default key");
         String savedKey=store.context.getSharedPreferences("connection",0).getString("key",null);
         Store.sessionKey=null;if(savedKey==null)expect(store.key().isEmpty()&&store.keySource().equals("none"),"missing key reads as empty instead of crashing");
+        try{store.requireAccess();throw new AssertionError("키 없이 시작할 수 없어야 합니다.");}catch(IOException ex){expect(ex.getMessage().equals("설정의 AI 연결에서 API 키를 먼저 등록하세요."),"키 없음 안내가 현재 설정 화면의 구역을 가리킨다");}
         try{store.key("bad",true);throw new AssertionError("bad key must fail");}catch(IOException ex){expect(ex.getMessage().contains("형식"),"bad key reason shown");}
         store.key("sk-mock-only-0000000000000000",false);expect(store.keySource().equals("session")&&store.key().startsWith("sk-mock"),"session key used without persisting");
         expect(store.context.getSharedPreferences("connection",0).getString("key",null)==null,"session key not written to storage");

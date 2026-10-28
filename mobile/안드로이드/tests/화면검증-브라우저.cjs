@@ -45,6 +45,7 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     const client=await connect(port);ws=client.ws;const send=client.send;
     await send('Page.enable');await send('Runtime.enable');await send('Page.addScriptToEvaluateOnNewDocument',{source:mock+require('./설정평가-모의브리지.cjs')});
     const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result.value;};
+    const until=async expression=>{const deadline=Date.now()+6500;while(Date.now()<deadline){if(await evaluate(expression))return true;await wait(50);}return false;};
     const click=selector=>evaluate('document.querySelector('+JSON.stringify(selector)+').click()');
     const viewport=(width,height=820)=>send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:2,mobile:true});
     const load=async(query='')=>{await send('Page.navigate',{url:base+query});await wait(450);};
@@ -106,10 +107,10 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     check('내 형식 저장 후 선택지와 예시를 갱신한다',await evaluate("document.querySelector('#output-format option[value=custom]').textContent.includes('주간 보고')&&!document.getElementById('start').disabled"));
     await shot('모바일-390-내형식.png');await click('#close-settings');await click('#start');await wait(60);
     check('시작 요청에 내 형식 정의와 고른 형식을 보존한다',await evaluate("(()=>{const d=__mock.calls.filter(c=>c.method==='start').at(-1).data;return d.outputFormat==='custom'&&d.customFormat.name==='주간 보고'})()"));
-    await load();await evaluate("__mock.access={accessMode:'trial',mustRegister:false,trialLimit:3,trialRemaining:1}");await wait(1600);
-    check('체험 연결 상태 갱신 뒤 시작 가능 여부가 맞다',await evaluate("document.getElementById('connection').textContent==='체험 1회'&&!document.getElementById('start').disabled"));
-    await evaluate("__mock.access={accessMode:'exhausted',mustRegister:true,trialLimit:3,trialRemaining:0}");await wait(1600);
-    check('체험 소진 뒤 시작과 재분석 안내를 갱신한다',await evaluate("document.getElementById('start').disabled&&document.getElementById('blocker-list').innerText.includes('새로운 API키를 등록하세요.')"));
+    await load();await evaluate("__mock.access={accessMode:'trial',mustRegister:false,trialLimit:3,trialRemaining:1}");
+    check('체험 연결 상태 갱신 뒤 시작 가능 여부가 맞다',await until("document.getElementById('connection').textContent==='체험 1회'&&!document.getElementById('start').disabled"),JSON.stringify(await evaluate("({chip:document.getElementById('connection').textContent,disabled:document.getElementById('start').disabled,blockers:document.getElementById('blocker-list').innerText,statusCalls:__mock.calls.filter(c=>c.method==='status').length})")));
+    await evaluate("__mock.access={accessMode:'exhausted',mustRegister:true,trialLimit:3,trialRemaining:0}");
+    check('체험 소진 뒤 시작과 재분석 안내를 갱신한다',await until("document.getElementById('start').disabled&&document.getElementById('blocker-list').innerText.includes('새로운 API키를 등록하세요.')"),JSON.stringify(await evaluate("({chip:document.getElementById('connection').textContent,disabled:document.getElementById('start').disabled,blockers:document.getElementById('blocker-list').innerText,statusCalls:__mock.calls.filter(c=>c.method==='status').length})")));
     await click('#history button');await wait(40);await evaluate("document.querySelector('#result details.more').open=true");await click('#retry');await wait(40);
     check('분석할 키가 없으면 요청 대신 설정을 연다',await evaluate("document.getElementById('settings').open&&__mock.calls.filter(c=>c.method==='analyze').length===0"));
 
@@ -184,8 +185,10 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     check('재정리 요청 실패에도 이전 결과와 저장된 평가는 남는다',await evaluate("document.getElementById('result-version').value==='1234'&&document.getElementById('minutes').textContent.includes('회의 내용을 보존')&&__mock.reviews['1234'].comment==='고쳐 주세요'&&document.getElementById('message').textContent.includes('요약 요청에 실패')"));
     await evaluate('__mock.failRefine=false');await click('#refine');await wait(40);
     check('요약이 진행 중이면 평가와 설정 변경을 잠근다',await evaluate("document.getElementById('save-review').disabled&&document.getElementById('result-version').disabled&&document.getElementById('meeting-status').textContent.includes('정리 중')"));
-    await evaluate("__mock.active=false;__mock.history[0].resultId='1235';__mock.meeting={...__mock.meeting,state:'complete',resultId:'1235',message:'회의록을 저장했습니다.'}");await wait(1600);
-    check('재정리 완료 뒤 새 버전과 의견 반영 표시를 연다',await evaluate("document.getElementById('result-version').value==='1235'&&document.getElementById('result-version').options.length===3&&!document.getElementById('refined-badge').hidden&&!document.getElementById('save-review').disabled"));
+    await evaluate("__mock.active=false;__mock.history[0].resultId='1235';__mock.meeting={...__mock.meeting,state:'complete',resultId:'1235',message:'회의록을 저장했습니다.'}");
+    check('재정리 완료 뒤 새 버전과 의견 반영 표시를 열고 평가는 비워 둔다',await until("document.getElementById('result-version').value==='1235'&&document.getElementById('result-version').options.length===3&&!document.getElementById('refined-badge').hidden&&!document.getElementById('review-comment').disabled&&document.getElementById('review-comment').value===''&&document.getElementById('save-review').disabled&&document.getElementById('refine').disabled"));
+    await click('[data-stars="4"]');await click('#save-review');await wait(50);
+    check('새 버전에 남긴 평가는 앞선 버전의 평가와 따로 저장한다',await evaluate("__mock.reviews['1235'].stars===4&&__mock.reviews['1234'].comment==='고쳐 주세요'&&__mock.calls.filter(c=>c.method==='review').at(-1).data.resultId==='1235'"));
 
     for(const width of [360,390,412]){
       await viewport(width);await load();await key();await click('#open-settings');await shot('모바일-'+width+'-설정-AI.png');
@@ -198,7 +201,7 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
       await evaluate("document.getElementById('review-comment').value='담당자가 틀렸습니다. 문서 정리는 담당자가 다음 주까지 하기로 했습니다.';document.getElementById('review-comment').dispatchEvent(new Event('input'));document.getElementById('review-panel').scrollIntoView()");await shot('모바일-'+width+'-평가.png');
       await evaluate("document.getElementById('copies-panel').scrollIntoView()");await shot('모바일-'+width+'-사본실패.png');
       check(width+'px 결과와 의견 구역 가로 넘침 없음',await evaluate("document.getElementById('result').scrollWidth<=document.getElementById('result').clientWidth"));
-      check(width+'px 실패 종류와 원인을 표시한다',await evaluate("document.getElementById('copies-state').textContent.includes('요약본 .txt')&&document.getElementById('copies-state').textContent.includes('권한')&&!document.getElementById('save-copies').hidden"));
+      check(width+'px 실패 종류와 원인을 표시한다',await evaluate("document.getElementById('copies-state').textContent.includes('요약본(.txt)')&&document.getElementById('copies-state').textContent.includes('권한')&&!document.getElementById('save-copies').hidden"));
       await click('#save-copies');await wait(60);
       check(width+'px 사본 재시도는 선택 결과를 보존한다',await evaluate("__mock.calls.filter(c=>c.method==='copies').at(-1).data.resultId==='1234'&&document.getElementById('copies-state').textContent.includes('회의.md')"));
     }

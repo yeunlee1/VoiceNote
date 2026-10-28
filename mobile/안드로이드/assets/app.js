@@ -254,7 +254,7 @@
   function renderStars() {
     for (const button of document.querySelectorAll('[data-stars]')) button.setAttribute('aria-pressed', String(Number(button.dataset.stars) === state.stars));
   }
-  const COPY_LABELS = {audio:'오디오',transcript:'전사문',summaryMd:'요약본 .md',summaryTxt:'요약본 .txt',all:'사본'};
+  const COPY_LABELS = {audio:'원음',transcript:'전사문',summaryMd:'요약본(.md)',summaryTxt:'요약본(.txt)',all:'사본'};
   function renderCopies(report) {
     state.copies = report; const configured = ['audio','transcript','summary'].some(kind => state.settings.storage?.[kind]?.uri);
     $('save-copies').hidden = !configured || !state.result?.minutes; $('copies-guide').hidden = configured;
@@ -341,7 +341,7 @@
       }
       // 체험 남은 횟수가 분석 뒤 바뀌므로 상태 조회 때 연결 정보도 함께 갱신한다.
       if (status.connection) { state.connection = status.connection; renderAccess(); }
-      if (state.opened?.id === meeting.id && state.opened.location === meeting.location && (status.active || meeting.state === 'failed')) $('meeting-status').textContent = meeting.message || '처리 중';
+      if (state.opened && state.opened.id === meeting.id && state.opened.location === meeting.location && (status.active || meeting.state === 'failed')) $('meeting-status').textContent = meeting.message || '처리 중';
       state.connection.active = state.active;
       state.lastState = state.active ? 'active' : '';
       lock();
