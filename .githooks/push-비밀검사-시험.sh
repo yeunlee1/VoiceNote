@@ -27,6 +27,8 @@ echo '{}' > .env.회의록키; git add -f .env.회의록키; git commit -q -m "�
 node -e "require('fs').writeFileSync('그림.bin', Buffer.concat([Buffer.from([0,1,2,0,255]), Buffer.from(process.env.FAKE_REAL), Buffer.from([0,0,9])]))"; git add 그림.bin; git commit -q -m "바이너리"; try "바이너리 안의 실제 키를 막음" 막음; undo
 node -e "require('fs').writeFileSync('설정16.json', Buffer.concat([Buffer.from([0xff,0xfe]), Buffer.from(JSON.stringify({apiKey:process.env.SHAPE}),'utf16le')]))"; git add 설정16.json; git commit -q -m "UTF-16"; try "UTF-16 JSON 안의 키 모양을 막음" 막음; undo
 echo "평범" > "$SHAPE.txt"; git add "$SHAPE.txt"; git commit -q -m "이름에 키"; try "파일 이름 안의 키 모양을 막음" 막음; undo
+echo "평범" > "$SHAPE.pem"; git add -f "$SHAPE.pem"; git commit -q -m "막는 종류 이름에 키"; try "막는 종류 파일 이름의 키도 안내에 가림" 막음; undo
+echo "$FAKE_REAL" > "$FAKE_REAL.txt"; git add "$FAKE_REAL.txt"; git commit -q -m "이름과 내용에 실제 키"; try "이름과 내용에 실제 키가 있어도 안내에 가림" 막음; undo
 echo "평범한 변경" >> a.txt; git add a.txt; git commit -q -m "메모 $FAKE_REAL"; try "커밋 메시지 안의 실제 키를 막음" 막음; undo
 node -e "require('fs').writeFileSync('묶음.zip', Buffer.from('PK\u0003\u0004 압축'))"; git add -f 묶음.zip; git commit -q -m "압축 파일"; try "속을 읽을 수 없는 압축 파일을 막음" 막음; undo
 git checkout -q -b 새가지; echo "$FAKE_REAL" > e.txt; git add e.txt; git commit -q -m "새 가지의 실제 키"; git push -q -f origin 새가지 > "$W/out.txt" 2>&1; judge "새 브랜치 첫 push도 검사" 막음 $?

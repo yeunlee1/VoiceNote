@@ -35,6 +35,13 @@ function scan(where, bytes, keys, problems) {
   }
 }
 
+// 안내에 넣는 파일 이름에서도 실제 키와 키 모양 부분은 가린다.
+function hide(text, keys) {
+  let shown = String(text);
+  for (const key of keys) shown = shown.split(key).join('[가린 키]');
+  return shown.replace(KEY_SHAPE, '[가린 키]');
+}
+
 // 보낼 원격에 이미 있는 커밋만 빼고 나머지를 모두 검사 대상으로 삼는다. 다른 원격에만 있는 커밋은 아직 공개되지 않았으므로 뺀다고 보지 않는다.
 function commitsToPush(lines, remote = '') {
   const commits = new Set(), tags = new Set();
@@ -62,11 +69,11 @@ function check({ commits, tags }, keys) {
     // -z 출력은 ':옛모드 새모드 옛blob 새blob 상태' 다음에 이스케이프 없는 경로가 온다.
     const fields = gitBytes('diff', '--raw', '-z', '--no-renames', '--no-ext-diff', parents[0] || emptyTree, sha).toString('utf8').split('\0');
     for (let i = 0; i + 1 < fields.length; i += 2) {
-      const [, , newMode, , blob, status] = fields[i].split(/[: ]/), file = fields[i + 1];
+      const [, , newMode, , blob, status] = fields[i].split(/[: ]/), file = fields[i + 1], shown = hide(file, keys);
       if (status === 'D') continue;
-      if (BLOCKED_FILE.test(file)) problems.push(`${short} ${file} — 키·서명·설정·압축 파일`);
+      if (BLOCKED_FILE.test(file)) problems.push(`${short} ${shown} — 키·서명·설정·압축 파일`);
       scan(`${short} 파일 이름`, Buffer.from(file), keys, problems);
-      if (newMode !== '160000') scan(`${short} ${file}`, gitBytes('cat-file', 'blob', blob), keys, problems);
+      if (newMode !== '160000') scan(`${short} ${shown}`, gitBytes('cat-file', 'blob', blob), keys, problems);
     }
   }
   return [...new Set(problems)];
