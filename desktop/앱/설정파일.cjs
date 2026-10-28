@@ -69,6 +69,12 @@ function parseSettingsFile(source) {
   return settingsValue(root);
 }
 
+// 다른 PC에서 만든 설정 파일의 네트워크 경로(\\호스트\공유, //호스트/공유)는 열어 보지 않는다. 열기만 해도 그 호스트로 접속과 인증을 시도한다.
+const NETWORK_FOLDER = '네트워크 폴더 경로는 불러오지 않습니다. 설정에서 직접 고르세요.';
+function isNetworkPath(folder) {
+  return typeof folder === 'string' && /^[\\/]{2}/.test(folder);
+}
+
 // 고른 폴더가 이 PC에 있고 실제로 파일을 쓰고 지울 수 있는지 시험 파일로 확인한다.
 function checkFolder(folder) {
   if (typeof folder !== 'string' || !path.isAbsolute(folder)) return { ok: false, message: '폴더는 드라이브부터 적은 전체 경로로 골라 주세요.' };
@@ -86,4 +92,4 @@ function checkFolder(folder) {
   }
 }
 
-module.exports = { FORMAT, VERSION, MAX_BYTES, LEGACY_MESSAGE, STORAGE_KINDS, MAX_FOLDER, buildSettingsFile, parseSettingsFile, checkFolder };
+module.exports = { FORMAT, VERSION, MAX_BYTES, LEGACY_MESSAGE, STORAGE_KINDS, MAX_FOLDER, NETWORK_FOLDER, buildSettingsFile, parseSettingsFile, checkFolder, isNetworkPath };

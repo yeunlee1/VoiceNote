@@ -20371,7 +20371,8 @@ function createMeetingServer(options = {}) {
       customFormat: { name: parsed.customFormat?.name ?? null, apply: true },
       storage: parsed.storage ? Object.fromEntries(settingsFormat.STORAGE_KINDS.map((kind) => {
         const value = parsed.storage[kind];
-        const check = value ? settingsFormat.checkFolder(value) : { ok: true };
+        // 불러온 파일의 네트워크 경로는 확인 버튼 전이든 뒤든 열어 보지 않고 건너뛴다.
+        const check = !value ? { ok: true } : settingsFormat.isNetworkPath(value) ? { ok: false, message: settingsFormat.NETWORK_FOLDER } : settingsFormat.checkFolder(value);
         return [kind, { value, apply: check.ok, ...check.ok ? {} : { reason: check.message } }];
       })) : null
     };

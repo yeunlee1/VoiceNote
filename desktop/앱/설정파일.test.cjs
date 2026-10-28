@@ -157,6 +157,31 @@ test('이 PC에 없는 폴더는 건너뛰고 미리보기와 skipped에 이유�
   assert.deepEqual((await server.request('/api/custom-format')).body.customFormat, custom);
 });
 
+test('불러온 파일의 네트워크 폴더 경로는 미리보기·적용 어디서도 열어 보지 않고 건너뛴다', async t => {
+  const server = await start(t);
+  const local = folder(t);
+  const NETWORK = '네트워크 폴더 경로는 불러오지 않습니다. 설정에서 직접 고르세요.';
+  const storage = { audio: '\\\\공격자\\공유\\원음', transcript: '//공격자/공유/전사', summary: local };
+  const touched = [];
+  for (const name of ['statSync', 'writeFileSync', 'unlinkSync', 'existsSync', 'readdirSync', 'openSync']) {
+    const original = fs[name];
+    fs[name] = function (target, ...rest) { if (/^[\\/]{2}/.test(String(target))) touched.push(`${name} ${target}`); return original.call(this, target, ...rest); };
+    t.after(() => { fs[name] = original; });
+  }
+  const file = fileText({ summaryModel: FIRST, defaultOutputFormat: 'meeting', customFormat: null, storage });
+  const preview = await server.request('/api/settings/preview', { file });
+  assert.deepEqual(preview.body.preview.storage, {
+    audio: { value: storage.audio, apply: false, reason: NETWORK },
+    transcript: { value: storage.transcript, apply: false, reason: NETWORK },
+    summary: { value: local, apply: true },
+  });
+  const imported = await server.request('/api/settings/import', { file });
+  assert.equal(imported.status, 200);
+  assert.deepEqual(imported.body.settings.storage, { audio: '', transcript: '', summary: local });
+  assert.deepEqual(imported.body.skipped, [`오디오 저장 위치: ${NETWORK}`, `전사문 저장 위치: ${NETWORK}`]);
+  assert.deepEqual(touched, [], '네트워크 경로에는 파일 시스템 호출을 하지 않는다');
+});
+
 test('목록에 없는 요약 모델은 적용하지 않는다', async t => {
   const server = await start(t);
   await server.request('/api/settings', { summaryModel: SECOND });
