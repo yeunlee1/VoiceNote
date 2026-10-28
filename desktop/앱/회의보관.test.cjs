@@ -128,6 +128,21 @@ test('깨진 JSON·남은 .tmp·다른 파일이 섞인 옛 폴더에서도 나�
   assert.equal(later.body.meeting.dailySequence, 2);
 });
 
+test('녹음 파일만 깨지고 결과는 멀쩡한 옛 회의도 목록에 보이고 원음 없이 열린다', async t => {
+  const dir = folder(t);
+  const old = legacyMeeting(dir, 1);
+  fs.writeFileSync(path.join(old.dir, `녹음-${old.recordingId}.json`), '{broken');
+  const request = await start(t, dir);
+  const list = await request('/api/meetings');
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.body.meetings.map(item => item.id), [old.id], '결과가 멀쩡하면 목록에서 빼지 않는다');
+  assert.equal(list.body.skipped, 1, '깨진 녹음 파일만 읽지 못한 기록으로 센다');
+  const opened = await request(`/api/meetings/p1/${old.id}`);
+  assert.equal(opened.status, 200);
+  assert.equal(opened.body.meeting.minutes.overview, old.record.minutes.overview);
+  assert.equal(opened.body.meeting.audio, undefined, '읽지 못한 원음 목록은 비워 둔다');
+});
+
 test('옛 보관함 회의를 다시 분석한 결과는 같은 옛 폴더에 location p1과 옛 projectName으로 저장한다', async t => {
   const dir = folder(t);
   const old = legacyMeeting(dir, 1, { projectName: '홈페이지 개편', dailySequence: 2 });

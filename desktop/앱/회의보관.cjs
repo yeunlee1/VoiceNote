@@ -135,8 +135,11 @@ function createMeetingStore(root, validateMinutes, options = {}) {
       if (record.id !== id || !belongs(record, location)) throw new Error();
       validateMinutes(record.minutes);
       const audioFile = recordingPath(location, record.recordingId || id);
+      // 녹음 파일만 깨졌으면 원음 목록 없이 결과는 그대로 보여 준다.
+      let audio;
+      try { if (fs.existsSync(audioFile)) audio = readJson(audioFile).audio; } catch {}
       return { ...record, location, ...storedFormat(record), dailySequence: record.dailySequence || sequenceFor(location, record.date, record.recordingId || id),
-        ...(fs.existsSync(audioFile) ? { audio: readJson(audioFile).audio } : {}), ...(record.analysis !== undefined ? { analysis: aiUsage.normalizeAnalysis(record.analysis) } : {}) };
+        ...(audio !== undefined ? { audio } : {}), ...(record.analysis !== undefined ? { analysis: aiUsage.normalizeAnalysis(record.analysis) } : {}) };
     } catch { throw fail(503, '저장된 회의 파일을 읽지 못했습니다. 기존 파일은 보존합니다.'); }
   }
   // 녹음 없이 전사로 만든 회의를 다시 분석할 때 잇는 처음 결과다. 같은 보관함에서 열 수 있어야 한다.
