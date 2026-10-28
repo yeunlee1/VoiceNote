@@ -109,7 +109,24 @@ final class Ai {
         try{copies=Copies.copyResult(store.context,store,Store.location(record),record.getString("id"),record.getString("resultId"));}
         catch(Exception ex){copies=new JSONObject().put("ok",false).put("written",new JSONArray()).put("skipped",new JSONArray()).put("failed",new JSONArray().put(new JSONObject().put("kind","all").put("message","사본 저장을 마치지 못했습니다. 폴더를 확인한 뒤 다시 저장하세요.")));}
         record.put("copies",copies);
-        if(!copies.optBoolean("ok"))record.put("message",record.optString("message")+" · 고른 폴더에 저장하지 못했습니다. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.");
+        String failure=copyFailureMessage(copies);
+        if(!failure.isEmpty())record.put("message",record.optString("message")+" · "+failure);
+    }
+    static String copyFailureMessage(JSONObject copies)throws JSONException {
+        JSONArray failed=copies.optJSONArray("failed");if(failed==null||failed.length()==0)return "";
+        Set<String> reasons=new LinkedHashSet<>();
+        for(int i=0;i<failed.length();i++){
+            JSONObject item=failed.getJSONObject(i);String label;
+            switch(item.optString("kind")){
+                case "transcript":label="전사문";break;
+                case "summaryMd":label="요약본(.md)";break;
+                case "summaryTxt":label="요약본(.txt)";break;
+                case "audio":label="원음";break;
+                default:label="사본";
+            }
+            reasons.add(label+" — "+item.optString("message").replaceFirst("\\.$",""));
+        }
+        return "고른 폴더에 저장하지 못했습니다: "+String.join(", ",reasons)+". 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.";
     }
     void analyze(JSONObject record) throws Exception {
         File dir=store.directory(Store.location(record),record.getString("id"));JSONArray audio=record.getJSONArray("audio");StringBuilder transcript=new StringBuilder();

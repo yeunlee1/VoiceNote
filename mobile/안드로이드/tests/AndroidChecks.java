@@ -375,10 +375,29 @@ public final class AndroidChecks extends Instrumentation {
         Copies.changeFolder(store.context,"summary","","",permissions);expect(released.equals(Arrays.asList(uri)),"마지막 종류를 비우면 권한을 한 번 놓는다");
     }
     static void copyFailureKeepsResult(Store store)throws Exception{
-        store.context.getSharedPreferences("connection",0).edit().putString("storage.summary","file:///합성-잘못된-트리").commit();
+        String denied="content://com.android.externalstorage.documents/tree/primary%3AVoiceNote-ungranted-check";
+        android.content.SharedPreferences prefs=store.context.getSharedPreferences("connection",0);
+        prefs.edit().putString("storage.summary",denied).commit();
         JSONObject record=analyzable(store,"사본 실패와 결과 보존");replies.add(completed());new Ai(store,message->{}).run(record);
         expect(record.getString("state").equals("complete")&&store.load("main",record.getString("id")).getString("state").equals("complete"),"자동 사본 실패가 AI 결과 저장 성공을 뒤집지 않는다");
         expect(!record.getJSONObject("copies").getBoolean("ok")&&record.getJSONObject("copies").getJSONArray("failed").length()==2,"자동 사본 실패의 종류를 상태 응답으로 돌려준다");
+        String reason="고른 폴더에 쓸 권한이 없습니다. 폴더를 다시 골라 주세요";
+        String message="회의록 저장 완료 · 고른 폴더에 저장하지 못했습니다: 요약본(.md) — "+reason+", 요약본(.txt) — "+reason+". 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.";
+        expect(record.getString("message").equals(message),"분석 뒤 상태 줄에 실패한 요약본 두 종류와 권한 이유가 나온다: "+record.getString("message"));
+        String old=record.getString("resultId");store.saveReview("main",record.getString("id"),old,3,"담당자를 확인해 주세요");
+        replies.add(completed());new Ai(store,text->{}).refine(record,old,"담당자를 확인해 주세요");
+        expect(record.getString("message").equals(message)&&!record.getString("resultId").equals(old),"의견 반영도 새 결과를 보존하고 같은 사본 실패 이유를 알린다");
+        prefs.edit().remove("storage.summary").putString("storage.audio",denied).commit();
+        JSONObject partial=analyzable(store,"원음만 실패");replies.add(completed());new Ai(store,text->{}).run(partial);
+        expect(partial.getString("message").contains("원음 — "+reason)&&!partial.getString("message").contains("요약본"),"일부 종류만 실패하면 그 종류만 상태 줄에 나온다");
+        prefs.edit().remove("storage.audio").commit();
+        JSONObject none=analyzable(store,"고른 저장 위치 없음");replies.add(completed());new Ai(store,text->{}).run(none);
+        expect(none.getString("message").equals("회의록 저장 완료"),"저장 위치가 없으면 사본 실패 안내를 붙이지 않는다");
+        JSONObject audio=new JSONObject().put("kind","audio").put("message","권한 없음.");
+        JSONObject report=new JSONObject().put("failed",new JSONArray().put(audio).put(audio).put(new JSONObject().put("kind","transcript").put("message","파일 없음.")).put(new JSONObject().put("kind","all").put("message","저장 실패.")));
+        expect(Ai.copyFailureMessage(report).equals("고른 폴더에 저장하지 못했습니다: 원음 — 권한 없음, 전사문 — 파일 없음, 사본 — 저장 실패. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요."),"같은 종류·이유는 한 번만 쓰고 끝 마침표와 종류 이름을 Windows에 맞춘다");
+        report.put("ok",true).put("failed",new JSONArray()).put("written",new JSONArray().put(new JSONObject().put("kind","summaryMd")));
+        expect(Ai.copyFailureMessage(report).isEmpty(),"사본이 모두 성공하면 실패 안내가 비어 있다");
     }
     @Override public void onStart(){Bundle result=new Bundle();try{
         if(!probe.isEmpty()){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
