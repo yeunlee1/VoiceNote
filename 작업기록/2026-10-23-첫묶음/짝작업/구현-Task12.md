@@ -35,3 +35,14 @@ Node19/19(최종-Node.log), 최종 빌드 클래스에서 JVM7종(TextChunks18·
 실제 TreeSink의 MIME/파일 이름, 폴더 선택/취소, 영구 권한·권한 회수는 Task17에서 확인한다. Android 화면 연결은 Task13 범위다. Task12는 구현·필수 시험 완료이나 Claude 교차 검토 전이다. APK는 검증용이며 버전 변경은 Task14에서 한다.
 
 끝 커밋 **1587f5dada1ace134b44c39a90954c9ff8ad1e27**, BASE **44b2ab8d33fb9eab48efc8c01084932f1f5703a4**. 제품·시험8파일, 커밋 뒤 작업 트리 깨끗함.
+
+## Dispatch C M1 수정 (2026-10-28)
+
+후보 283ccaaf69a3831df77946085e00dbc37fb5b532, BASE 01080b4d02c13bbb63eb69bb3f3bebf5ea3b2d62다. 자동 사본 실패 때 상태 줄에 실패한 종류와 이유를 넣는 M1을 작성자 검증까지 마쳤다. Claude의 같은 실패 조건 재확인이 남는다.
+
+확인한 것은 Ai.copyResult가 실제 copies.failed에서 문구를 만들고, Windows copyMessage와 같은 전사문·요약본(.md)·요약본(.txt)·원음·사본 이름, 끝 마침표 제거, 같은 종류와 이유 중복 제거, 쉼표 연결을 쓰는 점이다. 처음에는 권한 없는 실제 문서 트리 주소로 분석한 기기 시험이 이유 없는 옛 문구 때문에 실패했다. 고친 뒤 분석과 의견 반영은 결과 저장 성공을 유지하며 같은 종류와 권한 이유를 상태 줄에 넣었다. 원음만 실패한 경우에는 원음만 나왔고 저장 위치가 없거나 실패 배열이 비어 있으면 실패 안내를 붙이지 않았다. 모든 요청은 기존 모의 네트워크를 썼고 실제 API 호출은 0회다.
+
+Node 19/19, JVM 7종 147개, DebugBuild 성공과 공용 기본 키 포함 아니요, AndroidChecks 194 PASS다. 화면 파일은 이 수정에서 바뀌지 않아 Task 13의 Chrome 82/82와 캡처 30개 근거를 재사용한다. 로그는 작업 폴더 산출물/2026-10-28-DispatchC-M1의 RED-AndroidChecks.log, GREEN-AndroidChecks.log, GREEN-빌드.log, GREEN-Node.log, GREEN-JVM.log다. 기기 시험의 testContext가 앱 cache의 별도 UUID 폴더와 별도 설정에 합성 자료를 만들므로 사용자 회의 자료는 쓰지 않는다.
+
+추정에 기대어 통과한 항목은 없다. 실기기·실제 저장소 앱의 권한 유지·외부 AI 품질은 미확인이고, push와 main 병합은 하지 않았다. Task Master 5.12의 최종 닫기는 검토자인 Claude가 한다.
+2026-10-28 Claude는 283ccaa의 코드와 Windows 문구 규칙을 대조해 M1을 닫았다고 send로 알렸다. 작성자 기기 시험과 별개로, 이 재확인은 코드 대조라는 범위를 유지한다.
