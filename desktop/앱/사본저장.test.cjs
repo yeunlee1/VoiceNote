@@ -115,6 +115,29 @@ test('다시 분석해 제목이 바뀌어도 같은 원음은 다시 복사하�
   assert.equal(files(audio).length, 1);
 });
 
+test('고른 폴더가 잠시 없어졌다가 돌아와도 이미 쓴 사본과 원음을 다시 쓰지 않는다', async t => {
+  const { request } = await start(t);
+  const base = path.join(folder(t), '공유 폴더');
+  const summary = path.join(base, '요약'), audio = path.join(base, '원음');
+  fs.mkdirSync(summary, { recursive: true });
+  fs.mkdirSync(audio, { recursive: true });
+  await request('/api/settings', { storage: { summary, audio } });
+  const rec = await recording(request);
+  const saved = (await request('/api/meetings/main', result({ recordingId: rec.id }))).body;
+  assert.equal(saved.copies.ok, true);
+  // 폴더가 잠시 사라지면 다시 저장은 실패로 알린다.
+  fs.renameSync(base, `${base}-잠시치움`);
+  const missing = (await request(`/api/meetings/main/${saved.meeting.id}/copies`, {})).body.copies;
+  assert.equal(missing.ok, false);
+  // 폴더가 돌아오면 앞서 쓴 사본이 그대로 있으므로 아무것도 다시 쓰지 않는다.
+  fs.renameSync(`${base}-잠시치움`, base);
+  const back = (await request(`/api/meetings/main/${saved.meeting.id}/copies`, {})).body.copies;
+  assert.deepEqual(back.written, []);
+  assert.equal(back.ok, true);
+  assert.deepEqual(files(summary).length, 2);
+  assert.deepEqual(files(audio).length, 1);
+});
+
 test('세 종류를 같은 폴더로 골라도 이름이 겹치지 않는다', async t => {
   const { request } = await start(t);
   const same = folder(t);

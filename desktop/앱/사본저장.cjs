@@ -84,7 +84,11 @@ function createCopyWriter({ store, storage, fs = realFs }) {
   }
   const saved = (items, match, folder) => items.some(item => match(item) && item.folder === folder && item.ok && fs.existsSync(path.join(folder, item.name)));
   // 같은 종류·같은 폴더의 옛 기록은 새 결과로 바꾸고, 다른 폴더의 기록은 남긴다.
-  const remember = (items, match, entry) => [...items.filter(item => !(match(item) && item.folder === entry.folder)), entry];
+  // 이번에 실패했어도 앞서 성공한 기록은 남긴다. 폴더가 잠시 사라졌다 돌아오면 같은 사본을 다시 쓰지 않는다.
+  const remember = (items, match, entry) => {
+    if (!entry.ok && items.some(item => match(item) && item.folder === entry.folder && item.ok)) return items;
+    return [...items.filter(item => !(match(item) && item.folder === entry.folder)), entry];
+  };
 
   // 지금 설정된 폴더 기준으로, 아직 성공하지 않았거나 저장한 파일이 사라진 사본만 쓴다.
   function copyResult(location, resultId) {
