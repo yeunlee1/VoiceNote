@@ -52,6 +52,42 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     const shot=async name=>{for(let n=0;n<65&&await evaluate("!document.getElementById('message').hidden");n++)await wait(100);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(path.join(outDir,name),Buffer.from(r.data,'base64'));};
     const key=async()=>{await click('#open-settings');await evaluate("document.getElementById('api-key').value='sk-test-00000000000000000000'");await click('#save-key');await wait(60);await click('#close-settings');};
     for(const width of [360,390,412]){
+      await viewport(width);await load();await key();await click('#history button');await wait(60);
+      check(width+'px T1 의견 예시와 앞선 정리본을 보지 않는 안내',await evaluate("document.getElementById('review-comment').placeholder==='예) 담당자가 틀렸어요. 견적 검토는 이대리가 맡기로 했습니다.'&&document.getElementById('review-help').textContent==='AI는 앞선 결과를 보지 않고 전사를 다시 읽습니다. 위치보다 무엇이 어떻게 틀렸는지 적어 주세요.'"));
+      await evaluate("document.getElementById('review-panel').scrollIntoView()");await shot('보완-'+width+'-의견안내.png');await click('#close-result');
+      await click('#open-settings');await click('[data-pick-folder=summary]');await wait(60);await click('#close-settings');
+      await evaluate("__mock.copyReport={ok:false,written:[{kind:'summaryMd',name:'회의.md'}],failed:[{kind:'summaryTxt',message:'권한이 없습니다.'},{kind:'summaryTxt',message:'권한이 없습니다.'}],skipped:[]}");await click('#history button');await wait(60);
+      check(width+'px T2 사본 일부 실패는 종류·이유·재시도를 한 번씩 안내',await evaluate("document.getElementById('copies-state').textContent.includes('고른 폴더에 저장하지 못했습니다: 요약본(.txt) — 권한이 없습니다. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.')"));
+      await evaluate("document.getElementById('copies-panel').scrollIntoView()");await shot('보완-'+width+'-사본실패.png');
+      await evaluate("__mock.copiesResult={ok:true,written:[],failed:[],skipped:[{kind:'summaryMd',reason:'이미 저장했습니다'}]}");await click('#save-copies');await wait(60);
+      check(width+'px T2 이미 저장된 사본은 새 사본 없음 안내',await evaluate("document.getElementById('copies-state').textContent.includes('고른 폴더에 새로 저장할 사본이 없습니다.')"));
+      await shot('보완-'+width+'-이미저장.png');
+      await evaluate('__mock.copiesResult=null');await click('#save-copies');await wait(60);
+      check(width+'px T2 성공한 사본 종류를 안내',await evaluate("document.getElementById('copies-state').textContent.includes('고른 폴더에 사본을 저장했습니다: 요약본(.md).')"));
+      await click('#tab-transcript');
+      check(width+'px T3 전사문 탭에는 사본 구역이 보이지 않음',await evaluate("document.getElementById('panel-minutes').contains(document.getElementById('copies-panel'))&&!document.getElementById('copies-panel').getClientRects().length"));
+      await shot('보완-'+width+'-전사문탭.png');await click('#close-result');await click('#history button:last-of-type');await wait(60);
+      check(width+'px T3 정리본 없는 회의에는 빈 사본 구역이 없음',await evaluate("document.getElementById('copies-panel').hidden"));await shot('보완-'+width+'-결과없음.png');await click('#close-result');
+      await evaluate("__mock.versions=[{id:'1234',savedAt:Date.parse('2026-10-28T01:30:00Z'),outputFormat:'meeting'}]");await click('#history button');await wait(60);
+      check(width+'px T4 결과 하나면 버전 선택을 숨김',await evaluate("document.getElementById('version-wrap').hidden&&document.getElementById('result-version').value==='1234'"));await shot('보완-'+width+'-결과하나.png');await click('#close-result');
+      await evaluate("__mock.versions=[{id:'1233',savedAt:Date.parse('2026-10-28T01:30:00Z'),outputFormat:'meeting'},{id:'1234',savedAt:Date.parse('2026-10-28T02:30:00Z'),outputFormat:'meeting'}]");await click('#history button');await wait(60);
+      check(width+'px T4 같은 형식의 결과도 저장 시각으로 구분',await evaluate("!document.getElementById('version-wrap').hidden&&document.getElementById('result-version').options[0].textContent==='1번째 결과 · 10월 28일 10:30 · 회의록'&&document.getElementById('result-version').options[1].textContent==='2번째 결과 · 10월 28일 11:30 · 회의록'"));await shot('보완-'+width+'-저장시각.png');
+      await evaluate("document.getElementById('result-version').value='1233';document.getElementById('result-version').dispatchEvent(new Event('change'))");await wait(60);
+      await evaluate("document.getElementById('review-comment').value='앞선 결과에서 쓴 의견을 그대로 둡니다';document.getElementById('review-comment').dispatchEvent(new Event('input'))");await click('#refine');
+      await until("__mock.active&&document.getElementById('review-comment').disabled");
+      await evaluate("__mock.active=false;__mock.meeting={...__mock.meeting,state:'failed',resultId:'1234',message:'API 잔액을 확인하세요.'}");
+      await until("document.getElementById('meeting-status').textContent.includes('잔액')&&!document.getElementById('review-comment').disabled");
+      check(width+'px T5 서비스 실패도 시작한 버전과 의견을 유지',await evaluate("document.getElementById('result-version').value==='1233'&&document.getElementById('review-comment').value==='앞선 결과에서 쓴 의견을 그대로 둡니다'&&document.getElementById('minutes').textContent.includes('앞선 결과입니다.')&&document.getElementById('review-state').textContent.includes('다시 정리하지 못했습니다. 평가는 저장되어 있고 앞선 결과는 그대로입니다.')"));
+      await evaluate("document.getElementById('review-panel').scrollIntoView()");await shot('보완-'+width+'-서비스실패.png');await click('#close-result');
+      await load();await key();await click('#open-settings');await evaluate("__mock.importFile='설정_'+'x'.repeat(120)+'.json'");await click('#import-settings');await wait(60);
+      check(width+'px T6 긴 파일 이름이 미리보기 안에서 줄바꿈',await evaluate("(()=>{const d=document.getElementById('settings-preview'),f=document.getElementById('preview-file');return d.open&&f.textContent.includes('x'.repeat(120))&&d.scrollWidth<=d.clientWidth&&f.scrollWidth<=f.clientWidth})()"));await shot('보완-'+width+'-긴파일이름.png');await click('#cancel-settings');await click('#close-settings');
+      await click('#history button:nth-of-type(2)');await wait(60);await evaluate("document.getElementById('review-comment').value='두 번째 회의를 다시 정리합니다';document.getElementById('review-comment').dispatchEvent(new Event('input'))");await click('#refine');
+      await until("__mock.active&&document.getElementById('review-comment').disabled");await evaluate("__mock.active=false;__mock.history[1].resultId='1235';__mock.meeting={...__mock.meeting,state:'complete',resultId:'1235',message:'회의록 저장 완료'}");
+      await until("document.getElementById('result-version').value==='1235'&&!document.getElementById('review-comment').disabled");await click('#close-result');
+      check(width+'px T7 다시 정리 뒤 닫으면 그 회의로 초점 복귀',await evaluate("document.activeElement.dataset.location==='p2'&&document.activeElement.dataset.id==='22222222-2222-2222-2222-222222222222'"));await shot('보완-'+width+'-초점복귀.png');
+    }
+
+    for(const width of [360,390,412]){
       await viewport(width);await load();await click('#prepare');
       const fit=await evaluate("({scroll:document.documentElement.scrollWidth,width:innerWidth})");
       check(width+'px 회의명 빈칸 안내 전체 표시',await evaluate("(()=>{const e=document.getElementById('title-hint');if(!e)return false;const r=e.getBoundingClientRect();return e.textContent.includes('비워 두면 AI가 회의 내용을 보고 정합니다')&&r.left>=0&&r.right<=innerWidth&&e.scrollWidth<=e.clientWidth})()"));

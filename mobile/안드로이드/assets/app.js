@@ -167,8 +167,8 @@
     renderUsage(record);
     state.result = { label, minutes: !!minutes, transcript: !!transcript };
     const versions = data.versions || []; $('result-version').replaceChildren(...versions.map((version,index) => {
-      const option = node('option', `${index + 1}번째 · ${Flow.FORMAT_LABELS[Flow.outputFormat(version.outputFormat)]}${version.refined ? ' · 의견 반영본' : ''}${version.stars ? ' · ★ ' + version.stars : ''}`); option.value = version.id; return option;
-    })); $('result-version').value = selected || ''; $('version-wrap').hidden = !versions.length;
+      const option = node('option', [`${index + 1}번째 결과`, savedLabel(version.savedAt), Flow.FORMAT_LABELS[Flow.outputFormat(version.outputFormat)], version.refined && '의견 반영본', version.stars && `별 ${version.stars}개`].filter(Boolean).join(' · ')); option.value = version.id; return option;
+    })); $('result-version').value = selected || ''; $('version-wrap').hidden = versions.length < 2;
     $('refined-badge').hidden = !record.feedback && !versions.find(version => version.id === selected)?.refined;
     $('review-panel').hidden = !minutes || !selected; state.stars = data.review?.stars || null;
     $('review-comment').value = data.review?.comment || ''; $('review-state').textContent = data.review ? '저장된 평가입니다.' : '별점과 의견은 선택입니다. 평가 저장에는 요금이 들지 않습니다.';
@@ -254,13 +254,27 @@
   function renderStars() {
     for (const button of document.querySelectorAll('[data-stars]')) button.setAttribute('aria-pressed', String(Number(button.dataset.stars) === state.stars));
   }
+  function savedLabel(value) {
+    try { return new Intl.DateTimeFormat('ko-KR', {timeZone:'Asia/Seoul',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(value)); }
+    catch { return ''; }
+  }
   const COPY_LABELS = {audio:'원음',transcript:'전사문',summaryMd:'요약본(.md)',summaryTxt:'요약본(.txt)',all:'사본'};
-  function renderCopies(report) {
-    state.copies = report; const configured = ['audio','transcript','summary'].some(kind => state.settings.storage?.[kind]?.uri);
+  function copyMessage(report) {
+    if (report.failed?.length) {
+      const reasons = [...new Set(report.failed.map(item => `${COPY_LABELS[item.kind] || '사본'} — ${String(item.message || '').replace(/\.$/, '')}`))];
+      return `고른 폴더에 저장하지 못했습니다: ${reasons.join(', ')}. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.`;
+    }
+    const written = [...new Set((report.written || []).map(item => COPY_LABELS[item.kind]).filter(Boolean))];
+    return written.length ? `고른 폴더에 사본을 저장했습니다: ${written.join(', ')}.` : '고른 폴더에 새로 저장할 사본이 없습니다.';
+  }
+  function renderCopies(report, attempted = false) {
+    state.copies = report; state.copiesAttempted = attempted; const configured = ['audio','transcript','summary'].some(kind => state.settings.storage?.[kind]?.uri);
+    $('copies-panel').hidden = !state.result?.minutes;
     $('save-copies').hidden = !configured || !state.result?.minutes; $('copies-guide').hidden = configured;
     $('copies-state').replaceChildren(); if (!configured || !report) return;
+    const text = attempted || report.failed?.length || report.written?.length ? copyMessage(report) : '아직 이 폴더에 저장하지 않았습니다.';
+    $('copies-state').append(node('p', text, report.failed?.length ? 'copy-error' : 'hint'));
     for (const item of report.written || []) $('copies-state').append(node('p', `${COPY_LABELS[item.kind] || '사본'} · ${item.name || '저장 완료'}`, 'hint'));
-    for (const item of report.failed || []) $('copies-state').append(node('p', `${COPY_LABELS[item.kind] || '사본'} · ${item.message || '저장하지 못했습니다. 설정에서 폴더를 확인하세요.'}`, 'copy-error'));
   }
   async function saveReview(target) {
     const review = await call('review', {...target,stars:state.stars || null,comment:$('review-comment').value});
@@ -279,10 +293,13 @@
       await saveReview(target);
       if (!state.result?.transcript) throw new Error('저장된 전사가 없어 의견을 반영할 수 없습니다.');
       if (!Flow.canAnalyze(state.connection)) { openSettings(null,'ai'); throw new Error(state.connection.accessMode === 'exhausted' ? Flow.EXHAUSTED_MESSAGE : '설정의 AI 연결에서 API 키를 먼저 등록하세요.'); }
-      await call('refine', {...target,feedback}); await poll(true);
+      state.refining = target;
+      try { await call('refine', {...target,feedback}); }
+      catch (error) { state.refining = null; throw error; }
+      await poll(true);
     });
   };
-  $('save-copies').onclick = () => { const target = {...state.opened}; task(async () => { const report = await call('copies',target); renderCopies(report); }); };
+  $('save-copies').onclick = () => { const target = {...state.opened}; task(async () => { const report = await call('copies',target); renderCopies(report, true); }); };
   $('default-format').onchange = () => task(async () => {
     try { await call('saveSettings',{defaultOutputFormat:$('default-format').value}); queueDraft(); }
     catch (error) { renderSettings(); throw error; }
@@ -335,7 +352,14 @@
       }
       const key = `${meeting.id || ''}-${meeting.state || ''}`;
       if (key !== state.lastHistory) {
-        state.lastHistory = key; await history(); if (!state.active && state.lastState && meeting.id && meeting.location) await open(meeting.location, meeting.id, $('history').querySelector('button'), meeting.resultId);
+        state.lastHistory = key; await history();
+        if (!state.active && state.lastState && meeting.id && meeting.location) {
+          const target = state.refining, failedRefine = meeting.state === 'failed' && target?.id === meeting.id && target.location === meeting.location;
+          const opener = [...$('history').querySelectorAll('button')].find(button => button.dataset.location === meeting.location && button.dataset.id === meeting.id);
+          await open(meeting.location, meeting.id, opener, failedRefine ? target.resultId : meeting.resultId);
+          if (failedRefine) $('review-state').textContent = '다시 정리하지 못했습니다. 평가는 저장되어 있고 앞선 결과는 그대로입니다.';
+          state.refining = null;
+        }
         // 녹음 뒤 자동 분석이 체험 소진으로 멈췄으면 같은 안내와 함께 AI 설정을 연다.
         if (!state.active && state.lastState && meeting.state === 'failed' && meeting.message === Flow.EXHAUSTED_MESSAGE && !$('settings').open) { message(meeting.message); openSettings(); }
       }

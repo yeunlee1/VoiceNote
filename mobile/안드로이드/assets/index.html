@@ -118,16 +118,16 @@
           <button type="button" class="star" data-stars="4" aria-pressed="false" aria-label="별 4개">★<small>4</small></button>
           <button type="button" class="star" data-stars="5" aria-pressed="false" aria-label="별 5개">★<small>5</small></button>
         </div>
-        <label class="field">의견<textarea id="review-comment" rows="4" maxlength="1000" aria-describedby="review-help review-count" placeholder="예. 담당자가 틀렸어요. 견적 검토는 문서 담당자가 맡기로 했습니다."></textarea></label>
-        <p id="review-help" class="hint">다시 정리할 때는 전사를 다시 읽습니다. 무엇을 어떻게 고칠지 구체적으로 적어 주세요.</p>
+        <label class="field">의견<textarea id="review-comment" rows="4" maxlength="1000" aria-describedby="review-help review-count" placeholder="예) 담당자가 틀렸어요. 견적 검토는 이대리가 맡기로 했습니다."></textarea></label>
+        <p id="review-help" class="hint">AI는 앞선 결과를 보지 않고 전사를 다시 읽습니다. 위치보다 무엇이 어떻게 틀렸는지 적어 주세요.</p>
         <p id="review-count" class="hint">0 / 1,000</p>
         <div class="row"><button id="save-review" class="button" type="button">평가 저장</button><button id="refine" class="button primary" type="button">의견 반영해 다시 정리</button></div>
         <p id="review-state" class="hint" role="status"></p>
         <p id="refine-cost" class="notice" hidden>요약 요금이 추가로 듭니다. 긴 회의는 여러 번 나눠 요청할 수 있습니다.</p>
       </section>
+      <section id="copies-panel" class="block" hidden><h3>고른 폴더에 사본 저장</h3><p id="copies-guide" class="hint">설정에서 저장 위치를 고르면 사본을 저장할 수 있습니다.</p><div id="copies-state" class="copy-state" role="status"></div><button id="save-copies" class="button" type="button" hidden>고른 폴더에 다시 저장</button></section>
       <section id="meeting-notes-wrap" class="block" hidden><h3>회의 전 적어 둔 상세 내용</h3><p id="meeting-notes" class="prewrap"></p></section>
     </section>
-    <section id="copies-panel" class="block"><h3>고른 폴더에 사본 저장</h3><p id="copies-guide" class="hint">설정에서 저장 위치를 고르면 사본을 저장할 수 있습니다.</p><div id="copies-state" class="copy-state" role="status"></div><button id="save-copies" class="button" type="button" hidden>고른 폴더에 다시 저장</button></section>
     <section id="panel-transcript" class="result-panel" role="tabpanel" aria-labelledby="tab-transcript" hidden>
       <p id="transcript-meta" class="hint"></p>
       <pre id="transcript" class="transcript-view"></pre>

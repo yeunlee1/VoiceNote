@@ -249,6 +249,7 @@ details.more { margin-top: 20px; border-top: 1px solid var(--rule); padding-top:
 .folder-row { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--rule); min-width: 0; }
 .folder-row h4 { margin: 0; font-size: 14px; }
 .folder-row p, .preview-rows p { overflow-wrap: anywhere; font-size: 13px; }
+#preview-file { overflow-wrap: anywhere; }
 .folder-row .button { padding: 8px 12px; }
 .review-stars { display: flex; gap: 8px; }
 .star { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 48px; min-height: 48px; padding: 6px; border: 1px solid var(--rule-strong); border-radius: var(--radius-s); background: var(--sheet); color: var(--ink-faint); font-size: 20px; }
