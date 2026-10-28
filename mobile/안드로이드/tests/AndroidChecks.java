@@ -382,8 +382,8 @@ public final class AndroidChecks extends Instrumentation {
         JSONObject record=analyzable(store,"사본 실패와 결과 보존");replies.add(completed());new Ai(store,message->{}).run(record);
         expect(record.getString("state").equals("complete")&&store.load("main",record.getString("id")).getString("state").equals("complete"),"자동 사본 실패가 AI 결과 저장 성공을 뒤집지 않는다");
         expect(!record.getJSONObject("copies").getBoolean("ok")&&record.getJSONObject("copies").getJSONArray("failed").length()==2,"자동 사본 실패의 종류를 상태 응답으로 돌려준다");
-        String reason="고른 폴더에 쓸 권한이 없습니다. 폴더를 다시 골라 주세요";
-        String message="회의록 저장 완료 · 고른 폴더에 저장하지 못했습니다: 요약본(.md) — "+reason+", 요약본(.txt) — "+reason+". 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.";
+        String reason="고른 폴더를 찾을 수 없거나 권한이 끊겨 다시 골라야 합니다";
+        String message="회의록 저장 완료 · 고른 폴더에 저장하지 못했습니다: 요약본(.md)·요약본(.txt) — "+reason+". 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.";
         expect(record.getString("message").equals(message),"분석 뒤 상태 줄에 실패한 요약본 두 종류와 권한 이유가 나온다: "+record.getString("message"));
         String old=record.getString("resultId");store.saveReview("main",record.getString("id"),old,3,"담당자를 확인해 주세요");
         replies.add(completed());new Ai(store,text->{}).refine(record,old,"담당자를 확인해 주세요");
@@ -419,7 +419,7 @@ public final class AndroidChecks extends Instrumentation {
         expect(sink.names(tree).isEmpty(),"D2 실제로 존재하는 빈 폴더는 사라진 폴더로 보지 않는다");
         missing[0]=true;
         try{sink.write(tree.toString(),"원음.m4a","audio/mp4",Copies.text("합성 자료"));throw new AssertionError("사라진 폴더는 저장 전에 거절해야 합니다.");}
-        catch(Exception ex){expect(Copies.error(ex).equals("고른 폴더를 찾을 수 없거나 권한이 끊겼습니다. 설정에서 폴더를 다시 고르세요."),"D2 빈 결과를 돌려주는 사라진 문서 폴더는 다시 고르라고 알린다: "+Copies.error(ex));}
+        catch(Exception ex){expect(Copies.error(ex).equals("고른 폴더를 찾을 수 없거나 권한이 끊겨 다시 골라야 합니다"),"D2 빈 결과를 돌려주는 사라진 문서 폴더는 다시 고르라고 알린다: "+Copies.error(ex));}
     }
     static void copyRecoveryCheck(Store store)throws Exception{
         JSONObject record=store.create(new JSONObject().put("date","2099-05-01").put("title","폴더 복구와 원음 중복 방지"));String id=record.getString("id");
@@ -449,8 +449,40 @@ public final class AndroidChecks extends Instrumentation {
             expect(store.loadReview("main",id,old).getString("comment").equals("앞선 결과에서 저장한 의견")&&store.load("main",id).getString("resultId").equals(latest)&&store.load("main",id).getString("state").equals("complete"),"T5 서비스 실패 상태에도 앞선 평가와 저장된 완료 결과는 그대로다");
         }finally{MeetingService.snapshot=before;}
     }
+    void serviceAttemptChecks()throws Exception{
+        Store store=new Store(getTargetContext());String previousKey=Store.sessionKey,previousSnapshot=MeetingService.snapshot;
+        JSONObject record=store.create(new JSONObject().put("date","2099-06-01").put("title","합성 즉시 실패 경계"));String id=record.getString("id");File dir=store.directory("main",id);
+        Store.write(new File(dir,"전사.txt"),"시도 표지 시험용 전사");store.finish(record,minutes(),null);String old=record.getString("resultId");store.saveReview("main",id,old,4,"보존할 의견");
+        String original=Store.read(new File(dir,"결과-"+old+".json")),review=Store.read(new File(dir,"평가-"+old+".json"));
+        try{
+            Store.sessionKey="sk-test-00000000000000000000";code=500;
+            startActivitySync(new android.content.Intent(getTargetContext(),MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            for(int index=1;index<=2;index++){
+                final String attempt="합성시도-"+index;replies.add("{}");
+                final android.content.Intent request=new android.content.Intent(getTargetContext(),MeetingService.class).setAction("refine").putExtra("location","main").putExtra("id",id).putExtra("resultId",old).putExtra("feedback","보존할 의견").putExtra("attemptId",attempt);
+                runOnMainSync(()->getTargetContext().startForegroundService(request));
+                long deadline=System.currentTimeMillis()+5000;JSONObject event;
+                do{Thread.sleep(20);event=new JSONObject(MeetingService.snapshot);}while(System.currentTimeMillis()<deadline&&(MeetingService.active||!id.equals(event.optString("id"))||!"failed".equals(event.optString("state"))||!attempt.equals(event.optString("attemptId"))));
+                expect(!MeetingService.active&&event.optString("state").equals("failed")&&event.optString("attemptId").equals(attempt),"첫 조회 전에 끝난 "+index+"번째 실제 서비스 실패에도 고유 시도 표지가 남는다");
+                JSONObject saved=store.load("main",id);expect(saved.getString("state").equals("complete")&&saved.getString("resultId").equals(old)&&!saved.has("attemptId")&&Store.read(new File(dir,"결과-"+old+".json")).equals(original)&&Store.read(new File(dir,"평가-"+old+".json")).equals(review),"연속 서비스 실패에도 결과·평가 원문과 완료 포인터를 보존하고 시도 표지는 저장하지 않는다");waitForIdleSync();Thread.sleep(100);
+            }
+        }finally{code=200;Store.sessionKey=previousKey;MeetingService.snapshot=previousSnapshot;}
+    }
+    void dispatchFCopyChecks()throws Exception{
+        JSONArray failures=new JSONArray();String[] kinds={"transcript","summaryMd","summaryTxt","transcript","audio"},messages={"폴더 없음.","권한 없음.","폴더 없음","폴더 없음.","권한 없음"};
+        for(int i=0;i<kinds.length;i++)failures.put(new JSONObject().put("kind",kinds[i]).put("message",messages[i]));
+        expect(Ai.copyFailureMessage(new JSONObject().put("failed",failures)).equals("고른 폴더에 저장하지 못했습니다: 전사문·요약본(.txt) — 폴더 없음, 요약본(.md)·원음 — 권한 없음. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요."),"같은 이유별로 종류를 처음 나온 순서로 묶고 한 번 안내한다");
+        String reason="고른 폴더를 찾을 수 없거나 권한이 끊겨 다시 골라야 합니다";
+        expect(Copies.error(new Copies.FolderUnavailable()).replaceFirst("\\.$","").equals(reason)&&Copies.error(new SecurityException()).replaceFirst("\\.$","").equals(reason),"폴더 소실·권한 해제 이유는 다시 고르라는 한 절이다");
+        Store store=new Store(testContext());JSONObject record=store.create(new JSONObject().put("date","2099-06-02"));store.finish(record,minutes(),null);String id=record.getString("id"),rid=record.getString("resultId");
+        store.saveReview("main",id,rid,null," \n  보존할 의견 \t ");expect(store.loadReview("main",id,rid).getString("comment").equals("보존할 의견"),"평가 파일은 Windows처럼 앞뒤 공백을 지운다");
+        try{store.saveReview("main",id,rid,null,"\u3000\ufeff\u00a0");throw new AssertionError("별점 없는 전체 공백 의견은 거절해야 합니다.");}catch(IOException expected){expect(store.loadReview("main",id,rid).getString("comment").equals("보존할 의견"),"JavaScript와 같은 공백 집합으로 빈 평가를 거절하고 앞선 평가를 보존한다");}
+        Copies.Sink missing=new Copies.Sink(){public Copies.Created write(String f,String n,String m,Copies.Source s)throws Exception{throw new IOException();}public boolean exists(String uri){return false;}};
+        JSONObject report=Copies.report();new Copies(store,Collections.singletonMap("summary","file:/synthetic"),missing).statusItem(report,new JSONArray().put(new JSONObject().put("kind","summaryMd").put("folder","file:/synthetic").put("ok",true).put("uri","file:/missing")),"kind","summaryMd","file:/synthetic","summaryMd");
+        expect(report.getJSONArray("failed").getJSONObject(0).getString("message").equals("저장했던 사본을 찾을 수 없습니다"),"사본 상태 조회 이유에는 두 번째 행동 안내를 넣지 않는다");
+    }
     @Override public void onStart(){Bundle result=new Bundle();try{
-        if(!probe.isEmpty()){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
+        if(!probe.isEmpty()&&!probe.startsWith("f-")){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
         for(String name:new String[]{"first","open","review","draft","finish","n1new","n1old","n1meta"})regressionCheck(name);
         archiveChecks(new Store(testContext()));
         settingsChecks(new Store(testContext()));
@@ -464,6 +496,7 @@ public final class AndroidChecks extends Instrumentation {
             public InputStream getInputStream()throws IOException{requests.add(new String(sent.toByteArray(),StandardCharsets.UTF_8));routes.add(url.getPath());auths.add(lastAuth);String next=replies.poll();if(next==null)throw new IOException("Unexpected network request");return new ByteArrayInputStream(next.getBytes(StandardCharsets.UTF_8));}
             public InputStream getErrorStream(){try{return getInputStream();}catch(IOException ex){throw new RuntimeException(ex);}}
         };}}:null);
+        if(probe.startsWith("f-")){if(probe.equals("f-attempt"))serviceAttemptChecks();else dispatchFCopyChecks();result.putString("stream","PASS "+checks+" Dispatch F checks: "+probe+"\n");finish(-1,result);return;}
         Store store=new Store(testContext());
         String previousModel=store.summaryModel();store.summaryModel(null);
         boolean bundledKey=true;try{getTargetContext().getAssets().open("personal.key").close();}catch(FileNotFoundException absent){bundledKey=false;}
@@ -525,6 +558,7 @@ public final class AndroidChecks extends Instrumentation {
         missingFolderCheck(new Store(testContext()));
         copyRecoveryCheck(new Store(testContext()));
         serviceRefineFailureCheck(new Store(testContext()));
+        dispatchFCopyChecks();serviceAttemptChecks();
         store.summaryModel(previousModel);
         result.putString("stream","PASS "+checks+" native storage and recovery checks; real API calls=0\n");finish(-1,result);
     }catch(Throwable ex){result.putString("stream","FAIL "+ex.toString()+"\n");finish(0,result);}}

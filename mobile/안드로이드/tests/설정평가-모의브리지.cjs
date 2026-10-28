@@ -37,7 +37,13 @@ module.exports = '(' + function () {
         if(original.resultId==='1235')versions.push({id:'1235',savedAt:4,outputFormat:'summary',refined:true});
         reply({record,minutes,transcript:m.noTranscript?'':'저장된 전사',resultId:selected||null,versions:m.versions||versions,review:m.reviews[selected]||null,copies:m.copyReport});
       } else if (method==='review') {if(m.failReview)throw Error('평가 저장 실패');const r={stars:d.stars,comment:d.comment,savedAt:'2026-10-23T00:00:00Z'};m.reviews[d.resultId]=r;reply(r);}
-      else if (method==='refine') {if(m.failRefine)throw Error('요약 요청에 실패했습니다.');m.active=true;m.meeting={id:d.id,location:d.location,state:'analyzing',createdAt:Date.now(),message:'의견을 반영해 정리 중'};reply({id:d.id});}
+      else if (method==='refine') {
+        if(m.failRefine)throw Error('요약 요청에 실패했습니다.');
+        m.active=true;m.meeting={id:d.id,location:d.location,attemptId:d.attemptId,state:'analyzing',createdAt:Date.now(),message:'의견을 반영해 정리 중'};
+        const terminal=()=>{m.active=false;m.meeting={...m.meeting,state:m.refineOutcome==='success'?'complete':'failed',resultId:m.refineOutcome==='success'?'1235':'1234',message:'합성 서비스 종료'};if(m.refineOutcome==='success')m.history.find(r=>r.id===d.id).resultId='1235';};
+        if(['failure','success'].includes(m.refineOutcome))terminal();
+        reply({id:d.id,attemptId:d.attemptId});
+      }
       else if (method==='copies') {if(m.failCopies)throw Error('사본 저장 실패');m.copyReport=m.copiesResult||{ok:true,written:[{kind:'summaryMd',name:'회의.md'}],skipped:[],failed:[]};reply(m.copyReport);}
     } catch(error) {reply(null,error.message);}
   };

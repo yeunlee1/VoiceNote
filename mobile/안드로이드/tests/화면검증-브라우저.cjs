@@ -51,13 +51,14 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     const load=async(query='')=>{await send('Page.navigate',{url:base+query});await wait(450);};
     const shot=async name=>{for(let n=0;n<65&&await evaluate("!document.getElementById('message').hidden");n++)await wait(100);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(path.join(outDir,name),Buffer.from(r.data,'base64'));};
     const key=async()=>{await click('#open-settings');await evaluate("document.getElementById('api-key').value='sk-test-00000000000000000000'");await click('#save-key');await wait(60);await click('#close-settings');};
+    await require('./후속검증-화면.cjs')({viewport,load,key,click,evaluate,until,wait,shot,check});
     for(const width of [360,390,412]){
       await viewport(width);await load();await key();await click('#history button');await wait(60);
       check(width+'px T1 의견 예시와 앞선 정리본을 보지 않는 안내',await evaluate("document.getElementById('review-comment').placeholder==='예) 담당자가 틀렸어요. 견적 검토는 이대리가 맡기로 했습니다.'&&document.getElementById('review-help').textContent==='AI는 앞선 결과를 보지 않고 전사를 다시 읽습니다. 위치보다 무엇이 어떻게 틀렸는지 적어 주세요.'"));
       await evaluate("document.getElementById('review-panel').scrollIntoView()");await shot('보완-'+width+'-의견안내.png');await click('#close-result');
       await click('#open-settings');await click('[data-pick-folder=summary]');await wait(60);await click('#close-settings');
       await evaluate("__mock.copyReport={ok:false,written:[{kind:'summaryMd',name:'회의.md'}],failed:[{kind:'summaryTxt',message:'권한이 없습니다.'},{kind:'summaryTxt',message:'권한이 없습니다.'}],skipped:[]}");await click('#history button');await wait(60);
-      check(width+'px T2 사본 일부 실패는 종류·이유·재시도를 한 번씩 안내',await evaluate("document.getElementById('copies-state').textContent.includes('고른 폴더에 저장하지 못했습니다: 요약본(.txt) — 권한이 없습니다. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.')"));
+      check(width+'px T2 사본 일부 실패는 종류·이유·재시도를 한 번씩 안내',await evaluate("document.getElementById('copies-state').textContent.includes('고른 폴더의 사본을 확인하지 못했습니다: 요약본(.txt) — 권한이 없습니다. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.')"));
       await evaluate("document.getElementById('copies-panel').scrollIntoView()");await shot('보완-'+width+'-사본실패.png');
       await evaluate("__mock.copiesResult={ok:true,written:[],failed:[],skipped:[{kind:'summaryMd',reason:'이미 저장했습니다'}]}");await click('#save-copies');await wait(60);
       check(width+'px T2 이미 저장된 사본은 새 사본 없음 안내',await evaluate("document.getElementById('copies-state').textContent.includes('고른 폴더에 새로 저장할 사본이 없습니다.')"));
@@ -185,13 +186,13 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     await evaluate("document.getElementById('review-comment').value='  담당자를 확인해 주세요.  ';document.getElementById('review-comment').dispatchEvent(new Event('input'))");
     check('의견이 있을 때만 요금 안내와 다시 정리가 활성화된다',await evaluate("!document.getElementById('refine').disabled&&!document.getElementById('refine-cost').hidden"));
     await click('#save-review');await wait(60);
-    check('평가는 보고 있는 결과에 저장한다',await evaluate("__mock.calls.filter(c=>c.method==='review').at(-1).data.resultId==='1234'&&__mock.reviews['1234'].comment==='  담당자를 확인해 주세요.  '"));
+    check('평가는 보고 있는 결과에 앞뒤 공백을 지워 저장한다',await evaluate("__mock.calls.filter(c=>c.method==='review').at(-1).data.resultId==='1234'&&__mock.reviews['1234'].comment==='담당자를 확인해 주세요.'"));
     await evaluate("document.getElementById('review-comment').value='x'.repeat(1001);document.getElementById('review-comment').dispatchEvent(new Event('input'))");
     check('1,001자 의견은 평가와 다시 정리를 막는다',await evaluate("document.getElementById('save-review').disabled&&document.getElementById('refine').disabled"));
     await evaluate("document.getElementById('result-version').value='1233';document.getElementById('result-version').dispatchEvent(new Event('change'))");await wait(60);
     check('앞선 버전은 본문·형식·평가와 의견 반영 표시가 바뀐다',await evaluate("document.getElementById('minutes').textContent.includes('앞선 결과입니다.')&&document.getElementById('copy-result').textContent.includes('핵심 요약')&&!document.getElementById('refined-badge').hidden&&document.getElementById('review-comment').value===''"));
     await evaluate("document.getElementById('result-version').value='1234';document.getElementById('result-version').dispatchEvent(new Event('change'))");await wait(60);
-    check('최신 버전으로 돌아오면 그 평가를 다시 연다',await evaluate("document.getElementById('review-comment').value==='  담당자를 확인해 주세요.  '&&document.getElementById('refined-badge').hidden"));
+    check('최신 버전으로 돌아오면 그 평가를 다시 연다',await evaluate("document.getElementById('review-comment').value==='담당자를 확인해 주세요.'&&document.getElementById('refined-badge').hidden"));
     await evaluate('__mock.delay=180');await click('#refine');await wait(35);
     check('평가 저장을 기다리는 동안 버전과 결과 조작을 잠근다',await evaluate("document.getElementById('result-version').disabled&&document.getElementById('copy-result').disabled&&document.getElementById('save-review').disabled"));
     await wait(430);
@@ -232,7 +233,7 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
       await click('[data-pick-folder=summary]');await wait(60);await evaluate("document.getElementById('settings-storage').scrollIntoView()");await shot('모바일-'+width+'-설정-저장위치.png');
       check(width+'px 설정 내용 가로 넘침 없음',await evaluate("document.getElementById('settings').scrollWidth<=document.getElementById('settings').clientWidth"));
       check(width+'px 설정 머리글과 닫기가 화면 안에 남는다',await evaluate("(()=>{const e=document.getElementById('close-settings'),r=e.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.right<=innerWidth})()"));
-      await click('#close-settings');await evaluate("__mock.copyReport={ok:false,written:[{kind:'summaryMd',name:'회의.md'}],failed:[{kind:'summaryTxt',message:'폴더 권한이 끊겼습니다. 설정에서 폴더를 다시 고르세요.'}],skipped:[]}");await click('#history button');await wait(60);
+      await click('#close-settings');await evaluate("__mock.copyReport={ok:false,written:[{kind:'summaryMd',name:'회의.md'}],failed:[{kind:'summaryTxt',message:'고른 폴더를 찾을 수 없거나 권한이 끊겨 다시 골라야 합니다'}],skipped:[]}");await click('#history button');await wait(60);
       await evaluate("document.getElementById('result-version').focus()");await shot('모바일-'+width+'-결과버전.png');
       await evaluate("document.getElementById('review-comment').value='담당자가 틀렸습니다. 문서 정리는 담당자가 다음 주까지 하기로 했습니다.';document.getElementById('review-comment').dispatchEvent(new Event('input'));document.getElementById('review-panel').scrollIntoView()");await shot('모바일-'+width+'-평가.png');
       await evaluate("document.getElementById('copies-panel').scrollIntoView()");await shot('모바일-'+width+'-사본실패.png');
