@@ -1832,7 +1832,14 @@
     // 사본 저장 결과를 한 문장으로 알린다. 일부만 실패하면 실패한 종류만 적는다.
     if (!report) return "";
     if (report.failed?.length) {
-      const reasons = [...new Set(report.failed.map((item) => `${COPY_LABELS[item.kind] || "사본"} — ${String(item.message || "").replace(/\.$/, "")}`))];
+      // 같은 이유로 실패한 종류는 한 묶음으로 적어 이유가 되풀이되지 않게 한다.
+      const groups = new Map();
+      for (const item of report.failed) {
+        const reason = String(item.message || "").replace(/\.$/, ""), label = COPY_LABELS[item.kind] || "사본";
+        if (!groups.has(reason)) groups.set(reason, []);
+        if (!groups.get(reason).includes(label)) groups.get(reason).push(label);
+      }
+      const reasons = [...groups].map(([reason, labels]) => `${labels.join("·")} — ${reason}`);
       return `고른 폴더에 저장하지 못했습니다: ${reasons.join(", ")}. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.`;
     }
     const written = [...new Set((report.written || []).map((item) => COPY_LABELS[item.kind]).filter(Boolean))];

@@ -207,6 +207,18 @@ test('사본 실패 응답이면 실패한 종류와 정해진 문구, 다시 �
   assert.equal(review.ui['copy-status'].textContent, '고른 폴더에 사본을 저장했습니다: 요약본(.txt).');
 });
 
+test('여러 종류가 같은 이유로 실패하면 이유를 한 번만 적고 종류를 묶는다', async () => {
+  const missing = '고른 폴더를 찾을 수 없습니다.';
+  const failed = { ok: false, written: [], skipped: [], failed: [{ kind: 'transcript', message: missing }, { kind: 'summaryMd', message: missing },
+    { kind: 'summaryTxt', message: missing }, { kind: 'audio', message: '앱에 보관된 원음 파일을 읽지 못했습니다.' }, { kind: 'audio', message: missing }] };
+  const review = fixture({ routes: { ...savedRoute(failed) } });
+  review.state.settings = { summaryModel: 'gpt-6.1-sol', defaultOutputFormat: 'meeting', storage: { audio: 'D:\\원음', transcript: 'D:\\전사', summary: 'D:\\요약' } };
+  review.state.keyConfigured = true;
+  review.ui.transcript.value = '김과장: 견적 검토는 이대리가 맡아 주세요.';
+  await review.summarize(true);
+  assert.equal(review.ui['copy-status'].textContent, '고른 폴더에 저장하지 못했습니다: 전사문·요약본(.md)·요약본(.txt)·원음 — 고른 폴더를 찾을 수 없습니다, 원음 — 앱에 보관된 원음 파일을 읽지 못했습니다. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.');
+});
+
 test('저장 위치를 고르지 않았으면 다시 저장 대신 안내 문구를 보여 준다', async () => {
   const review = fixture({ routes: { ...opening(first) } });
   review.state.settings = { summaryModel: 'gpt-6.1-sol', defaultOutputFormat: 'meeting', storage: { audio: '', transcript: '', summary: '' } };
