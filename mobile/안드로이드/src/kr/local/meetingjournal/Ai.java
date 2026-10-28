@@ -9,15 +9,22 @@ import java.util.*;
 
 final class Ai {
     interface Progress {void update(String message) throws Exception;}
+    interface Templates {String read(String name)throws Exception;}
     static final class Limit extends IOException {Limit(String message){super(message);}}
     static final String DEFAULT_MODEL=AiModels.DEFAULT_MODEL;
-    final Store store; final Progress progress; final AiModels.Model model; final String analysisId; int extra;
+    static String checkedFeedback(Object value)throws IOException {
+        if(!(value instanceof String)||JsonText.trim((String)value).isEmpty())throw new IOException("반영할 의견을 입력하세요.");
+        String text=(String)value;if(text.length()>1000)throw new IOException("의견은 1,000자 이하로 입력하세요.");return text;
+    }
+    final Store store; final Progress progress; final AiModels.Model model; final String analysisId; final Templates templates; int extra;
+    JSONObject usageTarget;
     TrialAccess.Gate gate;
-    Ai(Store store,Progress progress) throws Exception {
+    Ai(Store store,Progress progress) throws Exception {this(store,progress,name->{try(InputStream in=store.context.getAssets().open(name)){return Store.read(in);}});}
+    Ai(Store store,Progress progress,Templates templates) throws Exception {
         // 분석 시도 하나에 ID 하나를 두고, 전사·분할 요약·자동 재시도가 같은 체험 예약을 함께 쓴다.
-        this.store=store;this.progress=progress;analysisId=UUID.randomUUID().toString();store.requireAccess();
+        this.store=store;this.progress=progress;this.templates=templates;analysisId=UUID.randomUUID().toString();store.requireAccess();
         String selected=store.summaryModel();model=AiModels.find(selected==null?DEFAULT_MODEL:selected);
-        if(model==null)throw new IOException("선택한 요약 모델("+selected+")은 지원 목록에 없습니다. AI 설정에서 요약 모델을 다시 선택하세요.");
+        if(model==null)throw new IOException("선택한 요약 모델("+selected+")은 지원 목록에 없습니다. 설정의 AI 연결에서 요약 모델을 다시 선택하세요.");
     }
     static JSONArray models() throws JSONException {
         JSONArray all=new JSONArray();
@@ -43,7 +50,7 @@ final class Ai {
             if(code.equals("context_length_exceeded"))throw new Limit("입력 길이 한도");
             if(status==401||status==403)throw new IOException("API 키 또는 모델 사용 권한을 확인하세요.");
             if(code.contains("quota")||code.contains("balance")||code.contains("spend_limit")||code.contains("usage_limit"))throw new IOException("API 잔액 또는 사용 한도를 확인하세요. 전사와 녹음은 저장되어 있습니다.");
-            if(code.equals("model_not_found"))throw new IOException("현재 API 계정에서 요약 모델("+model.id+")을 사용할 수 없습니다. AI 설정에서 다른 모델을 선택하거나 계정 권한을 확인하세요.");
+            if(code.equals("model_not_found"))throw new IOException("현재 API 계정에서 요약 모델("+model.id+")을 사용할 수 없습니다. 설정의 AI 연결에서 다른 모델을 선택하거나 계정 권한을 확인하세요.");
             if(status==429)throw new IOException("API 처리량 제한입니다. 잠시 후 다시 분석하세요.");
             throw new IOException("AI 요청에 실패했습니다. HTTP "+status);
         }return body;
@@ -63,6 +70,10 @@ final class Ai {
     void run(JSONObject record) throws Exception {
         // 회의록까지 저장하면 체험 1회로 확정하고, 실패·취소면 예약만 돌려준다.
         try{analyze(record);}catch(Exception ex){store.trial().release(analysisId);throw ex;}
+        finishAccess(record);
+        copyResult(record);
+    }
+    void finishAccess(JSONObject record)throws Exception {
         for(int attempt=0;;attempt++){
             try{store.trial().finish(analysisId);return;}
             catch(TrialAccess.StorageException ex){
@@ -71,8 +82,54 @@ final class Ai {
                 Thread.sleep(200);}
         }
     }
+    JSONObject refine(JSONObject record,String resultId,String feedback)throws Exception {
+        feedback=checkedFeedback(feedback);
+        String location=Store.location(record),id=record.getString("id");File dir=store.directory(location,id),file=new File(dir,"전사.txt");
+        if(!file.isFile())throw new IOException("저장된 전사가 없어 의견을 반영할 수 없습니다.");
+        String transcript=Store.read(file);if(JsonText.trim(transcript).isEmpty())throw new IOException("저장된 전사가 없어 의견을 반영할 수 없습니다.");
+        JSONObject selected=store.result(location,id,resultId);
+        if(selected.optJSONObject("minutes")==null)throw new IOException("정리된 결과에만 의견을 반영할 수 있습니다.");
+        usageTarget=store.load(location,id);JSONObject work=new JSONObject(selected.toString());work.remove("minutes");
+        if(usageTarget.has("analysis"))work.put("analysis",new JSONObject(usageTarget.getJSONObject("analysis").toString()));else work.remove("analysis");
+        try{
+            JSONObject previous=null;List<String> chunks=TextChunks.split(transcript,24000);
+            for(int i=0;i<chunks.size();i++){progress.update(model.label+" 의견 반영 중 · "+(i+1)+" / "+chunks.size());previous=section(work,chunks.get(i),previous,dir,0,feedback);}
+            analysis(work).put("summaryModel",model.id);String before=work.getString("resultId");
+            try{store.finish(work,previous,feedback);}finally{
+                if(!before.equals(work.optString("resultId"))){
+                    List<String> keys=new ArrayList<>();for(Iterator<String> it=record.keys();it.hasNext();)keys.add(it.next());for(String key:keys)record.remove(key);
+                    for(Iterator<String> it=work.keys();it.hasNext();){String key=it.next();record.put(key,work.get(key));}
+                }
+            }
+        }catch(Exception ex){store.trial().release(analysisId);throw ex;}finally{usageTarget=null;}
+        finishAccess(record);copyResult(record);return record;
+    }
+    void copyResult(JSONObject record)throws Exception {
+        JSONObject copies;
+        try{copies=Copies.copyResult(store.context,store,Store.location(record),record.getString("id"),record.getString("resultId"));}
+        catch(Exception ex){copies=new JSONObject().put("ok",false).put("written",new JSONArray()).put("skipped",new JSONArray()).put("failed",new JSONArray().put(new JSONObject().put("kind","all").put("message","사본 저장을 마치지 못했습니다. 폴더를 확인한 뒤 다시 저장하세요.")));}
+        record.put("copies",copies);
+        String failure=copyFailureMessage(copies);
+        if(!failure.isEmpty())record.put("message",record.optString("message")+" · "+failure);
+    }
+    static String copyFailureMessage(JSONObject copies)throws JSONException {
+        JSONArray failed=copies.optJSONArray("failed");if(failed==null||failed.length()==0)return "";
+        Set<String> reasons=new LinkedHashSet<>();
+        for(int i=0;i<failed.length();i++){
+            JSONObject item=failed.getJSONObject(i);String label;
+            switch(item.optString("kind")){
+                case "transcript":label="전사문";break;
+                case "summaryMd":label="요약본(.md)";break;
+                case "summaryTxt":label="요약본(.txt)";break;
+                case "audio":label="원음";break;
+                default:label="사본";
+            }
+            reasons.add(label+" — "+item.optString("message").replaceFirst("\\.$",""));
+        }
+        return "고른 폴더에 저장하지 못했습니다: "+String.join(", ",reasons)+". 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.";
+    }
     void analyze(JSONObject record) throws Exception {
-        File dir=store.directory(record.getInt("slot"),record.getString("id"));JSONArray audio=record.getJSONArray("audio");StringBuilder transcript=new StringBuilder();
+        File dir=store.directory(Store.location(record),record.getString("id"));JSONArray audio=record.getJSONArray("audio");StringBuilder transcript=new StringBuilder();
         for(int i=0;i<audio.length();i++){
             check();progress.update("음성을 글로 변환 중 · "+(i+1)+" / "+audio.length());File saved=new File(dir,String.format(Locale.ROOT,"전사-%03d.txt",i+1));
             String text=saved.exists()?Store.read(saved):transcribe(record,new File(dir,audio.getString(i)));
@@ -81,26 +138,32 @@ final class Ai {
         if(transcript.toString().trim().isEmpty())throw new IOException("인식된 발언이 없습니다. 원음은 보관했습니다.");
         JSONObject previous=null;List<String> chunks=TextChunks.split(transcript.toString(),24000);
         for(int i=0;i<chunks.size();i++){progress.update(model.label+" 회의록 분석 중 · "+(i+1)+" / "+chunks.size());previous=section(record,chunks.get(i),previous,dir,0);}
-        analysis(record).put("summaryModel",model.id);store.finish(record,previous);
+        analysis(record).put("summaryModel",model.id);store.finish(record,previous,null);
     }
     JSONObject section(JSONObject record,String text,JSONObject previous,File dir,int depth) throws Exception {
-        check();JSONObject input=new JSONObject().put("context",record.optString("context")).put("title",record.optString("title")).put("date",record.optString("date")).put("participants",record.optString("participants")).put("transcript",text);
+        return section(record,text,previous,dir,depth,null);
+    }
+    JSONObject section(JSONObject record,String text,JSONObject previous,File dir,int depth,String feedback) throws Exception {
+        check();JSONObject input=new JSONObject();
         if(!record.optString("notes").isEmpty())input.put("notes",record.optString("notes"));
+        input.put("title",record.optString("title")).put("date",record.optString("date")).put("participants",record.optString("participants")).put("transcript",text);
         if(previous!=null)input.put("previousMinutes",previous);
+        if(feedback!=null)input.put("feedback",feedback);
         String format=Store.meetingFormat(record);CustomFormat custom="custom".equals(format)?Store.custom(record):null;
-        // 기본 모델은 기존 중간 결과를 재사용하고, 다른 모델은 모델별로 따로 저장해 재분석 시 새 모델로 요청한다. 회의록 외 형식도 형식별로 따로 저장한다.
-        String source=model.id.equals(DEFAULT_MODEL)?input.toString():input.toString()+"\u0000"+model.id;
-        if(!"meeting".equals(format))source+="\u0000"+format;
-        if(custom!=null)source+="\u0000"+custom.json();
-        String hash=hex(MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8)));File cache=new File(dir,"중간요약/"+hash+".json"), split=new File(dir,"중간요약/"+hash+"-분할.json");
+        String instructions=templates.read("summary-"+(custom!=null?"meeting":format)+".json"),feedbackInstructions=feedback==null?null:templates.read("summary-feedback.json");
+        String source=new JSONArray().put("summary-v2").put(input.toString()).put(model.id).put(format).put(custom==null?JSONObject.NULL:custom.json()).put(digest(instructions)).put(feedbackInstructions==null?JSONObject.NULL:digest(feedbackInstructions)).toString();
+        String hash=digest(source);File cache=new File(dir,"중간요약/"+hash+".json"), split=new File(dir,"중간요약/"+hash+"-분할.json");
+        // 요청 내용과 실제 자산의 지문을 함께 묶어 옛 지시문·다른 의견의 성공 결과가 섞이지 않게 한다.
         if(cache.exists())return new JSONObject(Store.read(cache));
         JSONArray parts=split.exists()?new JSONArray(Store.read(split)):null;
         if(parts==null){
             if(depth>0&&extra++>=6)throw new IOException("자동 추가 요청 6회에 도달했습니다. 다시 분석하면 성공한 구간을 재사용합니다.");
-            try{JSONObject body=store.asset("summary-"+(custom!=null?"meeting":format)+".json");
+            try{JSONObject body=new JSONObject(instructions);
                 // 내 형식은 회의록형 기준 바로 다음에 사용자 항목·순서·추가 지시를 넣는다. 데스크톱과 같은 위치다.
                 if(custom!=null){JSONArray old=body.getJSONArray("input"),next=new JSONArray();for(int i=0;i<old.length();i++){next.put(old.get(i));if(i==0)next.put(new JSONObject().put("role","system").put("content",custom.instruction()));}body.put("input",next);}body.put("model",model.id).put("max_output_tokens",model.maxOutputTokens).put("reasoning",new JSONObject().put("effort",model.reasoningEffort));
-                body.remove("temperature");body.remove("top_p");body.getJSONArray("input").put(new JSONObject().put("role","user").put("content",input.toString()));
+                body.remove("temperature");body.remove("top_p");
+                if(feedbackInstructions!=null)body.getJSONArray("input").put(new JSONObject(feedbackInstructions));
+                body.getJSONArray("input").put(new JSONObject().put("role","user").put("content",input.toString()));
                 HttpURLConnection c=connect("responses","application/json");try(OutputStream out=c.getOutputStream()){out.write(body.toString().getBytes(StandardCharsets.UTF_8));}catch(Exception ex){c.disconnect();throw ex;}
                 JSONObject result=sent(record,c,AiUsage.SUMMARY,model.id);
                 if(result.optString("status").equals("incomplete")&&result.optJSONObject("incomplete_details")!=null&&result.getJSONObject("incomplete_details").optString("reason").equals("max_output_tokens"))throw new Limit("출력 길이 한도");
@@ -110,17 +173,22 @@ final class Ai {
             }catch(Limit limit){if(text.length()<=2000||extra>=6)throw new IOException("길이 한도를 복구하지 못했습니다. 전사와 성공 구간은 저장되어 있습니다.");parts=new JSONArray(TextChunks.split(text,(text.length()+1)/2));Store.write(split,parts.toString());}
         }
         progress.update("길이 한도에 도달해 작은 구간으로 나눠 분석합니다.");JSONObject result=previous;
-        for(int i=0;i<parts.length();i++)result=section(record,parts.getString(i),result,dir,depth+1);
+        for(int i=0;i<parts.length();i++)result=section(record,parts.getString(i),result,dir,depth+1,feedback);
         Store.write(cache,result.toString());return result;
     }
     static JSONObject analysis(JSONObject record) throws JSONException {JSONObject value=record.optJSONObject("analysis");if(value==null){value=new JSONObject();record.put("analysis",value);}return value;}
     JSONObject sent(JSONObject record,HttpURLConnection connection,String kind,String id) throws Exception {
         // 전송한 호출마다 기록한다. 응답을 못 받은 실패는 0이 아니라 미확인 건수로 남기고 원래 오류를 그대로 알린다.
         JSONObject result;
-        try{result=response(connection);}catch(Exception ex){try{addUsage(record,kind,id,null);store.save(record);}catch(Exception ignored){}throw ex;}
+        try{result=response(connection);}catch(Exception ex){try{addUsage(record,kind,id,null);saveUsage(record);}catch(Exception ignored){}throw ex;}
         Object reported=result.opt("model");
-        addUsage(record,kind,usageModel(reported instanceof String?(String)reported:null,id),result.optJSONObject("usage"));store.save(record);return result;
+        addUsage(record,kind,usageModel(reported instanceof String?(String)reported:null,id),result.optJSONObject("usage"));saveUsage(record);return result;
     }
+    void saveUsage(JSONObject record)throws Exception {
+        if(usageTarget==null)store.save(record);
+        else{usageTarget.put("analysis",new JSONObject(analysis(record).toString()));store.save(usageTarget);}
+    }
+    static String digest(String text)throws Exception{return hex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));}
     static String usageModel(String reported,String requested){
         // 응답이 알려준 실제 모델(스냅샷 이름 포함)을 우선 기록하고, 없거나 형식이 틀리면 요청한 모델로 기록한다.
         return AiUsage.validModel(reported)?reported:requested;

@@ -13,7 +13,7 @@ final class CustomFormat {
 
     static CustomFormat parse(String json) throws IOException {
         Object value;
-        try{value=new SettingsExchange.Parser(json).document();}catch(IOException ex){throw new IOException("내 형식 내용을 확인하세요.");}
+        try{value=new JsonText.Parser(json).document();}catch(IOException ex){throw new IOException("내 형식 내용을 확인하세요.");}
         return validate(value);
     }
 
@@ -21,9 +21,9 @@ final class CustomFormat {
         // 검사 순서와 안내 문구는 데스크톱 validateCustom과 같다.
         if(!(value instanceof Map))throw new IOException("내 형식 내용을 확인하세요.");
         Map<?,?> map=(Map<?,?>)value;
-        for(Object key:map.keySet())if(!"name".equals(key)&&!"sections".equals(key)&&!"instruction".equals(key)){String text=String.valueOf(key);throw new IOException("내 형식에 알 수 없는 항목("+(text.length()>40?text.substring(0,40):text)+")이 있습니다.");}
+        for(String key:JsonText.keys(map))if(!"name".equals(key)&&!"sections".equals(key)&&!"instruction".equals(key)){String text=String.valueOf(key);throw new IOException("내 형식에 알 수 없는 항목("+(text.length()>40?text.substring(0,40):text)+")이 있습니다.");}
         Object name=map.get("name");
-        if(!(name instanceof String)||SettingsExchange.trim((String)name).isEmpty()||SettingsExchange.trim((String)name).length()>NAME_MAX)throw new IOException("내 형식 이름은 1~"+NAME_MAX+"자로 입력하세요.");
+        if(!(name instanceof String)||JsonText.trim((String)name).isEmpty()||JsonText.trim((String)name).length()>NAME_MAX)throw new IOException("내 형식 이름은 1~"+NAME_MAX+"자로 입력하세요.");
         Object list=map.get("sections");
         if(!(list instanceof List)||((List<?>)list).isEmpty()||((List<?>)list).size()>KEYS.size())throw new IOException("내 형식에 넣을 항목을 하나 이상 고르세요.");
         Set<String> seen=new HashSet<>();List<Section> sections=new ArrayList<>();
@@ -34,12 +34,12 @@ final class CustomFormat {
             if(!(key instanceof String)||!KEYS.contains(key)||extra)throw new IOException("내 형식 항목을 확인하세요.");
             if(!seen.add((String)key))throw new IOException("같은 항목을 두 번 넣을 수 없습니다.");
             Object title=section.get("title");
-            if(!(title instanceof String)||SettingsExchange.trim((String)title).isEmpty()||SettingsExchange.trim((String)title).length()>TITLE_MAX)throw new IOException("항목 이름은 1~"+TITLE_MAX+"자로 입력하세요.");
-            sections.add(new Section((String)key,SettingsExchange.trim((String)title)));
+            if(!(title instanceof String)||JsonText.trim((String)title).isEmpty()||JsonText.trim((String)title).length()>TITLE_MAX)throw new IOException("항목 이름은 1~"+TITLE_MAX+"자로 입력하세요.");
+            sections.add(new Section((String)key,JsonText.trim((String)title)));
         }
         Object instruction=map.get("instruction");if(instruction==null)instruction="";
         if(!(instruction instanceof String)||((String)instruction).length()>INSTRUCTION_MAX)throw new IOException("추가 지시는 1,000자 이하로 입력하세요.");
-        return new CustomFormat(SettingsExchange.trim((String)name),sections,SettingsExchange.trim((String)instruction));
+        return new CustomFormat(JsonText.trim((String)name),sections,JsonText.trim((String)instruction));
     }
 
     String instruction(){
@@ -53,8 +53,8 @@ final class CustomFormat {
     }
 
     String json(){
-        StringBuilder out=new StringBuilder("{\"name\":").append(SettingsExchange.quote(name)).append(",\"sections\":[");
-        for(int i=0;i<sections.size();i++){if(i>0)out.append(',');out.append("{\"key\":").append(SettingsExchange.quote(sections.get(i).key)).append(",\"title\":").append(SettingsExchange.quote(sections.get(i).title)).append('}');}
-        return out.append("],\"instruction\":").append(SettingsExchange.quote(instruction)).append('}').toString();
+        StringBuilder out=new StringBuilder("{\"name\":").append(JsonText.quote(name)).append(",\"sections\":[");
+        for(int i=0;i<sections.size();i++){if(i>0)out.append(',');out.append("{\"key\":").append(JsonText.quote(sections.get(i).key)).append(",\"title\":").append(JsonText.quote(sections.get(i).title)).append('}');}
+        return out.append("],\"instruction\":").append(JsonText.quote(instruction)).append('}').toString();
     }
 }

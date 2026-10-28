@@ -1,48 +1,53 @@
-안드로이드 빌드 (VoiceNote 1.2.0, versionCode 4)
+﻿안드로이드 빌드 (VoiceNote 1.3.0, versionCode 5)
 
-이 폴더는 Windows 앱과 같은 Sol 요청 양식을 쓰는 Android 네이티브 앱입니다. WebView는 APK 안의 화면만 표시하며 녹음, API 통신, 파일 보관·공유, 설정 파일 내보내기·불러오기(SAF 문서 선택 창)는 Java 코드가 처리합니다.
+Windows 앱과 같은 요약 요청 양식을 쓰는 Android 네이티브 앱입니다. WebView는 APK 안의 화면을 표시하고 녹음, API 통신, 기록 보관·공유, 설정 파일과 폴더 선택은 Java 코드가 처리합니다. 프로젝트를 고르지 않고 회의를 시작하며, 이전 프로젝트 1~3의 기록은 원래 위치에서 함께 읽습니다. 이전 자료를 지우거나 옮기지 않습니다.
 
 필요 도구
 
 - Node.js 22 이상
 - JDK 21
 - Android SDK platform android-36, build-tools 36.0.0, platform-tools
+- Windows PowerShell 5.1 또는 PowerShell 7
 
-빌드.ps1의 ToolRoot 아래에 SDK와 도구/JDK/<JDK폴더>를 준비합니다. 기본 ToolRoot는 C:\DEV\VoiceNote\2026-09-30-회의록도구-안드로이드 입니다. APK와 빌드 중간 파일은 OutputRoot에 저장하며, 기본값은 실행할 때마다 프로젝트 안의 산출물\안드로이드\<yyyy-MM-dd-HHmmss> 폴더입니다. SDK 라이선스에 동의해야 합니다.
+빌드.ps1의 ToolRoot 아래에 SDK와 도구/JDK/<JDK폴더>를 준비합니다. 기본 ToolRoot는 C:\DEV\VoiceNote\2026-09-30-회의록도구-안드로이드입니다. APK와 중간 파일은 OutputRoot에 저장하며, 기본값은 프로젝트 안의 산출물\안드로이드\<yyyy-MM-dd-HHmmss>입니다. SDK 라이선스에 동의해야 합니다. 기기 지원 범위는 Android 8.0(API 26) 이상, target API 35입니다.
 
-PowerShell 실행
+저장소 루트에서 실행
 
-  .\안드로이드\빌드.ps1 -DebugBuild
-  .\안드로이드\빌드.ps1 -DefaultKeyFile '<공용 기본 키 JSON 파일>'
+  .\mobile\안드로이드\빌드.ps1 -DebugBuild
+  .\mobile\안드로이드\빌드.ps1
 
-요약 요청 양식은 desktop\앱\서버.cjs를 빌드 입력으로 직접 사용합니다(ServerScript 인수로 바꿀 수 있음). 스크립트는 서버를 잠시 로컬로 열고 모의 응답으로 회의록(meeting)·핵심 요약(summary)·업무 정리(tasks) 세 양식을 summary-<형식>.json으로 추출합니다. 외부 AI는 호출하지 않습니다. 세 양식이 같거나 사용자 메시지 필드가 휴대폰과 다르면 빌드를 멈춥니다.
+첫 명령은 검증용, 두 번째는 release APK를 공용 기본 키 없이 만듭니다. 시도마다 다른 OutputRoot를 지정합니다. 내부 결과 이름은 VoiceNote-android-test.apk 또는 VoiceNote-android.apk이며, 날짜와 1.3.0이 든 한글 이름으로도 복사합니다. 사용자 전달은 이 산출물 경로가 아니라 루트 배포준비.ps1로 배포\최신과 배포\VoiceNote-배포.zip을 갱신하는 별도 단계입니다.
 
-공용 기본 키
+요약 요청 양식
 
-DefaultKeyFile은 apiKey 속성이 있는 JSON 파일입니다. 기본값은 빈값이라 명시하지 않으면 키가 들어가지 않습니다. 명시하면 release 빌드의 패키징 임시 자산(stage-release\assets\default.key)에만 넣고, 서명 뒤 그 임시 파일과 서명 전 중간 APK를 지웁니다. 원본 assets, 소스 압축, 로그에는 키를 넣지 않으며 값도 출력하지 않습니다. 검증용(DebugBuild)에 DefaultKeyFile을 주면 빌드를 멈춥니다. 빌드 끝에 APK 항목 이름만 읽어 공용 키 포함 여부, 개인 키 파일 부재, 세 요약 양식 포함을 확인합니다.
+desktop\앱\서버.cjs를 빌드 입력으로 씁니다(ServerScript로 변경 가능). 서버를 잠시 로컬로 열고 모의 응답으로 회의록·핵심 요약·업무 정리의 summary-<형식>.json과 의견 반영 지시문 summary-feedback.json을 추출합니다. 외부 AI는 호출하지 않습니다. 요청 필드와 지시문 순서가 계약과 다르면 빌드를 멈춥니다. 완성 APK에 세 요약 양식·의견 지시문·formats.js가 모두 있는지 확인합니다.
 
-공용 기본 키는 TrialAccess.java 규칙으로 분석 3회까지만 씁니다. 공개 소스에는 해제문자가 없어(UNLOCK_SHA256 빈 값) 횟수 제한을 풀 수 없습니다. 개인 키를 등록하면 체험 제한 없이 개인 키를 씁니다. 체험 기록 파일(files/trial-access.json)은 설정 내보내기에 들어가지 않고 allowBackup=false를 유지합니다. 앱 안에서만 동작하는 제한입니다.
+공용 기본 키와 서명
 
-설정 파일
+DefaultKeyFile의 기본값은 빈값이므로 지정하지 않으면 키가 들어가지 않습니다. 지정할 때만 apiKey 속성이 있는 JSON을 읽어 release의 임시 assets/default.key에 넣고 서명 뒤 지웁니다. DebugBuild에 이 인수를 주면 중단합니다. 원본 자산에 personal.key 또는 default.key가 있으면 빌드를 멈추며 PowerShell 5.1에서도 파일 이름으로 검사합니다. 키 값은 출력하지 않습니다. 마지막 출력의 '공용 기본 키 포함: 아니요'로 이번 공용 키 없는 빌드를 확인합니다.
 
-1.3.0부터 프로젝트가 없습니다. 새 회의는 기본 보관함에 쌓이고, 1.2.0까지의 프로젝트-01~03 폴더에 있던 회의는 지우지 않고 지난 회의 목록에 함께 보여 줍니다.
-설정 파일은 Windows와 같은 2판 형식(voicenote-settings, version 2)으로 요약 모델·기본 출력 형식·내 형식을 내보냅니다. Android는 저장 위치(storage)를 내보내지 않고, Windows에서 만든 파일의 storage 칸은 읽기만 하고 적용하지 않습니다. 불러오기는 128KiB 이하 UTF-8 파일을 쓰기 전에 모두 검증하고, 저장 중 하나라도 실패하면 요약 모델·기본 출력 형식·내 형식을 이전 값으로 함께 되돌립니다. 파일의 내 형식이 null이면 지금 내 형식을 지웁니다. 1.2.0까지의 프로젝트 설정 파일(voicenote-project-settings 1판)은 "이전 버전의 프로젝트 설정 파일입니다. 프로젝트 기능이 없어져 불러올 수 없습니다."라고 알리고 아무것도 바꾸지 않습니다. 회의 기록과 녹음은 건드리지 않습니다.
+공용 기본 키가 든 별도 설치본은 분석 3회 체험 규칙을 씁니다. 공개 소스에는 해제문자가 없습니다. 개인 키를 등록하면 개인 키를 사용합니다. 체험 기록과 API 키는 설정 파일로 내보내지 않으며 allowBackup=false를 유지합니다.
 
-서명
+개인서명 폴더의 회의록서명.p12와 서명암호.txt는 별도로 보관하고 이후 업데이트도 같은 서명을 씁니다. 빌드는 기존 서명을 읽으며 새로 만들지 않습니다. 소스나 전달 묶음에 서명 파일·API 키를 넣지 않습니다.
 
-개인서명 폴더의 회의록서명.p12와 서명암호.txt를 별도로 보관합니다. 이후 업데이트도 같은 서명으로 만들어야 기존 설치 위에 업데이트할 수 있습니다. 소스 압축이나 사용자 공유 파일에는 서명 파일과 API 키를 넣지 않습니다.
+설정·사본·결과 화면
+
+설정은 AI 연결·출력 형식·저장 위치·설정 파일 네 구역입니다. 기본 출력 형식과 내 형식 편집을 여기서 합니다. 회의 준비에서는 이번 회의의 형식과 예시를 고릅니다. 회의명은 비워 두면 AI가 정합니다. 녹음·분석 중에는 설정과 평가 변경을 잠급니다.
+
+저장 위치에서 원음·전사문·요약본의 폴더를 각각 Android 문서 선택 창으로 고릅니다. 앱 안 기록을 유지하면서 분석이나 의견 반영이 끝나면 고른 폴더에 사본을 씁니다. 요약본은 기존 모양 그대로 .md와 .txt 두 파일입니다. 실패한 종류와 이유를 알리고, 폴더를 확인한 뒤 '고른 폴더에 다시 저장'으로 선택 결과의 사본을 다시 저장합니다. 고른 폴더가 없으면 안내만 보입니다. 실제 권한 유지와 파일 이름 처리는 저장소 앱에 따라 기기 확인이 필요합니다.
+
+정리본에서 별점 1~5와 1,000자 이하 의견을 평가로 저장합니다. 평가 저장에는 요금이 들지 않습니다. 의견 반영은 평가를 먼저 저장한 뒤 저장된 전사로 요약만 다시 요청하므로 요약 요금이 추가로 듭니다. 전사가 없으면 안내하고 멈춥니다. 성공하면 새 결과 버전이 생기며 '결과 버전'에서 앞선 결과와 그 평가를 다시 엽니다. 새 결과에는 '의견 반영본'을 표시하고 그 결과의 평가는 새로 남깁니다.
+
+설정 파일은 voicenote-settings, version 2로 요약 모델·기본 출력 형식·내 형식만 옮깁니다. Android는 저장 위치를 내보내지 않고 Windows 파일의 저장 위치도 적용하지 않습니다. API 키·체험 기록·회의 자료는 포함하지 않습니다. 128KiB 이하 UTF-8 파일을 먼저 검증하고 미리보기에서 확인한 토큰으로 적용합니다. 취소하면 유지하고 저장 중 실패하면 이전 설정을 복구합니다. 1판 프로젝트 설정 파일은 이유를 알리고 거절합니다.
 
 검증
 
-- node --test tests/*.test.cjs : 시작 조건, 화면 흐름, 출력 형식 화면 구성, 체험 표시, 모델 목록, 내 형식 판정, Windows 설정 파일 모듈(desktop\앱\설정파일.cjs)과의 판정·왕복 비교(JDK 필요)
-- tests/SettingsFileTest.java, tests/CustomFormatTest.java, tests/TextChunksTest.java, tests/TrialAccessTest.java, tests/AiUsageTest.java : java.*만 쓰는 클래스를 해당 소스와 함께 하나씩 javac로 컴파일해 실행합니다. tests/*.java를 한꺼번에 컴파일하지 않습니다.
-- tests/AiResponseModelTest.java : Ai의 정적 함수만 실행하지만 Ai.java가 org.json·Android 타입에 연결되어 있어, 컴파일과 실행 classpath에 android.jar와 컴파일된 앱 클래스를 함께 둡니다. org.json 객체를 만들지 않으므로 JVM에서도 통과합니다.
-- android.jar의 org.json은 JVM에서 동작하지 않으므로 JSONObject·Context를 쓰는 Store·Ai의 나머지 동작은 AndroidChecks가 기기에서 확인합니다.
-- node tests/화면검증-브라우저.cjs <캡처폴더> : 헤드리스 Chrome 화면 검사
-- AndroidChecks.java는 DebugBuild에만 포함됩니다. 검증 전용 가상기기에 설치한 뒤 실행합니다.
+- node --test mobile/안드로이드/tests/*.test.cjs
+- node mobile/안드로이드/tests/화면검증-브라우저.cjs <캡처폴더>
+- JVM 단독 시험 7종은 TextChunksTest·TrialAccessTest·AiUsageTest·AiResponseModelTest·SettingsFileTest·AiFeedbackTest·CopyFilesTest입니다. 새 DebugBuild의 stage-debug/classes와 android-36/android.jar를 classpath로 따로 컴파일해 실행합니다. android.jar의 org.json은 JVM에서 Stub 예외가 나므로 Store·Ai 저장 동작은 기기 시험이 맡습니다.
+- AndroidChecks는 DebugBuild에만 들어갑니다. 검증 전용 가상기기에 설치한 뒤 다음을 실행합니다.
 
-  adb shell am instrument -w kr.local.meetingjournal/kr.local.meetingjournal.AndroidChecks
+  adb -s emulator-5554 install -r <검증용 APK>
+  adb -s emulator-5554 shell am instrument -w kr.local.meetingjournal/kr.local.meetingjournal.AndroidChecks
 
-가상기기는 도구 경로에 한글이 있으면 부팅 중 멈춥니다. C:\vn-emu\sdk(SDK 정션)와 C:\vn-emu\phone.avd(가상기기 정션)처럼 영어 경로로 연결해 실행합니다. 예: $env:ANDROID_SDK_ROOT='C:\vn-emu\sdk'; C:\vn-emu\sdk\emulator\emulator.exe -avd VoiceNotePhone -no-metrics
-
-이 검증은 앱 캐시 아래의 시험 폴더(task10-*)에 시험 기록을 만들고 앱의 회의자료 폴더는 건드리지 않습니다. 앱 설정 값은 바꿀 수 있으므로 실제 사용자 휴대폰 대신 검증 전용 가상기기에서 실행합니다. 실제 API 호출은 없습니다.
+영문 정션 C:\vn-emu\sdk와 C:\vn-emu\phone.avd를 사용합니다. ANDROID_SDK_ROOT를 C:\vn-emu\sdk로 정하고 emulator.exe -avd VoiceNotePhone -no-window -no-metrics로 실행합니다. 다른 작업자와 동시에 쓰지 않습니다. AndroidChecks는 앱 cache 아래 별도 UUID 폴더와 별도 설정 이름에 합성 기록을 만들고 실제 API는 호출하지 않습니다. 사용자 실기기에는 실행하지 않습니다.

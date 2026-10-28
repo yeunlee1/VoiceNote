@@ -11,8 +11,8 @@ public final class CustomFormatTest {
         List<String> lines=Files.readAllLines(Paths.get(args[0]),StandardCharsets.UTF_8);StringBuilder out=new StringBuilder();
         for(String line:lines){
             if(line.isEmpty())continue;
-            try{CustomFormat value=CustomFormat.parse(line);out.append("{\"ok\":true,\"value\":").append(value.json()).append(",\"instruction\":").append(SettingsExchange.quote(value.instruction())).append("}\n");}
-            catch(java.io.IOException ex){out.append("{\"ok\":false,\"message\":").append(SettingsExchange.quote(ex.getMessage())).append("}\n");}
+            try{CustomFormat value=CustomFormat.parse(line);out.append("{\"ok\":true,\"value\":").append(value.json()).append(",\"instruction\":").append(JsonText.quote(value.instruction())).append("}\n");}
+            catch(java.io.IOException ex){out.append("{\"ok\":false,\"message\":").append(JsonText.quote(ex.getMessage())).append("}\n");}
         }
         Files.write(Paths.get(args[1]),out.toString().getBytes(StandardCharsets.UTF_8));
     }
