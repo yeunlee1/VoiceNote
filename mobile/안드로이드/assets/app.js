@@ -25,7 +25,7 @@
   const number = value => Number(value || 0).toLocaleString('ko-KR');
 
   function snapshot() {
-    return { busy: state.busy, active: state.active, opened: !!state.opened, keyConfigured: Flow.canAnalyze(state.connection), trialExhausted: state.connection.accessMode === 'exhausted',
+    return { busy: state.busy, active: state.active || !!state.refining, opened: !!state.opened, keyConfigured: Flow.canAnalyze(state.connection), trialExhausted: state.connection.accessMode === 'exhausted',
       date: $('date').value, notes: $('notes').value, customMissing: $('output-format').value === 'custom' && !state.customFormat,
       permissionPending: !!state.connection.permissionPending, filePending: !!state.connection.filePending, modelError: !!state.connection.modelError };
   }
@@ -50,15 +50,15 @@
     }
   }
   function lock() {
-    const idle = !state.busy && !state.active;
+    const idle = !state.busy && !state.active && !state.refining;
     $('prepare').disabled = !idle;
     $('start').hidden = state.recording; $('finish').hidden = !state.recording;
     $('start').disabled = !Flow.canStart(snapshot());
     $('start-label').textContent = state.active && !state.recording ? '분석 중' : '회의 시작';
     $('finish').disabled = state.busy || !state.recording;
     $('retry').disabled = !idle || !state.opened;
-    $('save-key').disabled = state.busy || state.active;
-    $('remove-key').disabled = state.busy || state.active || !state.connection.keyConfigured;
+    $('save-key').disabled = !idle;
+    $('remove-key').disabled = !idle || !state.connection.keyConfigured;
     $('settings-lock').hidden = idle;
     $('api-key').disabled = !idle;
     for (const input of document.querySelectorAll('input[name="persist"]')) input.disabled = !idle;
@@ -261,7 +261,13 @@
   const COPY_LABELS = {audio:'원음',transcript:'전사문',summaryMd:'요약본(.md)',summaryTxt:'요약본(.txt)',all:'사본'};
   function copyMessage(report) {
     if (report.failed?.length) {
-      const reasons = [...new Set(report.failed.map(item => `${COPY_LABELS[item.kind] || '사본'} — ${String(item.message || '').replace(/\.$/, '')}`))];
+      const groups = new Map();
+      for (const item of report.failed) {
+        const reason = String(item.message || '').replace(/\.$/, ''), label = COPY_LABELS[item.kind] || '사본';
+        if (!groups.has(reason)) groups.set(reason, []);
+        if (!groups.get(reason).includes(label)) groups.get(reason).push(label);
+      }
+      const reasons = [...groups].map(([reason, labels]) => `${labels.join('·')} — ${reason}`);
       return `고른 폴더에 저장하지 못했습니다: ${reasons.join(', ')}. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.`;
     }
     const written = [...new Set((report.written || []).map(item => COPY_LABELS[item.kind]).filter(Boolean))];
@@ -272,12 +278,13 @@
     $('copies-panel').hidden = !state.result?.minutes;
     $('save-copies').hidden = !configured || !state.result?.minutes; $('copies-guide').hidden = configured;
     $('copies-state').replaceChildren(); if (!configured || !report) return;
-    const text = attempted || report.failed?.length || report.written?.length ? copyMessage(report) : '아직 이 폴더에 저장하지 않았습니다.';
+    let text = attempted || report.failed?.length || report.written?.length ? copyMessage(report) : '아직 이 폴더에 저장하지 않았습니다.';
+    if (!attempted && report.failed?.length) text = text.replace('고른 폴더에 저장하지 못했습니다:', '고른 폴더의 사본을 확인하지 못했습니다:');
     $('copies-state').append(node('p', text, report.failed?.length ? 'copy-error' : 'hint'));
     for (const item of report.written || []) $('copies-state').append(node('p', `${COPY_LABELS[item.kind] || '사본'} · ${item.name || '저장 완료'}`, 'hint'));
   }
   async function saveReview(target) {
-    const review = await call('review', {...target,stars:state.stars || null,comment:$('review-comment').value});
+    const review = await call('review', {...target,stars:state.stars || null,comment:$('review-comment').value.trim()});
     $('review-state').textContent = '평가를 저장했습니다. 요금은 들지 않습니다.'; await history(); return review;
   }
   $('result-version').onchange = () => { const target = {...state.opened}, resultId = $('result-version').value; task(() => open(target.location,target.id,state.opener,resultId)); };
@@ -293,8 +300,8 @@
       await saveReview(target);
       if (!state.result?.transcript) throw new Error('저장된 전사가 없어 의견을 반영할 수 없습니다.');
       if (!Flow.canAnalyze(state.connection)) { openSettings(null,'ai'); throw new Error(state.connection.accessMode === 'exhausted' ? Flow.EXHAUSTED_MESSAGE : '설정의 AI 연결에서 API 키를 먼저 등록하세요.'); }
-      state.refining = target;
-      try { await call('refine', {...target,feedback}); }
+      const attemptId = crypto.randomUUID(); state.refining = {...target,attemptId};
+      try { await call('refine', {...target,feedback,attemptId}); }
       catch (error) { state.refining = null; throw error; }
       await poll(true);
     });
@@ -350,15 +357,17 @@
         $('record-state').textContent = meeting.state === 'complete' ? '보관 완료' : '확인 필요';
         $('workflow').textContent = meeting.message || '다음 회의를 준비하세요.'; $('timer').textContent = '00:00';
       }
-      const key = `${meeting.id || ''}-${meeting.state || ''}`;
-      if (key !== state.lastHistory) {
+      const target = state.refining;
+      const finishedRefine = !status.active && target && meeting.attemptId === target.attemptId && target.id === meeting.id && target.location === meeting.location && ['complete','failed'].includes(meeting.state);
+      const key = `${meeting.id || ''}-${meeting.state || ''}-${meeting.attemptId || ''}`;
+      if (key !== state.lastHistory || finishedRefine) {
         state.lastHistory = key; await history();
-        if (!state.active && state.lastState && meeting.id && meeting.location) {
-          const target = state.refining, failedRefine = meeting.state === 'failed' && target?.id === meeting.id && target.location === meeting.location;
+        if (finishedRefine || (!target && !state.active && state.lastState && meeting.id && meeting.location)) {
+          const failedRefine = finishedRefine && meeting.state === 'failed';
           const opener = [...$('history').querySelectorAll('button')].find(button => button.dataset.location === meeting.location && button.dataset.id === meeting.id);
           await open(meeting.location, meeting.id, opener, failedRefine ? target.resultId : meeting.resultId);
           if (failedRefine) $('review-state').textContent = '다시 정리하지 못했습니다. 평가는 저장되어 있고 앞선 결과는 그대로입니다.';
-          state.refining = null;
+          if (finishedRefine) state.refining = null;
         }
         // 녹음 뒤 자동 분석이 체험 소진으로 멈췄으면 같은 안내와 함께 AI 설정을 연다.
         if (!state.active && state.lastState && meeting.state === 'failed' && meeting.message === Flow.EXHAUSTED_MESSAGE && !$('settings').open) { message(meeting.message); openSettings(); }

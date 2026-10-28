@@ -200,10 +200,10 @@ final class Store {
     JSONObject saveReview(String location,String id,String resultId,Integer stars,String comment)throws Exception {
         if(stars!=null&&(stars<1||stars>5))throw new IOException("별점은 1~5 중에서 골라 주세요.");
         if(comment==null)comment="";if(comment.length()>1000)throw new IOException("의견은 1,000자 이하로 입력하세요.");
-        if(stars==null&&comment.trim().isEmpty())throw new IOException("별점이나 의견을 입력하세요.");
+        if(stars==null&&JsonText.trim(comment).isEmpty())throw new IOException("별점이나 의견을 입력하세요.");
         JSONObject target=result(location,id,resultId);if(!target.has("minutes"))throw new IOException("정리된 결과에만 평가를 남길 수 있습니다.");
         String selected=target.getString("resultId");java.text.SimpleDateFormat date=new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.ROOT);date.setTimeZone(TimeZone.getTimeZone("UTC"));
-        JSONObject review=new JSONObject().put("version",1).put("stars",stars==null?JSONObject.NULL:stars).put("comment",comment).put("savedAt",date.format(new Date()));
+        JSONObject review=new JSONObject().put("version",1).put("stars",stars==null?JSONObject.NULL:stars).put("comment",JsonText.trim(comment)).put("savedAt",date.format(new Date()));
         write(new File(directory(location,id),"평가-"+selected+".json"),review.toString(2));return review;
     }
     static String notes(JSONObject input) throws IOException {

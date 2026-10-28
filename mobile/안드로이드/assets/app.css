@@ -111,6 +111,7 @@ legend { padding: 0; margin-bottom: 4px; font-size: 13px; font-weight: 600; colo
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--tap); padding: 10px 16px; border: 1px solid var(--rule-strong); border-radius: var(--radius-s); background: var(--sheet); font-size: 15px; font-weight: 600; color: var(--ink); }
 .button:disabled { opacity: .5; }
 .button.primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+#refine { word-break: keep-all; }
 .button.stop { background: var(--rec); border-color: var(--rec); color: #fff; }
 .link { min-height: 44px; min-width: 44px; padding: 0 8px; border: 0; background: transparent; color: var(--teal-deep); font-size: 14px; font-weight: 600; }
 .icon-button { display: inline-grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: var(--radius-s); background: transparent; color: var(--ink-soft); }

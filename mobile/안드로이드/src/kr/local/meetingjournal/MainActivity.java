@@ -107,8 +107,9 @@ public final class MainActivity extends Activity {
                 if(selected.optJSONObject("minutes")==null)throw new IOException("정리된 결과에만 의견을 반영할 수 있습니다.");
                 File transcript=new File(store.directory(location,meetingId),"전사.txt");
                 if(!transcript.isFile()||JsonText.trim(Store.read(transcript)).isEmpty())throw new IOException("저장된 전사가 없어 의견을 반영할 수 없습니다.");
-                Intent request=new Intent(this,MeetingService.class).setAction("refine").putExtra("location",location).putExtra("id",meetingId).putExtra("resultId",selected.getString("resultId")).putExtra("feedback",feedback);
-                runOnUiThread(()->{try{startForegroundService(request);answer(id,new JSONObject().put("id",meetingId),null);}catch(Exception ex){answer(id,null,"의견 반영 서비스를 시작하지 못했습니다. 다시 시도하세요.");}});break;
+                String attemptId=data.getString("attemptId");if(attemptId.isEmpty()||attemptId.length()>128)throw new IOException("의견 반영 시도를 확인할 수 없습니다. 다시 시도하세요.");
+                Intent request=new Intent(this,MeetingService.class).setAction("refine").putExtra("location",location).putExtra("id",meetingId).putExtra("resultId",selected.getString("resultId")).putExtra("feedback",feedback).putExtra("attemptId",attemptId);
+                runOnUiThread(()->{try{startForegroundService(request);answer(id,new JSONObject().put("id",meetingId).put("attemptId",attemptId),null);}catch(Exception ex){answer(id,null,"의견 반영 서비스를 시작하지 못했습니다. 다시 시도하세요.");}});break;
             }
             case "open":{
                 String meetingId=data.getString("id");JSONObject record=store.result(location,meetingId,nullableString(data,"resultId"));

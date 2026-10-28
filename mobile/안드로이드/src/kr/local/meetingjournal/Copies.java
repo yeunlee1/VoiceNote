@@ -73,7 +73,7 @@ final class Copies {
         public boolean exists(String uri)throws Exception{try(InputStream in=Files.newInputStream(Paths.get(URI.create(uri)))){return true;}catch(FileNotFoundException|NoSuchFileException absent){return false;}}
     }
     static final class FolderUnavailable extends IOException {
-        FolderUnavailable(){super("고른 폴더를 찾을 수 없거나 권한이 끊겼습니다. 설정에서 폴더를 다시 고르세요.");}
+        FolderUnavailable(){super("고른 폴더를 찾을 수 없거나 권한이 끊겨 다시 골라야 합니다");}
     }
     static final class TreeSink implements Sink {
         final ContentResolver resolver;TreeSink(Context context){resolver=context.getContentResolver();}
@@ -101,7 +101,7 @@ final class Copies {
     static String error(Exception ex){
         if(ex.getSuppressed().length>0)return "사본 쓰기를 마치지 못했고 만들던 파일도 지우지 못했습니다.";
         if(ex instanceof FolderUnavailable)return ex.getMessage();
-        if(ex instanceof SecurityException||ex instanceof AccessDeniedException)return "고른 폴더에 쓸 권한이 없습니다. 폴더를 다시 골라 주세요.";
+        if(ex instanceof SecurityException||ex instanceof AccessDeniedException)return "고른 폴더를 찾을 수 없거나 권한이 끊겨 다시 골라야 합니다";
         if(ex instanceof FileNotFoundException)return "고른 폴더나 파일을 찾을 수 없습니다.";
         return "파일을 쓰지 못했습니다.";
     }
@@ -126,7 +126,7 @@ final class Copies {
         catch(Exception ex){String message=error(ex);entry.put("message",message);report.getJSONArray("failed").put(new JSONObject().put("kind",kind).put("message",message));}
         if(!entry.optBoolean("ok")&&previousSuccess!=null)entry=previousSuccess;
         JSONArray next=new JSONArray();for(int i=0;i<items.length();i++){JSONObject item=items.optJSONObject(i);if(item!=null&&!match(item,key,value,folder))next.put(item);}next.put(entry);
-        try{Store.write(log,new JSONObject().put("version",1).put("items",next).toString(2));}catch(Exception ex){report.getJSONArray("failed").put(new JSONObject().put("kind",kind).put("message","사본 저장 기록을 남기지 못했습니다. 고른 폴더의 파일을 확인하세요."));}
+        try{Store.write(log,new JSONObject().put("version",1).put("items",next).toString(2));}catch(Exception ex){report.getJSONArray("failed").put(new JSONObject().put("kind",kind).put("message","사본 저장 기록을 남기지 못했습니다"));}
         return next;
     }
     JSONObject copyResult(String location,String id,String resultId)throws Exception{
@@ -147,9 +147,9 @@ final class Copies {
     void statusItem(JSONObject report,JSONArray entries,String key,Object value,String folder,String kind)throws Exception{
         if(folder==null||folder.isEmpty()){report.getJSONArray("skipped").put(new JSONObject().put("kind",kind).put("reason","설정에서 저장 위치를 고르지 않았습니다."));return;}
         for(int i=0;i<entries.length();i++){JSONObject item=entries.optJSONObject(i);if(!match(item,key,value,folder))continue;
-            String message=item.optString("message","파일을 쓰지 못했습니다.");boolean exists=false;try{exists=item.optBoolean("ok")&&sink.exists(item.optString("uri"));}catch(Exception ex){message=error(ex);}
+            String message=item.optString("message","파일을 쓰지 못했습니다.");boolean exists=false,inaccessible=false;try{exists=item.optBoolean("ok")&&sink.exists(item.optString("uri"));}catch(Exception ex){message=error(ex);inaccessible=true;}
             if(exists)report.getJSONArray("written").put(new JSONObject().put("kind",kind).put("uri",item.optString("uri")).put("name",item.optString("name")));
-            else report.getJSONArray("failed").put(new JSONObject().put("kind",kind).put("message",item.optBoolean("ok")?"저장했던 사본을 열 수 없습니다. 폴더를 확인한 뒤 다시 저장하세요.":message));return;
+            else report.getJSONArray("failed").put(new JSONObject().put("kind",kind).put("message",item.optBoolean("ok")&&!inaccessible?"저장했던 사본을 찾을 수 없습니다":message));return;
         }
     }
     JSONObject status(String location,String id,String resultId)throws Exception{
