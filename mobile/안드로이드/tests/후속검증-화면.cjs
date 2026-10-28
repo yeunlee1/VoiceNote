@@ -11,6 +11,11 @@ module.exports=async({viewport,load,key,click,evaluate,until,wait,shot,check})=>
     await evaluate('__mock.copiesResult=__mock.copyReport');await click('#save-copies');await wait(60);
     check(width+'px N2 저장 실패는 같은 이유를 한 번씩',await evaluate("document.getElementById('copies-state').textContent==="+JSON.stringify('고른 폴더에 저장하지 못했습니다: '+reasons)));
     await shot('후속-'+width+'-사본저장실패.png');await click('#close-result');
+    for(const item of [{name:'폴더없음',kinds:['transcript','summaryMd','summaryTxt','audio'],reason:'고른 폴더를 찾을 수 없거나 권한이 끊겨 다시 골라야 합니다',labels:'전사문·요약본(.md)·요약본(.txt)·원음'},{name:'파일없음',kinds:['summaryTxt'],reason:'저장했던 사본을 찾을 수 없습니다',labels:'요약본(.txt)'}]){
+      await evaluate('__mock.copyReport='+JSON.stringify({ok:false,failed:item.kinds.map(kind=>({kind,message:item.reason})),written:[],skipped:[]}));await click('#history button');await wait(60);
+      check(width+'px N3 '+item.name+' 조회 이유는 쓰기 실패와 구분',await evaluate("document.getElementById('copies-state').textContent==="+JSON.stringify('고른 폴더의 사본을 확인하지 못했습니다: '+item.labels+' — '+item.reason+'. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.')));
+      await evaluate("document.getElementById('copies-panel').scrollIntoView()");await shot('조회-'+width+'-'+item.name+'.png');await click('#close-result');
+    }
     await load();await key();await click('#history button');await wait(60);
     await evaluate("document.getElementById('result-version').value='1233';document.getElementById('result-version').dispatchEvent(new Event('change'))");await wait(60);
     const text='  앞선 결과 의견을 보존합니다.\n  ';
