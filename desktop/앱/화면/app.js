@@ -1813,9 +1813,13 @@
     }
     ui["review-status"].textContent = "의견을 반영해 다시 정리하고 있습니다.";
     const done = await summarize(true, comment);
+    // 새 요약은 받았는데 저장만 실패했으면 화면에 남은 새 결과를 저장하라고 알린다.
+    const unsaved = !done && state.resultId !== target && Boolean(state.minutes) && !state.resultStored;
     ui["review-status"].textContent = done
       ? "의견을 반영한 새 결과를 저장했습니다. 앞선 결과는 ‘결과 버전’에서 다시 볼 수 있습니다."
-      : "다시 정리하지 못했습니다. 평가는 저장되어 있고 앞선 결과는 그대로입니다.";
+      : unsaved
+        ? "다시 정리한 결과를 저장하지 못했습니다. 화면의 새 결과를 확인하고 ‘회의록 저장’을 누르세요. 앞선 결과와 평가는 지워지지 않았습니다."
+        : "다시 정리하지 못했습니다. 평가는 저장되어 있고 앞선 결과는 그대로입니다.";
   }
 
   function runReview(task) {

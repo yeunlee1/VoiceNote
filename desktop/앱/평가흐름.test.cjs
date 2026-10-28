@@ -159,6 +159,18 @@ test('요약이 실패해도 평가는 저장되어 있고 앞선 결과가 그�
   assert.match(review.ui['review-status'].textContent, /평가는 저장되어 있고 앞선 결과는 그대로/);
 });
 
+test('다시 정리한 요약을 받았는데 저장이 실패하면 저장하라고 안내하고 앞선 결과가 그대로라고 하지 않는다', async () => {
+  const review = fixture({ routes: { ...opening(first), ...reviewRoute,
+    '/api/meetings/main': () => Response.json({ error: { code: 'STORE_UNAVAILABLE', message: '회의를 저장하지 못했습니다.' } }, { status: 503 }) } });
+  await review.openMeeting('main', first.id);
+  review.state.keyConfigured = true;
+  typeComment(review, '담당자가 틀렸어요.');
+  await review.refineSummary();
+  assert.ok(texts(review.ui.minutes).includes('의견 반영 요약'), '받은 새 요약은 화면에 남는다');
+  assert.equal(review.state.resultStored, false);
+  assert.equal(review.ui['review-status'].textContent, '다시 정리한 결과를 저장하지 못했습니다. 화면의 새 결과를 확인하고 ‘회의록 저장’을 누르세요. 앞선 결과와 평가는 지워지지 않았습니다.');
+});
+
 test('결과 버전에서 앞선 결과를 열면 그때의 본문·형식·평가가 보인다', async () => {
   const review = fixture({ routes: { ...opening(second, null, versions), ...opening(first, { version: 1, stars: 2, comment: '담당자가 틀렸어요.', savedAt: 'x' }, versions) } });
   await review.openMeeting('main', second.id);
