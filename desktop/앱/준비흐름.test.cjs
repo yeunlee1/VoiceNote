@@ -1,4 +1,4 @@
-// 회의 준비·동의·시작 조건과 상세내용·모델·사용량이 화면 상태에서 올바르게 이어지는지 검증한다.
+// 회의 준비·시작 조건과 상세내용·모델·사용량이 화면 상태에서 올바르게 이어지는지 검증한다.
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
@@ -27,78 +27,129 @@ function fixture({ summary, meeting, shared } = {}) {
         if (summary) return summary(summaryBodies.at(-1));
         return Response.json({ minutes: { overview: '시험', topics: [], decisions: [], actions: [], openQuestions: [] } });
       }
-      if (url === '/api/projects/1' && options.method === 'POST') return Response.json({ project: { ...JSON.parse(options.body), slot: 1, revision: 2 } });
-      if (url === '/api/projects/1/meetings' && options.method === 'POST') {
+      if (url === '/api/meetings/main' && options.method === 'POST') {
         meetingBodies.push(JSON.parse(options.body));
         return Response.json({ meeting: { dailySequence: 1 } });
       }
-      if (url === '/api/projects/1/meetings') return Response.json({ meetings: [] });
-      if (meeting && url.startsWith('/api/projects/1/meetings/')) return Response.json({ meeting });
+      if (url === '/api/meetings') return Response.json({ meetings: [], skipped: 0 });
+      if (meeting && url.startsWith('/api/meetings/main/')) return Response.json({ meeting, versions: [] });
       return Response.json({});
     } };
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
   const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/,
-    '  globalThis.review = { state, ui, refresh, applyProject, applyModels, prepareMeeting, startBlockers, summarize, documentObject, exportDocument, lines, openMeeting, recordCall, renderUsage };\n})();');
+    '  globalThis.review = { state, ui, refresh, resetMeetingForm, recordingMetadata, applyModels, prepareMeeting, startBlockers, summarize, documentObject, exportDocument, lines, openMeeting, recordCall, renderUsage };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const review = sandbox.review;
-  review.state.projects = Array.from({ length: 9 }, (_, i) => ({ slot: i + 1, name: i ? '' : '시험 프로젝트', title: i ? '' : '주간 회의', context: '', revision: 1 }));
-  review.applyProject(1);
+  review.resetMeetingForm();
   return { ...review, calls, summaryBodies, meetingBodies, focused: () => focused };
 }
 const config = { summaryModels: [{ id: 'model-a', label: '모델 A', maxOutputTokens: 32000 }, { id: 'model-b', label: '모델 B', maxOutputTokens: 32000 }], summaryModel: 'model-b' };
 
-test('첫 실행에 준비를 먼저 누르고 동의를 체크하면 준비를 다시 누르지 않아도 시작할 수 있다', () => {
-  const { state, ui, refresh, prepareMeeting } = fixture();
+const html = fs.readFileSync(path.join(__dirname, '화면/index.html'), 'utf8');
+const appSource = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
+
+test('키가 있는 기본 상태에서 회의 준비 없이 시작 버튼이 눌린다', () => {
+  const { state, ui, refresh, startBlockers } = fixture();
   state.keyConfigured = true;
-  prepareMeeting();
-  assert.equal(state.setupOpen, true);
-  assert.equal(ui.start.disabled, true);
-  ui['meeting-notes'].value = '안건 1';
-  ui['record-consent'].checked = true;
-  ui['ai-consent'].checked = true;
   refresh();
+  assert.equal(state.setupOpen, false);
+  assert.deepEqual([...startBlockers()], []);
   assert.equal(ui.start.disabled, false);
   assert.equal(ui['start-hint'].dataset.state, 'ready');
 });
 
-test('키나 동의가 없어도 준비 버튼은 폼을 열고 부족한 조건을 구체적으로 안내한다', () => {
+test('키가 없어도 준비 버튼은 폼을 열고 부족한 조건을 구체적으로 안내한다', () => {
   const { state, ui, refresh, prepareMeeting, startBlockers } = fixture();
   refresh();
   assert.equal(ui.prepare.disabled, false);
   prepareMeeting();
   assert.equal(ui['meeting-setup'].hidden, false);
   assert.equal(ui.prepare.attributes['aria-expanded'], 'true');
-  const blockers = startBlockers().join(' ');
-  assert.match(blockers, /API 키/);
-  assert.match(blockers, /녹음 동의/);
-  assert.match(blockers, /AI 분석 동의/);
+  assert.match(startBlockers().join(' '), /API 키/);
   assert.equal(ui.start.disabled, true);
-  ui.title.value = '';
-  ui['record-consent'].checked = true;
-  ui['ai-consent'].checked = true;
   state.keyConfigured = true;
   refresh();
-  assert.deepEqual([...startBlockers()], ['‘회의 준비’에서 회의명을 입력하세요.']);
+  assert.deepEqual([...startBlockers()], []);
+  assert.equal(ui.start.disabled, false);
+});
+
+test('시작 버튼 아래에 정해진 안내 한 줄이 보인다', () => {
+  const notice = /<p id="consent-notice"([^>]*)>([^<]*)<\/p>/.exec(html);
+  assert.ok(notice, '안내 문단이 있다');
+  assert.equal(notice[2], '녹음 전에 참석자에게 녹음과 AI 분석(OpenAI 전송)을 알려 주세요.');
+  assert.doesNotMatch(notice[1], /hidden/);
+  assert.ok(html.indexOf('id="start"') < html.indexOf('id="consent-notice"'), '시작 버튼 아래에 있다');
+  assert.doesNotMatch(appSource, /consent-notice/, '화면 상태와 관계없이 늘 보인다');
+});
+
+test('진행 중·날짜 형식·메모 4,001자·저장 안 된 내 형식은 여전히 막는다', () => {
+  const { state, ui, refresh, startBlockers } = fixture();
+  state.keyConfigured = true;
+  refresh();
+  assert.equal(ui.start.disabled, false);
+  for (const key of ['flowBusy', 'permissionPending', 'archiveBusy']) {
+    state[key] = true;
+    refresh();
+    assert.equal(ui.start.disabled, true, key);
+    state[key] = false;
+  }
+  ui.date.value = '';
+  assert.match(startBlockers().join(' '), /회의 날짜/);
+  ui.date.value = '2026-10-23';
+  ui['meeting-notes'].value = '가'.repeat(4001);
+  assert.match(startBlockers().join(' '), /4,000자/);
+  ui['meeting-notes'].value = '가'.repeat(4000);
+  assert.deepEqual([...startBlockers()], []);
+  ui['output-format'].value = 'custom';
+  assert.match(startBlockers().join(' '), /내 형식/);
+  refresh();
   assert.equal(ui.start.disabled, true);
 });
 
-test('새 프로젝트를 고르면 준비 양식을 열고 이름 입력칸에 포커스한다', () => {
-  const { state, applyProject, prepareMeeting, ui, focused } = fixture();
-  applyProject(2);
-  assert.equal(state.setupOpen, true);
-  prepareMeeting();
-  assert.equal(focused(), ui['project-name']);
+test('프로젝트 이름과 동의 체크는 화면에 없다', () => {
+  for (const id of ['project-name', 'record-consent', 'ai-consent', 'project-presets', 'header-project', 'selected-project', 'meeting-context', 'save-preset', 'delete-preset'])
+    assert.equal(html.includes(`id="${id}"`) || appSource.includes(`"${id}"`), false, id);
+  assert.doesNotMatch(html, /동의를 확인했습니다|동의합니다/);
 });
 
-test('녹음 중에는 프로젝트·회의 정보·AI 설정 변경을 잠근다', () => {
+test('회의명은 선택 입력으로 남고 빈칸 안내가 보인다', () => {
+  // 좁은 화면에서 안내가 잘리지 않도록 입력칸 속 자리표시자가 아니라 칸 이름 아래 안내로 보여 준다.
+  const label = /<label class="field field-wide">회의명 <span class="field-note">([^<]*)<\/span><input id="title"([^>]*)>/.exec(html);
+  assert.ok(label, '회의명 칸은 한 줄 전체를 쓰고 안내를 붙인다');
+  assert.equal(label[1], '선택 · 비워 두면 AI가 회의 내용을 보고 정합니다');
+  assert.doesNotMatch(label[2], /required|placeholder/);
+});
+
+test('회의명을 비워도 시작할 수 있고, 적은 회의명은 녹음·요약 요청에 그대로 들어간다', async () => {
+  const { state, ui, refresh, startBlockers, recordingMetadata, summarize, summaryBodies } = fixture();
+  state.keyConfigured = true;
+  ui.title.value = '';
+  refresh();
+  assert.deepEqual([...startBlockers()], []);
+  assert.equal(ui.start.disabled, false);
+  ui.title.value = '주간 점검 회의';
+  assert.equal(recordingMetadata().title, '주간 점검 회의');
+  assert.equal('context' in recordingMetadata(), false);
+  ui.transcript.value = '발언';
+  assert.equal(await summarize(true), true);
+  assert.equal(summaryBodies[0].title, '주간 점검 회의');
+});
+
+test('회의 준비를 열면 비어 있는 회의명 칸에 먼저 포커스한다', () => {
+  const { prepareMeeting, ui, focused } = fixture();
+  prepareMeeting();
+  assert.equal(focused(), ui.title);
+});
+
+test('녹음 중에는 회의 정보·AI 설정 변경을 잠근다', () => {
   const { state, ui, refresh, applyModels } = fixture();
   applyModels(config);
   state.keyConfigured = true;
   state.recorders.add({});
   state.recorder = { part: { chunkBytes: 0 } };
   refresh();
-  for (const id of ['prepare', 'project-name', 'title', 'meeting-notes', 'summary-model', 'save-key', 'remove-key', 'api-key']) assert.equal(ui[id].disabled, true, id);
+  for (const id of ['prepare', 'title', 'meeting-notes', 'summary-model', 'save-key', 'remove-key', 'api-key']) assert.equal(ui[id].disabled, true, id);
   assert.equal(ui['settings-lock'].hidden, false);
   assert.equal(ui.stop.disabled, false);
 });
@@ -110,7 +161,6 @@ test('요약 요청에 상세내용과 서버 목록에서 고른 모델을 보�
       aiCall: { kind: 'summary', model: body.model, sent: true, usage } }) });
   applyModels(config);
   state.keyConfigured = true;
-  ui['ai-consent'].checked = true;
   ui['meeting-notes'].value = '안건: 표준 양식 확정';
   ui.transcript.value = '양식을 확정합니다.';
   assert.equal(await summarize(true), true);
@@ -135,7 +185,6 @@ test('사용량을 주지 않은 응답과 과금된 실패 응답은 미확인 
   } });
   applyModels(config);
   state.keyConfigured = true;
-  ui['ai-consent'].checked = true;
   ui.transcript.value = '발언';
   assert.equal(await summarize(true), false);
   assert.equal(await summarize(true), true);
@@ -149,7 +198,6 @@ test('사용량을 주지 않은 응답과 과금된 실패 응답은 미확인 
 test('모델 목록이 없는 옛 서버에서는 모델을 보내지 않고 사용량이 없으면 미제공으로 표시한다', async () => {
   const { state, ui, summarize, summaryBodies, renderUsage } = fixture();
   state.keyConfigured = true;
-  ui['ai-consent'].checked = true;
   ui.transcript.value = '발언';
   assert.equal(await summarize(true), true);
   assert.equal('model' in summaryBodies[0], false);
@@ -173,7 +221,7 @@ test('지난 회의를 열면 상세내용과 저장된 사용량을 복원하�
   const { state, ui, openMeeting, startBlockers } = fixture({ meeting: { id, title: '주간 회의', date: '2026-10-01', participants: '', context: '', notes: '복원할 안건',
     transcript: '발언', minutes: { overview: '시험', topics: [], decisions: [], actions: [], openQuestions: [] }, dailySequence: 1,
     analysis: { summaryModel: 'model-a', usage: [{ kind: 'summary', model: 'model-a', requests: 1, measuredRequests: 1, unknownRequests: 0, inputTokens: 3, outputTokens: 2, totalTokens: 5 }] } } });
-  await openMeeting(id);
+  await openMeeting('main', id);
   assert.equal(ui['meeting-notes'].value, '복원할 안건');
   assert.equal(state.usage[0].totalTokens, 5);
   assert.equal(ui['meeting-detail'].open, true);
@@ -208,9 +256,8 @@ test('저장한 회의를 다시 분석하면 실패해도 이전 사용량을 �
       if (count === 1) return Response.json({ error: { code: 'AI_UNAVAILABLE', message: '시험 실패', aiCall: { callId: 'call_fail00001', kind: 'summary', model: 'model-a', sent: true, usage: null } } }, { status: 503 });
       return Response.json({ minutes: { overview: '새 결과', topics: [], decisions: [], actions: [], openQuestions: [] }, model: 'model-a', aiCall: { callId: 'call_ok0000001', kind: 'summary', model: 'model-a', sent: true, usage } });
     } });
-  await openMeeting(id);
+  await openMeeting('main', id);
   state.keyConfigured = true;
-  ui['ai-consent'].checked = true;
   ui.transcript.value = '발언을 고쳐 다시 분석합니다.';
   assert.equal(await summarize(true), false);
   assert.equal(state.usage[0].requests, 2);
@@ -229,7 +276,7 @@ test('새 회의를 준비하면 이전 회의의 사용량과 callId를 비운�
   const { state, openMeeting, prepareMeeting } = fixture({ meeting: { id, title: '주간 회의', date: '2026-10-01', participants: '', context: '', transcript: '발언',
     minutes: { overview: '이전', topics: [], decisions: [], actions: [], openQuestions: [] }, dailySequence: 1,
     analysis: { summaryModel: 'model-a', callIds: ['call_old000001'], usage: [{ kind: 'summary', model: 'model-a', requests: 1, inputTokens: 3, outputTokens: 2, totalTokens: 5 }] } } });
-  await openMeeting(id);
+  await openMeeting('main', id);
   assert.equal(state.usage.length, 1);
   prepareMeeting();
   assert.equal(state.usage.length, 0);

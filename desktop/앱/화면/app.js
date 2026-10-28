@@ -3,16 +3,16 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
+  // 사본을 쓸 폴더 종류. 설정의 storage 칸과 화면의 storage-·pick-·clear- 이름에 같이 쓴다.
+  const STORAGE_KINDS = ["audio", "transcript", "summary"];
   const ui = Object.fromEntries(
     [
       "title",
-      "project-presets", "project-name", "selected-project", "save-preset", "delete-preset", "prepare",
+      "prepare",
       "workflow-status", "meeting-setup", "retry-analysis", "archive-status", "save-archive",
       "history-status", "meeting-history",
       "date",
       "participants",
-      "meeting-context",
-      "record-consent",
       "record-state",
       "microphone-volume",
       "microphone-status",
@@ -25,7 +25,6 @@
       "stop",
       "audio-parts",
       "audio-file",
-      "ai-consent",
       "transcript",
       "transcript-count",
       "transcribe",
@@ -44,28 +43,35 @@
       "clear",
       "shutdown",
       "status",
-      "meeting-notes", "start-hint", "stage", "header-project", "open-ai-settings", "ai-status-label",
-      "summary-model", "model-help", "settings-lock", "meeting-detail", "ai-settings", "detail-title",
+      "meeting-notes", "start-hint", "stage", "open-settings", "ai-status-label",
+      "summary-model", "model-help", "settings-lock", "meeting-detail", "settings", "detail-title",
       "detail-meta", "usage", "open-result", "open-result-label", "setup-close", "meeting-heading", "key-form",
-      "output-format", "export-settings", "import-settings", "settings-file", "settings-import", "settings-preview", "settings-import-file", "confirm-import",
-      "format-help", "format-example", "format-example-title", "format-example-text", "format-example-body", "custom-editor", "custom-name",
-      "custom-section-list", "custom-instruction", "custom-save", "custom-delete", "custom-status",
+      "output-format", "custom-missing", "open-format-settings",
+      "format-help", "format-example", "format-example-title", "format-example-text", "format-example-body", "custom-name",
+      "custom-sections", "custom-section-list", "custom-instruction", "custom-save", "custom-delete", "custom-status", "custom-preview",
+      "settings-ai", "settings-format", "settings-storage", "settings-file", "settings-data", "default-format", "storage-status",
+      ...STORAGE_KINDS.flatMap((kind) => [`storage-${kind}`, `pick-${kind}`, `clear-${kind}`]),
+      "export-settings", "import-settings", "settings-file-input", "settings-file-status", "settings-import", "settings-preview", "confirm-import", "open-data-folder",
+      "review", "review-comment", "save-review", "refine", "refine-cost", "review-status", "result-versions", "result-version-field", "refined-badge",
+      "copy-block", "copy-status", "copy-again", ...[1, 2, 3, 4, 5].map((stars) => `review-star-${stars}`),
       "tab-minutes", "tab-transcript", "panel-minutes", "panel-transcript", "transcript-view", "transcript-meta", "copy-result", "share-result", "save-result", "result-status",
     ].map((id) => [id, $(id)]),
   );
   const Formats = window.MeetingFormats;
   const formatLabels = Formats.LABELS;
   const outputFormat = (value) => (Object.hasOwn(formatLabels, value) ? value : "meeting");
-  const maxSettingsBytes = 128 * 1024;
   const state = {
     token: "",
-    projects: [], slot: 1, setupOpen: false, projectBusy: false, flowBusy: false, archiveBusy: false,
-    meetingId: null, resultId: null, recordingMetadata: null, audioStored: false, resultStored: false,
+    setupOpen: false, historyBusy: false, flowBusy: false, archiveBusy: false,
+    // 열린 회의가 든 보관함(main, p1~p3)과 그 녹음 id다. 새 녹음은 언제나 main에 만든다.
+    // 녹음이 서버에 있을 때만 recordingStored가 참이고, 녹음 없이 전사로 만든 회의는 meetingId(처음 결과 id)로 다음 결과를 잇는다.
+    location: "main", projectName: "", recordingId: null, recordingStored: false, meetingId: null, resultId: null, recordingMetadata: null, audioStored: false, resultStored: false,
     keyConfigured: false,
     keySaved: false,
     keyStorageError: "",
     keyBusy: false,
     settingsBusy: false,
+    settings: null,
     models: [],
     summaryModel: "",
     usage: [],
@@ -94,7 +100,6 @@
     summarySource: "",
     notesSaved: true,
     aiController: null,
-    pendingImport: null,
     minutesFormat: null,
     // customFormat은 저장된 내 형식, meetingCustom은 다시 연 회의에 기록된 당시 내 형식이다.
     customFormat: null,
@@ -103,6 +108,8 @@
     transcriptShown: null,
     access: { accessMode: "none", trialLimit: 3, trialRemaining: 0, mustRegister: true, unlocked: false, trialError: "" },
     analysisId: null,
+    // 같은 녹음(회의)의 결과 목록과 지금 결과의 평가·반영한 의견·사본 저장 결과다. 평가는 결과마다 따로 저장한다.
+    versions: [], feedback: "", review: null, reviewStars: null, reviewBusy: false, copies: null, copyBusy: false,
   };
 
   function applyAccess(data) {
@@ -116,14 +123,14 @@
     return state.keyConfigured || ["trial", "unlimited"].includes(state.access.accessMode);
   }
 
-  // 체험을 모두 쓴 뒤에도 분석 버튼은 눌리게 두고, 누르면 새 키 등록 안내와 AI 설정을 연다.
+  // 체험을 모두 쓴 뒤에도 분석 버튼은 눌리게 두고, 누르면 새 키 등록 안내와 설정 창을 연다.
   function needsNewKey() {
     return !state.keyConfigured && state.access.accessMode === "exhausted";
   }
 
   function promptNewKey() {
     announce("새로운 API키를 등록하세요.");
-    if (!ui["ai-settings"].open) openDialog(ui["ai-settings"], ui["open-ai-settings"]);
+    openSettings("settings-ai");
   }
 
   function withTrialWarning(message) {
@@ -290,7 +297,6 @@
 
   function summaryInput() {
     return JSON.stringify({
-      context: ui["meeting-context"].value.trim(),
       text: ui.transcript.value,
       title: ui.title.value.trim(),
       date: ui.date.value,
@@ -310,36 +316,39 @@
     return format === "custom" && currentCustom() ? { outputFormat: format, customFormat: currentCustom() } : { outputFormat: format === "custom" ? "meeting" : format };
   }
 
-  function rememberFormat(slot, value) {
-    try { localStorage.setItem(`voicenote.outputFormat.${slot}`, value); } catch {}
-  }
-
-  function rememberedFormat(project) {
-    let value = null;
-    try { value = localStorage.getItem(`voicenote.outputFormat.${project.slot}`); } catch {}
-    const format = outputFormat(value || project.outputFormat);
+  function defaultFormat() {
+    // 새 회의는 설정의 기본 출력 형식으로 시작한다. 내 형식인데 저장된 형식이 없으면 회의록으로 시작한다.
+    const format = outputFormat(state.settings?.defaultOutputFormat || "meeting");
     return format === "custom" && !state.customFormat ? "meeting" : format;
   }
 
   function updateCustomOption() {
-    const option = ui["output-format"].querySelector('option[value="custom"]');
-    option.textContent = state.customFormat ? `내 형식 · ${state.customFormat.name}` : "내 형식 (새로 만들기)";
+    // 회의 준비와 설정 창의 출력 형식 선택지 모두 저장된 내 형식 이름을 보여 준다.
+    const label = state.customFormat ? `내 형식 · ${state.customFormat.name}` : "내 형식 (아직 없음)";
+    for (const id of ["output-format", "default-format"]) ui[id].querySelector('option[value="custom"]').textContent = label;
   }
 
   function renderFormatExample() {
-    // 고른 형식으로 가상의 회의를 정리한 모습을 같은 화면 그리기 함수로 보여 준다.
+    // 회의 준비의 예시는 보기만 한다. 고른 형식으로 가상의 회의를 정리한 모습을 같은 화면 그리기 함수로 보여 준다.
     const open = !ui["format-example"].hidden;
     ui["format-help"].setAttribute("aria-expanded", String(open));
     ui["format-help"].textContent = open ? "예시 닫기" : "예시 보기";
     if (!open) return;
     const format = outputFormat(ui["output-format"].value);
-    const preview = format === "custom" ? editorValue(false) : null;
-    ui["format-example-title"].textContent = `${format === "custom" ? preview?.name || "내 형식" : formatLabels[format]} 예시`;
+    const custom = format === "custom" ? currentCustom() : null;
+    ui["format-example-title"].textContent = `${format === "custom" ? custom?.name || "내 형식" : formatLabels[format]} 예시`;
     ui["format-example-text"].textContent = `${Formats.DESCRIPTIONS[format]} 아래는 가상의 회의로 만든 예시입니다.`;
-    ui["custom-editor"].hidden = format !== "custom";
     ui["format-example-body"].replaceChildren();
-    if (format === "custom" && !preview) ui["format-example-body"].append(element("p", "항목을 하나 이상 고르면 예시가 보입니다.", "muted"));
-    else renderMinutesInto(ui["format-example-body"], Formats.SAMPLE.minutes, format, preview);
+    if (format === "custom" && !custom) ui["format-example-body"].append(element("p", "저장된 내 형식이 없습니다. 설정 › 출력 형식에서 먼저 만드세요.", "muted"));
+    else renderMinutesInto(ui["format-example-body"], Formats.SAMPLE.minutes, format, custom);
+  }
+
+  function renderCustomPreview() {
+    // 설정 창에서 편집 중인 내 형식으로 가상의 회의를 정리한 모습을 바로 보여 준다.
+    const preview = editorValue(false);
+    ui["custom-preview"].replaceChildren();
+    if (!preview) ui["custom-preview"].append(element("p", "항목을 하나 이상 고르면 예시가 보입니다.", "muted"));
+    else renderMinutesInto(ui["custom-preview"], Formats.SAMPLE.minutes, "custom", preview);
   }
 
   function loadEditor() {
@@ -352,6 +361,7 @@
     ui["custom-delete"].hidden = !state.customFormat;
     ui["custom-status"].textContent = state.customFormat ? "" : "아직 저장한 내 형식이 없습니다. 이름과 항목을 정하고 저장하세요.";
     renderEditorRows();
+    renderCustomPreview();
   }
 
   function renderEditorRows() {
@@ -363,12 +373,12 @@
       check.type = "checkbox";
       check.checked = row.on;
       check.setAttribute("aria-label", `${Formats.KEY_LABELS[row.key]} 넣기`);
-      check.addEventListener("change", () => { row.on = check.checked; renderFormatExample(); });
+      check.addEventListener("change", () => { row.on = check.checked; renderCustomPreview(); });
       const title = document.createElement("input");
       title.value = row.title;
       title.maxLength = Formats.LIMITS.title;
       title.setAttribute("aria-label", `${Formats.KEY_LABELS[row.key]} 항목 이름`);
-      title.addEventListener("input", () => { row.title = title.value; renderFormatExample(); });
+      title.addEventListener("input", () => { row.title = title.value; renderCustomPreview(); });
       const move = (label, delta, disabled) => {
         const button = element("button", label, "button button-quiet custom-move");
         button.type = "button";
@@ -377,7 +387,7 @@
         button.addEventListener("click", () => {
           [state.customRows[index], state.customRows[index + delta]] = [state.customRows[index + delta], state.customRows[index]];
           renderEditorRows();
-          renderFormatExample();
+          renderCustomPreview();
         });
         return button;
       };
@@ -413,7 +423,7 @@
     await api("/api/custom-format", { method: "DELETE" });
     state.customFormat = null;
     updateCustomOption();
-    if (ui["output-format"].value === "custom" && !state.meetingCustom) { ui["output-format"].value = "meeting"; rememberFormat(state.slot, "meeting"); }
+    if (ui["output-format"].value === "custom" && !state.meetingCustom) { ui["output-format"].value = defaultFormat(); }
     loadEditor();
     ui["custom-status"].textContent = "내 형식을 삭제했습니다.";
     renderFormatExample();
@@ -426,16 +436,17 @@
 
   function startBlockers() {
     const blockers = [];
-    if (!state.projects.length) blockers.push("프로젝트 목록을 불러오는 중입니다.");
     if (hasMeetingRecord()) blockers.push("지난 회의 기록이 열려 있습니다. ‘회의 준비’를 눌러 새 회의를 준비하세요.");
-    if (!canAnalyze()) blockers.push(state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요. 상단 ‘AI 설정’에서 등록합니다." : "상단 ‘AI 설정’에서 API 키를 등록하세요.");
-    if (state.modelError) blockers.push(`상단 ‘AI 설정’에서 요약 모델을 다시 선택하세요. ${state.modelError}`);
-    if (!ui["project-name"].value.trim()) blockers.push("‘회의 준비’에서 프로젝트 이름을 입력하세요.");
-    if (!ui.title.value.trim()) blockers.push("‘회의 준비’에서 회의명을 입력하세요.");
-    if (ui["output-format"].value === "custom" && !currentCustom()) blockers.push("‘회의 준비’의 예시 보기에서 내 형식을 먼저 저장하세요.");
-    if (!ui["record-consent"].checked) blockers.push("참석자 녹음 동의를 체크하세요.");
-    if (!ui["ai-consent"].checked) blockers.push("외부 AI 분석 동의를 체크하세요.");
+    if (!canAnalyze()) blockers.push(state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요. 상단 ‘설정’에서 등록합니다." : "상단 ‘설정’에서 API 키를 등록하세요.");
+    if (state.modelError) blockers.push(`상단 ‘설정’에서 요약 모델을 다시 선택하세요. ${state.modelError}`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ui.date.value)) blockers.push("‘회의 준비’에서 회의 날짜를 확인하세요.");
+    if (ui["meeting-notes"].value.length > 4000) blockers.push("‘회의 준비’의 상세 회의내용을 4,000자 이하로 줄이세요.");
+    if (customMissing()) blockers.push("설정 › 출력 형식에서 내 형식을 먼저 만드세요.");
     return blockers;
+  }
+
+  function customMissing() {
+    return outputFormat(ui["output-format"].value) === "custom" && !currentCustom();
   }
 
   function settingsLocked() {
@@ -483,25 +494,20 @@
   function refresh() {
     renderResultActions();
     const recording = Boolean(state.recorder && !state.recordingStopping);
-    const busy = Boolean(state.aiController) || state.keyBusy || state.projectBusy || state.archiveBusy;
+    const busy = Boolean(state.aiController) || state.keyBusy || state.historyBusy || state.archiveBusy;
     const locked = busy || state.flowBusy || state.permissionPending || state.recorders.size > 0;
-    ui.prepare.disabled = locked || !state.projects.length;
+    ui.prepare.disabled = locked;
     ui.prepare.setAttribute("aria-expanded", String(state.setupOpen));
     ui["meeting-setup"].hidden = !state.setupOpen;
-    ui["save-preset"].disabled = locked || !state.projects.length;
-    ui["delete-preset"].hidden = !state.projects[state.slot - 1]?.name;
-    ui["delete-preset"].disabled = locked || hasMeetingRecord();
     ui["save-archive"].disabled = locked || !state.minutes || stale() || state.resultStored;
     ui["save-archive"].hidden = !state.minutes || state.resultStored;
     ui["retry-analysis"].disabled = locked;
     ui.clear.disabled = locked;
-    ui.shutdown.disabled = state.flowBusy || state.archiveBusy || state.projectBusy;
-    for (const id of ["project-name", "title", "date", "output-format", "participants", "meeting-notes", "meeting-context", "transcript", "audio-file"])
+    ui.shutdown.disabled = state.flowBusy || state.archiveBusy || state.historyBusy;
+    for (const id of ["title", "date", "output-format", "participants", "meeting-notes", "transcript", "audio-file"])
       ui[id].disabled = Boolean(locked);
-    for (const id of ["export-settings", "import-settings", "confirm-import"]) ui[id].disabled = settingsTransferBlocked();
-    for (const button of ui["project-presets"].querySelectorAll("button")) button.disabled = Boolean(locked);
     for (const button of ui["meeting-history"].querySelectorAll("button")) button.disabled = Boolean(locked);
-    const allowedAI = (canAnalyze() || needsNewKey()) && ui["ai-consent"].checked && !busy;
+    const allowedAI = (canAnalyze() || needsNewKey()) && !busy;
     const canSendAudio = state.parts.some(
       (part) =>
         part.blob && part.blob.size <= state.maxAudioBytes && !part.applied,
@@ -530,13 +536,42 @@
     const title = ui.title.value.trim();
     ui["meeting-heading"].textContent = title || "새 회의";
     ui["detail-title"].textContent = title || "회의 기록";
-    ui["detail-meta"].textContent = [state.projects[state.slot - 1]?.name, ui.date.value, state.dailySequence && `${state.dailySequence}차 회의`]
+    ui["detail-meta"].textContent = [state.projectName && `이전 프로젝트: ${state.projectName}`, ui.date.value, state.dailySequence && `${state.dailySequence}차 회의`]
       .filter(Boolean).join(" · ");
     const lockedSettings = settingsLocked();
     for (const id of ["api-key", "persist-key", "save-key", "remove-key"]) ui[id].disabled = lockedSettings || state.keyBusy;
     ui["remove-key"].disabled ||= !state.keyConfigured;
     ui["summary-model"].disabled = lockedSettings || state.settingsBusy || !state.models.length;
     ui["settings-lock"].hidden = !lockedSettings;
+    // 설정 창의 출력 형식·저장 위치·설정 파일도 녹음·분석·저장 중이거나 설정을 저장하는 동안 잠근다.
+    const settingsBusy = lockedSettings || state.settingsBusy;
+    for (const id of ["default-format", "custom-name", "custom-sections", "custom-instruction", "custom-save", "custom-delete", "export-settings", "import-settings", "settings-file-input", "confirm-import"])
+      ui[id].disabled = settingsBusy;
+    for (const kind of STORAGE_KINDS) {
+      ui[`pick-${kind}`].disabled = settingsBusy;
+      ui[`clear-${kind}`].disabled = settingsBusy || !state.settings?.storage?.[kind];
+    }
+    ui["custom-missing"].hidden = !customMissing();
+    // 평가·다시 정리·사본 다시 저장은 저장된 결과에만 쓰고, 녹음·분석·저장 중에는 잠근다.
+    const reviewable = Boolean(state.minutes && state.resultStored && state.resultId);
+    const reviewLocked = locked || state.reviewBusy || !reviewable;
+    const comment = ui["review-comment"].value.trim();
+    ui.review.hidden = !reviewable;
+    for (let stars = 1; stars <= 5; stars++) {
+      const star = ui[`review-star-${stars}`];
+      star.setAttribute("aria-pressed", String(state.reviewStars === stars));
+      star.dataset.on = String(state.reviewStars !== null && stars <= state.reviewStars);
+      star.disabled = reviewLocked;
+    }
+    ui["review-comment"].disabled = reviewLocked;
+    ui["save-review"].disabled = reviewLocked || (state.reviewStars === null && !comment);
+    ui.refine.disabled = reviewLocked || !comment || stale();
+    ui["refine-cost"].hidden = !comment;
+    ui["copy-block"].hidden = !reviewable;
+    ui["copy-again"].disabled = locked || state.copyBusy || !reviewable;
+    // 평가·의견 반영·사본 저장이 끝나기 전에는 다른 결과로 바꾸지 않는다. 진행 중인 작업이 시작한 결과를 계속 가리키게 한다.
+    ui["result-versions"].disabled = locked || state.reviewBusy || state.copyBusy;
+    renderCopies();
     const { accessMode, trialRemaining, trialLimit } = state.access;
     ui["key-state"].textContent =
       state.keyStorageError ||
@@ -552,7 +587,7 @@
     const model = modelInfo();
     ui["ai-status-label"].textContent = !canAnalyze() ? "키 필요" : state.modelError ? "모델 선택 필요"
       : !state.keyConfigured && accessMode === "trial" ? `체험 ${trialRemaining}/${trialLimit}` : model?.label || "연결됨";
-    ui["open-ai-settings"].dataset.state = canAnalyze() && !state.modelError ? "ready" : "missing";
+    ui["open-settings"].dataset.state = canAnalyze() && !state.modelError ? "ready" : "missing";
     ui["model-help"].textContent = state.modelError ? state.modelError : !state.models.length
       ? "이 서버는 모델 목록을 제공하지 않아 서버 기본 모델로 요약합니다."
       : model
@@ -635,14 +670,27 @@
     state.usage = [];
     state.callIds = [];
     state.analysisModel = "";
+    state.versions = [];
+    state.feedback = "";
+    state.copies = null;
+    clearReview();
     renderMinutes();
     refresh();
+  }
+
+  function clearReview(review = null) {
+    // 결과가 바뀌면 그 결과의 평가를 보여 준다. 새 결과에는 아직 평가가 없다.
+    state.review = review;
+    state.reviewStars = review?.stars ?? null;
+    ui["review-comment"].value = review?.comment || "";
+    ui["review-status"].textContent = "";
+    renderVersions();
   }
 
   function recordingMetadata() {
     return {
       title: ui.title.value.trim(), date: ui.date.value, participants: ui.participants.value.trim(),
-      context: ui["meeting-context"].value.trim(), notes: ui["meeting-notes"].value.trim(), ...formatFields(),
+      notes: ui["meeting-notes"].value.trim(), ...formatFields(),
     };
   }
 
@@ -762,7 +810,7 @@
 
   function rotateRecording() {
     const previous = state.recorder;
-    if (!previous || state.recordingStopping || !ui["record-consent"].checked) return;
+    if (!previous || state.recordingStopping) return;
     try {
       startPart(state.stream, previous.recorder.mimeType);
       previous.recorder.stop();
@@ -772,21 +820,8 @@
     }
   }
 
-  // 브라우저 입력칸은 CRLF를 LF로 바꾸므로 줄바꿈만 맞춰 비교하고, 앞뒤 공백은 자르지 않는다.
-  const newlines = (value) => String(value ?? "").replace(/\r\n?/g, "\n");
-  function presetContext(project) {
-    const value = ui["meeting-context"].value;
-    return project && newlines(project.context) === newlines(value) ? project.context : value;
-  }
-
-  function presetChanged() {
-    const project = state.projects[state.slot - 1];
-    return !project || project.name !== ui["project-name"].value.trim() || project.title !== ui.title.value.trim()
-      || project.context !== presetContext(project);
-  }
-
   async function startRecording() {
-    if (state.flowBusy || state.projectBusy || state.archiveBusy || state.aiController) return;
+    if (state.flowBusy || state.historyBusy || state.archiveBusy || state.aiController) return;
     if (state.permissionPending || state.recorders.size) return;
     const blockers = startBlockers();
     if (blockers.length) {
@@ -798,14 +833,6 @@
       announce("이 브라우저에서 마이크 녹음을 사용할 수 없습니다.");
       return;
     }
-    if (presetChanged()) {
-      try {
-        await savePreset();
-      } catch (error) {
-        workflow(`프리셋을 저장하지 못해 녹음을 시작하지 않았습니다. ${error.message}`);
-        return;
-      }
-    }
     const generation = ++state.permissionGeneration;
     state.permissionPending = true;
     ui["record-state"].textContent = "마이크 허가 대기";
@@ -815,7 +842,7 @@
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       });
-      if (generation !== state.permissionGeneration || !ui["record-consent"].checked) {
+      if (generation !== state.permissionGeneration) {
         stopTracks(stream);
         return;
       }
@@ -828,7 +855,11 @@
       });
       clearParts();
       resetResult();
-      state.meetingId = newOperationId();
+      state.recordingId = newOperationId();
+      state.recordingStored = false;
+      state.meetingId = null;
+      state.location = "main";
+      state.projectName = "";
       state.recordingMetadata = recordingMetadata();
       state.audioStored = false;
       state.setupOpen = false;
@@ -931,11 +962,15 @@
     renderParts();
     resetResult();
     ui["record-state"].textContent = "파일 불러옴";
-    state.meetingId = newOperationId();
+    state.recordingId = newOperationId();
+    state.recordingStored = false;
+    state.meetingId = null;
+    state.location = "main";
+    state.projectName = "";
     state.recordingMetadata = null;
     state.audioStored = false;
     ui["retry-analysis"].hidden = false;
-    workflow("음성을 불러왔습니다. ‘저장·분석 다시 시도’를 누르면 프로젝트에 보관하고 분석합니다.");
+    workflow("음성을 불러왔습니다. ‘저장·분석 다시 시도’를 누르면 보관하고 분석합니다.");
     announce(`${files.length}개 파일을 이름 순서대로 불러왔습니다. 전사할 때만 외부로 전송됩니다.`);
   }
 
@@ -945,7 +980,7 @@
   }
 
   function assertAI(signal) {
-    if (signal.aborted || !ui["ai-consent"].checked || state.recorders.size)
+    if (signal.aborted || state.recorders.size)
       throw new DOMException("요청 취소", "AbortError");
   }
 
@@ -992,7 +1027,7 @@
 
   async function paidTask(task) {
     if (needsNewKey() && !state.aiController) return promptNewKey();
-    if (!canAnalyze() || !ui["ai-consent"].checked || state.aiController) return;
+    if (!canAnalyze() || state.aiController) return;
     state.trialWarning = "";
     const controller = new AbortController();
     // 분석 시도마다 새 식별자를 써서 분할·자동 재요청은 한 번으로, 명시적 재분석은 새 한 번으로 센다.
@@ -1007,7 +1042,7 @@
       if (error.mustRegister) {
         announce(withTrialWarning(error.message));
         api("/api/config").then((config) => { applyAccess(config); refresh(); }).catch(() => {});
-        if (!ui["ai-settings"].open) openDialog(ui["ai-settings"], ui["open-ai-settings"]);
+        openSettings("settings-ai");
       } else if (error.name === "AbortError") announce("요청을 취소했습니다. 원음과 전사는 유지됩니다.");
       else announce(withTrialWarning(`${error.message} 명시적으로 다시 요청하면 비용이 다시 발생할 수 있습니다.`));
       workflow(`${state.audioStored ? "음성은 저장되어 있습니다. " : ""}${error.name === "AbortError" ? "분석을 취소했습니다." : error.message}`);
@@ -1062,7 +1097,8 @@
     return sections;
   }
 
-  async function summarize(useExistingText = false) {
+  async function summarize(useExistingText = false, feedback = "") {
+    // feedback이 있으면 의견 반영 다시 정리다. 모든 구간 요청에 같은 의견을 넣고, 새 결과에 그 의견을 함께 저장한다.
     if (state.parts.length && !state.audioStored) return await finishMeeting();
     return await paidTask(async (signal) => {
       const transcript = useExistingText === true && ui.transcript.value.trim()
@@ -1076,8 +1112,8 @@
       if (!transcript) throw new Error("전사 내용이 비어 있습니다.");
       const source = summaryInput();
       const metadata = JSON.parse(source);
-      if (state.audioStored && state.meetingId) {
-        await api(`/api/projects/${state.slot}/recordings/${state.meetingId}/transcript`, {
+      if (!feedback && state.audioStored && state.recordingId) {
+        await api(`/api/recordings/${state.location}/${state.recordingId}/transcript`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: transcript }), signal,
         });
         assertAI(signal);
@@ -1089,7 +1125,7 @@
       async function summarizeSection(text, depth = 0) {
         assertAI(signal);
         if (summaryInput() !== source) throw new Error("전송 중 입력을 수정했습니다. 수정 내용은 유지했습니다. 다시 만들면 변경 내용을 반영합니다.");
-        const body = JSON.stringify({ ...metadata, text, previousMinutes, ...(state.models.length && state.summaryModel ? { model: state.summaryModel } : {}) });
+        const body = JSON.stringify({ ...metadata, text, previousMinutes, ...(feedback ? { feedback } : {}), ...(state.models.length && state.summaryModel ? { model: state.summaryModel } : {}) });
         const cached = state.summarySteps.find((step) => step.body === body);
         if (cached?.minutes) previousMinutes = cached.minutes;
         else if (cached?.sections) {
@@ -1135,12 +1171,16 @@
       state.notesSaved = false;
       state.resultId = newOperationId();
       state.resultStored = false;
+      state.feedback = feedback;
+      state.copies = null;
+      clearReview();
       renderMinutes();
       refresh();
       await archiveResult();
-      workflow("회의록 저장 완료. 이 프로젝트의 ‘지난 회의’에서 다시 열 수 있습니다.");
+      workflow("회의록 저장 완료. ‘지난 회의’에서 다시 열 수 있습니다.");
       ui["retry-analysis"].hidden = true;
-      announce(withTrialWarning(`${state.audioStored ? "음성과 " : ""}회의록을 보관했습니다. 내용을 검토하세요.`));
+      const copyFailure = state.copies?.failed?.length ? ` ${copyMessage(state.copies)}` : "";
+      announce(withTrialWarning(`${state.audioStored ? "음성과 " : ""}회의록을 보관했습니다. 내용을 검토하세요.${copyFailure}`));
     });
   }
 
@@ -1356,8 +1396,7 @@
 
   function documentObject() {
     return {
-      projectName: state.projects[state.slot - 1]?.name || "",
-      context: ui["meeting-context"].value.trim(),
+      ...(state.projectName ? { projectName: state.projectName } : {}),
       title: ui.title.value.trim(),
       date: ui.date.value,
       dailySequence: state.dailySequence,
@@ -1369,6 +1408,7 @@
         transcript: part.transcript,
       })),
       ...formatFields(),
+      ...(state.feedback ? { feedback: state.feedback } : {}),
       minutes: state.minutes,
       analysis: { summaryModel: state.analysisModel || state.summaryModel || null, usage: usageTools().normalize(state.usage), callIds: state.callIds },
     };
@@ -1380,7 +1420,7 @@
     const head = [
       `# ${data.title || "회의록"}`,
       "",
-      `프로젝트: ${data.projectName}`,
+      ...(data.projectName ? [`프로젝트: ${data.projectName}`] : []),
       `날짜: ${data.date || "미입력"}${data.dailySequence ? ` · ${data.dailySequence}차 회의` : ""}`,
       `참석자: ${data.participants || "미입력"}`,
       "",
@@ -1444,7 +1484,7 @@
       state.permissionPending ||
       Boolean(state.recorders.size) ||
       Boolean(state.aiController) ||
-      state.flowBusy || state.archiveBusy || state.projectBusy ||
+      state.flowBusy || state.archiveBusy || state.historyBusy ||
       state.parts.some((part) => part.blob && !part.saved) ||
       Boolean((ui.transcript.value || state.minutes) && !state.notesSaved)
     );
@@ -1472,16 +1512,17 @@
     stopTimer();
     clearParts();
     resetResult();
+    state.recordingId = null;
+    state.recordingStored = false;
     state.meetingId = null;
+    state.location = "main";
+    state.projectName = "";
     state.recordingMetadata = null;
     state.audioStored = false;
     ui["retry-analysis"].hidden = true;
     ui.title.value = "";
     ui.participants.value = "";
     ui["meeting-notes"].value = "";
-    ui["meeting-context"].value = "";
-    ui["record-consent"].checked = false;
-    ui["ai-consent"].checked = false;
     ui["record-state"].textContent = "대기";
     ui.timer.textContent = "00:00";
     refresh();
@@ -1572,109 +1613,36 @@
     return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   }
 
-  function renderPresets() {
-    const slot = state.slot;
-    const project = state.projects[slot - 1];
-    ui["selected-project"].textContent = `${slot}번 프로젝트 · ${project.name || "새 프로젝트 등록"}`;
-    ui["header-project"].textContent = project.name || `${slot}번 · 새 프로젝트`;
-    ui["project-presets"].replaceChildren();
-    // 저장된 프로젝트와 지금 등록 중인 빈 칸만 보이고, 빈 칸이 남아 있으면 추가 버튼을 둔다.
-    for (const preset of state.projects.filter((item) => item.name || item.slot === slot)) {
-      const button = element("button", "", "preset-button");
-      button.type = "button";
-      button.setAttribute("aria-pressed", String(preset.slot === slot));
-      button.append(element("span", preset.slot, "preset-no"), element("span", preset.name || "새 프로젝트 등록", "preset-name"));
-      button.addEventListener("click", () => selectProject(preset.slot));
-      ui["project-presets"].append(button);
-    }
-    const empty = state.projects.find((item) => !item.name);
-    if (empty && project.name) {
-      const add = element("button", `+ 프로젝트 추가 (최대 ${state.projects.length}개)`, "preset-add");
-      add.type = "button";
-      add.addEventListener("click", () => selectProject(empty.slot));
-      ui["project-presets"].append(add);
-    }
-  }
-
-  function applyProject(slot, resetDate = true) {
-    state.slot = slot;
-    const project = state.projects[slot - 1];
-    ui["project-name"].value = project.name;
-    ui.title.value = project.title;
+  function resetMeetingForm(resetDate = true) {
+    // 새 회의 양식을 비우고 설정의 기본 출력 형식으로 시작한다. 회의명은 비워 두면 분석할 때 AI가 정한다.
+    ui.title.value = "";
     if (resetDate) ui.date.value = today();
-    ui["meeting-context"].value = project.context;
-    ui["output-format"].value = rememberedFormat(project);
+    ui["output-format"].value = defaultFormat();
     state.meetingCustom = null;
-    renderPresets();
-    if (!project.name) state.setupOpen = true;
-    workflow("‘회의 준비’를 눌러 회의 정보를 확인하고, 동의를 체크한 뒤 ‘회의 시작’을 누르세요.", true);
+    workflow("‘회의 시작’을 누르면 바로 녹음합니다. 회의명·참석자·메모는 ‘회의 준비’에서 적을 수 있습니다.", true);
     refresh();
-  }
-
-  async function selectProject(slot) {
-    if (state.projectBusy || state.flowBusy || state.recorders.size || state.aiController || state.permissionPending) return;
-    if (hasUnsavedWork() && !confirm("저장되지 않은 현재 회의 내용을 비우고 다른 프로젝트로 이동할까요?")) return;
-    state.projectBusy = true;
-    refresh();
-    try {
-      const result = await api("/api/projects");
-      state.projects = result.projects;
-      clearLocal(true);
-      applyProject(slot);
-      await loadHistory();
-    } catch (error) { workflow(error.message); }
-    finally { state.projectBusy = false; refresh(); }
-  }
-
-  async function savePreset() {
-    const project = state.projects[state.slot - 1];
-    if (!project || state.projectBusy) throw new Error("프로젝트를 먼저 불러오세요.");
-    const input = { name: ui["project-name"].value.trim(), title: ui.title.value.trim(), context: presetContext(project),
-      outputFormat: outputFormat(project.outputFormat), revision: project.revision };
-    if (!input.name || !input.title) throw new Error("프로젝트 이름과 회의명을 입력하세요.");
-    state.projectBusy = true;
-    refresh();
-    try {
-      const result = await api(`/api/projects/${state.slot}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
-      state.projects[state.slot - 1] = result.project;
-      applyProject(state.slot, false);
-      workflow(`${input.name} 프리셋을 저장했습니다. 다음 실행에서도 불러옵니다.`);
-    } finally { state.projectBusy = false; refresh(); }
-  }
-
-  async function deletePreset() {
-    const project = state.projects[state.slot - 1];
-    if (!project?.name || state.projectBusy) return;
-    if (!confirm(`‘${project.name}’ 프로젝트를 삭제할까요? 회의 기록이 있는 프로젝트는 삭제되지 않습니다.`)) return;
-    state.projectBusy = true;
-    refresh();
-    try {
-      const result = await api(`/api/projects/${state.slot}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision: project.revision }) });
-      state.projects = result.projects;
-      clearLocal(true);
-      applyProject(state.projects.find((item) => item.name)?.slot || 1);
-      await loadHistory();
-      workflow(`${project.name} 프로젝트를 삭제했습니다.`);
-    } finally { state.projectBusy = false; refresh(); }
   }
 
   function focusSetup() {
-    const target = ["project-name", "title"].map((id) => ui[id]).find((input) => !input.value.trim()) || ui["meeting-notes"];
+    const target = ui.title.value.trim() ? ui["meeting-notes"] : ui.title;
     target.focus?.();
   }
 
   function prepareMeeting() {
-    if (state.projectBusy || state.flowBusy || state.recorders.size || state.aiController || state.permissionPending) return;
+    if (state.historyBusy || state.flowBusy || state.recorders.size || state.aiController || state.permissionPending) return;
     if (hasMeetingRecord()) {
       if (hasUnsavedWork() && !confirm("저장하지 않은 이전 회의 내용을 비우고 새 회의를 준비할까요?")) return;
       clearParts();
       resetResult();
+      state.recordingId = null;
+      state.recordingStored = false;
       state.meetingId = null;
+      state.location = "main";
+      state.projectName = "";
       state.recordingMetadata = null;
       state.audioStored = false;
-      const project = state.projects[state.slot - 1];
-      ui.title.value = project?.title || "";
-      ui["output-format"].value = project ? rememberedFormat(project) : "meeting";
+      ui.title.value = "";
+      ui["output-format"].value = defaultFormat();
       state.meetingCustom = null;
       ui.date.value = today();
       ui.participants.value = "";
@@ -1682,45 +1650,46 @@
       ui["record-state"].textContent = "대기";
       ui.timer.textContent = "00:00";
       ui["retry-analysis"].hidden = true;
-      ui["archive-status"].textContent = "회의 종료 후 음성과 회의록을 이 프로젝트에 보관합니다.";
+      ui["archive-status"].textContent = "회의 종료 후 음성과 회의록을 지난 회의에 보관합니다.";
     }
     state.setupOpen = true;
     refresh();
     focusSetup();
-    workflow("회의 정보를 입력하고 동의를 체크하면 바로 ‘회의 시작’을 누를 수 있습니다.", true);
+    workflow("필요한 회의 정보만 적고 ‘회의 시작’을 누르세요. 회의명을 비워 두면 AI가 정합니다.", true);
   }
 
   async function loadHistory() {
-    const slot = state.slot;
+    // 모든 보관함의 회의를 한 목록으로 보여 준다. 옛 프로젝트 기록에는 그때 프로젝트 이름을 작게 붙인다.
     try {
-      const result = await api(`/api/projects/${slot}/meetings`);
-      if (slot !== state.slot) return;
-      ui["history-status"].textContent = `${state.projects[slot - 1]?.name || `${slot}번 프로젝트`} · ${result.meetings.length}개 회의`;
+      const result = await api("/api/meetings");
+      ui["history-status"].textContent = `${result.meetings.length}개 회의${result.skipped ? ` · 읽지 못한 기록 ${result.skipped}개` : ""}`;
       ui["meeting-history"].replaceChildren();
       if (!result.meetings.length) ui["meeting-history"].append(element("p", "아직 보관된 회의가 없습니다."));
       for (const meeting of result.meetings) {
         const button = element("button", "", "history-button");
         button.type = "button";
         const format = outputFormat(meeting.outputFormat);
-        button.append(element("strong", `${meeting.date || "날짜 미입력"} · ${meeting.dailySequence || 1}차 · ${meeting.title}`),
-          element("span", `${meeting.analyzed ? `${format === "meeting" ? "회의록" : formatLabels[format]} 완료 · 눌러서 보기` : "분석 대기"} · 음성 ${meeting.audioCount}개`));
-        button.addEventListener("click", () => openMeeting(meeting.id, button));
+        const status = [meeting.analyzed ? `${format === "meeting" ? "회의록" : formatLabels[format]} 완료 · 눌러서 보기` : "분석 대기", `음성 ${meeting.audioCount}개`, meeting.stars && `별 ${meeting.stars}개`];
+        button.append(element("strong", `${meeting.date || "날짜 미입력"} · ${meeting.dailySequence || 1}차 · ${meeting.title || "제목 미정 회의"}`),
+          element("span", status.filter(Boolean).join(" · ")));
+        if (meeting.projectName) button.append(element("span", `이전 프로젝트: ${meeting.projectName}`));
+        button.addEventListener("click", () => openMeeting(meeting.location, meeting.id, button));
         ui["meeting-history"].append(button);
       }
     } catch (error) { ui["history-status"].textContent = `목록 확인 실패. ${error.message}`; }
     refresh();
   }
 
-  async function openMeeting(id, opener) {
-    if (state.projectBusy || state.flowBusy || state.recorders.size || state.aiController) return;
+  async function openMeeting(location, id, opener) {
+    if (state.historyBusy || state.flowBusy || state.recorders.size || state.aiController || state.reviewBusy || state.copyBusy) return;
     if (hasUnsavedWork() && !confirm("현재 저장하지 않은 내용을 비우고 지난 회의를 열까요?")) return;
-    state.projectBusy = true;
+    state.historyBusy = true;
     refresh();
     try {
-      const { meeting } = await api(`/api/projects/${state.slot}/meetings/${id}`);
+      const { meeting, versions, review } = await api(`/api/meetings/${location}/${id}`);
       const parts = [];
       for (const audio of meeting.audio || []) {
-        const response = await fetch(`/api/projects/${state.slot}/recordings/${meeting.recordingId || id}/audio/${audio.index}`, { headers: { "X-Meeting-Token": state.token } });
+        const response = await fetch(`/api/recordings/${location}/${meeting.recordingId || id}/audio/${audio.index}`, { headers: { "X-Meeting-Token": state.token } });
         if (!response.ok) throw new Error("저장된 원음을 불러오지 못했습니다.");
         parts.push({ blob: await response.blob(), saved: true, diskSaved: true, transcript: "", applied: Boolean(meeting.transcript) });
       }
@@ -1728,14 +1697,17 @@
       ui.title.value = meeting.title;
       ui.date.value = meeting.date;
       ui.participants.value = meeting.participants;
-      ui["meeting-context"].value = meeting.context;
       ui["meeting-notes"].value = meeting.notes || "";
       state.meetingCustom = meeting.outputFormat === "custom" ? meeting.customFormat || null : null;
       ui["output-format"].value = outputFormat(meeting.outputFormat);
       ui.transcript.value = meeting.transcript;
       state.parts = parts.map(part => ({ ...part, url: URL.createObjectURL(part.blob) }));
-      state.meetingId = meeting.recordingId || id;
-      state.recordingMetadata = { title: meeting.title, date: meeting.date, participants: meeting.participants, context: meeting.context, notes: meeting.notes || "",
+      state.recordingId = meeting.recordingId || (meeting.minutes ? null : id);
+      state.recordingStored = Boolean(state.recordingId);
+      state.meetingId = state.recordingId ? null : meeting.meetingId || id;
+      state.location = location;
+      state.projectName = meeting.projectName || "";
+      state.recordingMetadata = { title: meeting.title, date: meeting.date, participants: meeting.participants, notes: meeting.notes || "",
         outputFormat: outputFormat(meeting.outputFormat), ...(state.meetingCustom ? { customFormat: state.meetingCustom } : {}) };
       state.audioStored = parts.length > 0 && (!meeting.expectedParts || meeting.expectedParts === parts.length);
       state.minutes = meeting.minutes;
@@ -1748,17 +1720,21 @@
       state.usage = usageTools().normalize(meeting.analysis?.usage);
       state.callIds = Array.isArray(meeting.analysis?.callIds) ? meeting.analysis.callIds.filter((id) => typeof id === "string") : [];
       state.analysisModel = meeting.analysis?.summaryModel || "";
+      state.versions = Array.isArray(versions) ? versions : [];
+      state.feedback = meeting.feedback || "";
+      state.copies = null;
+      clearReview(review || null);
       state.setupOpen = false;
       ui["record-state"].textContent = parts.length ? "보관된 음성" : "대기";
       renderParts();
       renderMinutes();
       ui["retry-analysis"].hidden = Boolean(meeting.minutes) || !state.audioStored;
-      ui["archive-status"].textContent = meeting.minutes ? "프로젝트에 보관된 회의록입니다." : meeting.transcript ? "음성과 전사 원문은 보관되어 있습니다. 다시 분석하면 전사를 재사용합니다." : "음성은 보관되어 있고 분석은 완료되지 않았습니다.";
+      ui["archive-status"].textContent = meeting.minutes ? "보관된 회의록입니다." : meeting.transcript ? "음성과 전사 원문은 보관되어 있습니다. 다시 분석하면 전사를 재사용합니다." : "음성은 보관되어 있고 분석은 완료되지 않았습니다.";
       if (meeting.transcript && !meeting.minutes) document.getElementById("transcript-details").open = true;
       openDialog(ui["meeting-detail"], opener);
-      workflow(meeting.minutes ? "지난 회의를 불러왔습니다. ‘회의록 보기’에서 결과·내보내기·재분석을 할 수 있습니다." : state.audioStored ? "음성 저장 완료. AI 연결과 전송 동의를 확인한 뒤 다시 분석하세요." : "일부 음성 저장이 끝나지 않은 회의입니다. 원래 녹음 창에서 저장을 완료하세요.");
+      workflow(meeting.minutes ? "지난 회의를 불러왔습니다. ‘회의록 보기’에서 결과·내보내기·재분석을 할 수 있습니다." : state.audioStored ? "음성 저장 완료. AI 연결을 확인한 뒤 다시 분석하세요." : "일부 음성 저장이 끝나지 않은 회의입니다. 원래 녹음 창에서 저장을 완료하세요.");
     } catch (error) { workflow(error.message); }
-    finally { state.projectBusy = false; refresh(); }
+    finally { state.historyBusy = false; refresh(); }
   }
 
   async function archiveResult() {
@@ -1766,13 +1742,19 @@
     state.archiveBusy = true;
     state.resultId ||= newOperationId();
     refresh();
-    const document = { ...documentObject(), id: state.resultId, ...(state.audioStored ? { recordingId: state.meetingId } : {}) };
+    const document = { ...documentObject(), id: state.resultId, ...(state.recordingStored ? { recordingId: state.recordingId } : state.meetingId ? { meetingId: state.meetingId } : {}) };
     try {
-      const saved = await api(`/api/projects/${state.slot}/meetings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(document) });
+      const saved = await api(`/api/meetings/${state.location}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(document) });
       state.dailySequence = saved.meeting?.dailySequence;
       state.resultStored = true;
       state.notesSaved = true;
-      ui["archive-status"].textContent = `${document.projectName} · 전사 원문과 회의록 저장 완료`;
+      // 저장한 결과를 결과 버전 끝에 더하고, 고른 폴더에 쓴 사본 결과를 결과 창에 보여 준다.
+      const record = saved.meeting;
+      if (record?.id) state.versions = [...state.versions.filter((version) => version.id !== record.id),
+        { id: record.id, savedAt: record.savedAt, outputFormat: outputFormat(record.outputFormat), refined: Boolean(record.feedback) }];
+      state.copies = saved.copies || null;
+      renderVersions();
+      ui["archive-status"].textContent = "전사 원문과 회의록 저장 완료";
       await loadHistory();
     } catch (error) {
       ui["archive-status"].textContent = "회의록 저장 실패. 결과는 화면에 남아 있습니다. 저장을 다시 시도하세요.";
@@ -1780,8 +1762,123 @@
     } finally { state.archiveBusy = false; refresh(); }
   }
 
+  function savedLabel(value) {
+    try {
+      return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(value));
+    } catch { return ""; }
+  }
+
+  function renderVersions() {
+    // 같은 회의의 결과를 저장한 순서대로 보여 주고 지금 열린 결과를 고른 상태로 둔다. 결과가 하나뿐이면 목록을 숨긴다.
+    ui["result-version-field"].hidden = state.versions.length < 2;
+    ui["result-versions"].replaceChildren(...state.versions.map((version, index) => {
+      const option = element("option", [`${index + 1}번째 결과`, savedLabel(version.savedAt), formatLabels[outputFormat(version.outputFormat)],
+        version.refined && "의견 반영본", version.stars && `별 ${version.stars}개`].filter(Boolean).join(" · "));
+      option.value = version.id;
+      return option;
+    }));
+    ui["result-versions"].value = state.resultId || "";
+    ui["refined-badge"].hidden = !state.feedback;
+  }
+
+  async function saveReview() {
+    // 별점·의견은 결과 파일을 고치지 않고 그 결과의 평가로 따로 저장한다. 요금이 들지 않는다.
+    const target = state.resultId;
+    const { review } = await api(`/api/meetings/${state.location}/${target}/review`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stars: state.reviewStars, comment: ui["review-comment"].value }) });
+    if (state.resultId !== target) return review;
+    state.review = review;
+    state.versions = state.versions.map((version) => (version.id === state.resultId ? { ...version, stars: review.stars ?? undefined } : version));
+    ui["review-status"].textContent = "평가를 저장했습니다.";
+    renderVersions();
+    await loadHistory();
+    return review;
+  }
+
+  async function refineSummary() {
+    // 의견을 먼저 평가로 저장하고, 열린 결과의 전사로 요약만 다시 요청해 새 결과로 저장한다. 원음은 다시 전사하지 않는다.
+    const comment = ui["review-comment"].value.trim();
+    if (!comment || !state.minutes || !state.resultStored) return;
+    const target = state.resultId;
+    try { await saveReview(); }
+    catch (error) { ui["review-status"].textContent = `평가를 저장하지 못했습니다. ${error.message}`; return; }
+    // 평가를 저장하는 사이 다른 결과가 열렸으면 그 결과의 전사로 요약하지 않는다.
+    if (state.resultId !== target) return;
+    const stop = (message) => { ui["review-status"].textContent = message; announce(message); };
+    if (!ui.transcript.value.trim()) return stop("저장된 전사가 없어 의견을 반영할 수 없습니다.");
+    if (needsNewKey()) return promptNewKey();
+    if (!canAnalyze()) {
+      stop("분석할 API 키가 없습니다. 설정에서 API 키를 등록한 뒤 다시 정리하세요.");
+      return openSettings("settings-ai");
+    }
+    ui["review-status"].textContent = "의견을 반영해 다시 정리하고 있습니다.";
+    const done = await summarize(true, comment);
+    // 새 요약은 받았는데 저장만 실패했으면 화면에 남은 새 결과를 저장하라고 알린다.
+    const unsaved = !done && state.resultId !== target && Boolean(state.minutes) && !state.resultStored;
+    ui["review-status"].textContent = done
+      ? "의견을 반영한 새 결과를 저장했습니다. 앞선 결과는 ‘결과 버전’에서 다시 볼 수 있습니다."
+      : unsaved
+        ? "다시 정리한 결과를 저장하지 못했습니다. 화면의 새 결과를 확인하고 ‘회의록 저장’을 누르세요. 앞선 결과와 평가는 지워지지 않았습니다."
+        : "다시 정리하지 못했습니다. 평가는 저장되어 있고 앞선 결과는 그대로입니다.";
+  }
+
+  function runReview(task) {
+    if (state.reviewBusy) return;
+    state.reviewBusy = true;
+    refresh();
+    task().catch((error) => { ui["review-status"].textContent = `평가를 저장하지 못했습니다. ${error.message}`; })
+      .finally(() => { state.reviewBusy = false; refresh(); });
+  }
+
+  const COPY_LABELS = { transcript: "전사문", summaryMd: "요약본(.md)", summaryTxt: "요약본(.txt)", audio: "원음", all: "사본" };
+
+  function copyMessage(report) {
+    // 사본 저장 결과를 한 문장으로 알린다. 일부만 실패하면 실패한 종류만 적는다.
+    if (!report) return "";
+    if (report.failed?.length) {
+      // 같은 이유로 실패한 종류는 한 묶음으로 적어 이유가 되풀이되지 않게 한다.
+      const groups = new Map();
+      for (const item of report.failed) {
+        const reason = String(item.message || "").replace(/\.$/, ""), label = COPY_LABELS[item.kind] || "사본";
+        if (!groups.has(reason)) groups.set(reason, []);
+        if (!groups.get(reason).includes(label)) groups.get(reason).push(label);
+      }
+      const reasons = [...groups].map(([reason, labels]) => `${labels.join("·")} — ${reason}`);
+      return `고른 폴더에 저장하지 못했습니다: ${reasons.join(", ")}. 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.`;
+    }
+    const written = [...new Set((report.written || []).map((item) => COPY_LABELS[item.kind]).filter(Boolean))];
+    return written.length ? `고른 폴더에 사본을 저장했습니다: ${written.join(", ")}.` : "고른 폴더에 새로 저장할 사본이 없습니다.";
+  }
+
+  function renderCopies() {
+    // 저장 위치를 하나도 고르지 않았으면 다시 저장 버튼 대신 안내만 보여 준다.
+    const configured = STORAGE_KINDS.some((kind) => state.settings?.storage?.[kind]);
+    ui["copy-again"].hidden = !configured;
+    ui["copy-status"].textContent = configured ? copyMessage(state.copies) : "설정에서 저장 위치를 고르면 사본을 저장할 수 있습니다.";
+  }
+
+  async function copyAgain() {
+    // 지금 설정된 폴더 기준으로 아직 저장하지 못했거나 사라진 사본만 다시 쓴다.
+    if (!state.resultStored || !state.resultId || state.copyBusy) return;
+    const target = state.resultId;
+    let copies;
+    state.copyBusy = true;
+    refresh();
+    try {
+      copies = (await api(`/api/meetings/${state.location}/${target}/copies`, { method: "POST" })).copies;
+    } catch (error) {
+      copies = { ok: false, written: [], skipped: [], failed: [{ kind: "all", message: error.message }] };
+    } finally {
+      state.copyBusy = false;
+      // 저장을 시작한 결과가 아직 열려 있을 때만 그 결과의 사본 상태로 보여 준다.
+      if (state.resultId === target) state.copies = copies;
+      refresh();
+    }
+    if (state.resultId === target && copies?.failed?.length) announce(copyMessage(copies));
+  }
+
   async function finishMeeting() {
-    if (state.flowBusy || state.projectBusy || state.archiveBusy || state.aiController) return;
+    if (state.flowBusy || state.historyBusy || state.archiveBusy || state.aiController) return;
     state.flowBusy = true;
     ui["retry-analysis"].hidden = true;
     const pending = [...state.recorders].map(context => context.done);
@@ -1792,13 +1889,16 @@
       await Promise.all(pending);
       if (!state.parts.length || state.parts.some(part => !part.blob?.size)) throw new Error("저장할 음성이 없습니다. 마이크와 녹음 시간을 확인하세요.");
       if (!state.audioStored) {
-        state.meetingId ||= newOperationId();
+        // 원음은 기본 보관함의 새 녹음으로만 저장한다. 옛 보관함 회의의 원음이 덜 저장돼 있었다면 새 녹음으로 다시 올린다.
+        if (state.location !== "main" || !state.recordingId) { state.recordingId = null; state.recordingStored = false; state.meetingId = null; state.location = "main"; state.projectName = ""; }
+        state.recordingId ||= newOperationId();
         state.recordingMetadata ||= recordingMetadata();
-        await api(`/api/projects/${state.slot}/recordings/${state.meetingId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...state.recordingMetadata, expectedParts: state.parts.length }) });
+        await api(`/api/recordings/main/${state.recordingId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...state.recordingMetadata, expectedParts: state.parts.length }) });
+        state.recordingStored = true;
         for (let i = 0; i < state.parts.length; i++) {
           const part = state.parts[i];
           workflow(`음성 저장 중 · ${i + 1}/${state.parts.length}개`);
-          await api(`/api/projects/${state.slot}/recordings/${state.meetingId}/audio/${i + 1}`, { method: "POST", headers: { "Content-Type": part.blob.type.split(";")[0] || "audio/webm" }, body: part.blob });
+          await api(`/api/recordings/main/${state.recordingId}/audio/${i + 1}`, { method: "POST", headers: { "Content-Type": part.blob.type.split(";")[0] || "audio/webm" }, body: part.blob });
           part.saved = true;
           part.diskSaved = true;
         }
@@ -1811,97 +1911,13 @@
         promptNewKey();
         throw new Error("새로운 API키를 등록하세요.");
       }
-      if (!canAnalyze() || !ui["ai-consent"].checked) throw new Error("음성은 저장했습니다. API 키와 외부 AI 전송 동의를 확인한 뒤 다시 분석하세요.");
+      if (!canAnalyze()) throw new Error("음성은 저장했습니다. 상단 ‘설정’에서 API 키를 확인한 뒤 다시 분석하세요.");
       workflow("음성 저장 완료. 전사와 회의록을 분석하고 있습니다…");
       await summarize();
     } catch (error) {
       workflow(`${state.audioStored ? "음성 저장 완료. " : "저장을 완료하지 못했습니다. 창을 닫지 마세요. "}${error.message}`);
       ui["retry-analysis"].hidden = false;
     } finally { state.flowBusy = false; refresh(); }
-  }
-
-  function settingsTransferBlocked() {
-    return Boolean(state.recorder || state.recorders.size || state.permissionPending || state.aiController || state.flowBusy || state.archiveBusy
-      || state.projectBusy || state.keyBusy || state.settingsBusy || !state.projects.length);
-  }
-
-  async function exportSettings() {
-    if (settingsTransferBlocked()) return announce("녹음·마이크 허가·AI 분석·저장이 끝난 뒤 설정을 내보내세요.");
-    if (!hasMeetingRecord() && presetChanged()
-      && !confirm("화면에서 바꾼 프로젝트 설정은 아직 저장되지 않아 파일에 들어가지 않습니다. 저장된 설정만 내보낼까요? 먼저 저장하려면 취소한 뒤 ‘프리셋 저장’을 누르세요."))
-      return;
-    state.projectBusy = true;
-    refresh();
-    try {
-      const { file } = await api("/api/project-settings/export");
-      download(new Blob([JSON.stringify(file, null, 2)], { type: "application/json;charset=utf-8" }), `${today()}-VoiceNote-프로젝트설정.json`);
-      announce("프로젝트 설정 파일 다운로드를 시작했습니다. API 키와 회의 기록은 들어가지 않습니다.");
-    } catch (error) {
-      announce(`설정을 내보내지 못했습니다. ${error.message}`);
-    } finally { state.projectBusy = false; refresh(); }
-  }
-
-  function chooseSettingsFile() {
-    if (settingsTransferBlocked()) return announce("녹음·마이크 허가·AI 분석·저장이 끝난 뒤 설정 파일을 불러오세요.");
-    ui["settings-file"].click();
-  }
-
-  async function previewSettings(event) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    if (settingsTransferBlocked()) return announce("녹음·마이크 허가·AI 분석·저장이 끝난 뒤 설정 파일을 불러오세요.");
-    if (file.size > maxSettingsBytes) return announce("설정 파일이 128KiB를 넘어 불러오지 않았습니다. 현재 설정은 바뀌지 않았습니다.");
-    state.projectBusy = true;
-    refresh();
-    try {
-      // 원본 바이트로 크기를 재고 손상된 UTF-8은 대체 문자로 바꾸지 않고 거절한다. 검증은 서버가 쓰기 없이 같은 규칙으로 한다.
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      if (bytes.length > maxSettingsBytes) throw new Error("설정 파일이 128KiB를 넘었습니다.");
-      let text;
-      try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
-      catch { throw new Error("UTF-8 설정 파일이 아닙니다."); }
-      const { projects } = await api("/api/project-settings/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: text }) });
-      state.pendingImport = { text, revisions: state.projects.map((project) => project.revision) };
-      ui["settings-preview"].replaceChildren();
-      for (const project of projects) {
-        const row = document.createElement("li");
-        row.append(element("span", project.slot, "preset-no"), element("span", project.name || "비어 있음", project.name ? "" : "empty"));
-        if (project.name) row.append(element("span", formatLabels[outputFormat(project.outputFormat)], "format"));
-        ui["settings-preview"].append(row);
-      }
-      ui["settings-import-file"].textContent = `${file.name} · 아래 프로젝트 설정으로 바꿉니다.${!hasMeetingRecord() && presetChanged() ? " 화면에서 저장하지 않은 프로젝트 입력은 사라집니다." : ""}`;
-      state.projectBusy = false;
-      openDialog(ui["settings-import"], ui["import-settings"]);
-    } catch (error) {
-      state.pendingImport = null;
-      announce(`설정 파일을 불러오지 못했습니다. ${error.message} 현재 설정은 바뀌지 않았습니다.`);
-    } finally { state.projectBusy = false; refresh(); }
-  }
-
-  async function applyImportedSettings() {
-    const pending = state.pendingImport;
-    if (!pending) return;
-    if (settingsTransferBlocked()) return announce("녹음·마이크 허가·AI 분석·저장이 끝난 뒤 설정을 바꾸세요.");
-    state.projectBusy = true;
-    refresh();
-    try {
-      const result = await api("/api/project-settings/import", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file: pending.text, revisions: pending.revisions }) });
-      state.projects = result.projects;
-      if (hasMeetingRecord()) renderPresets();
-      else applyProject(state.slot, false);
-      announce("프로젝트 설정을 파일 내용으로 바꿨습니다. 회의와 녹음은 그대로입니다.");
-      workflow("프로젝트 설정을 불러왔습니다. 프로젝트를 고르고 ‘회의 준비’를 누르세요.", true);
-      loadHistory();
-    } catch (error) {
-      announce(`설정을 바꾸지 못했습니다. ${error.message}`);
-    } finally {
-      state.pendingImport = null;
-      state.projectBusy = false;
-      if (ui["settings-import"].open) ui["settings-import"].close();
-      refresh();
-    }
   }
 
   function focusables(dialog) {
@@ -1915,7 +1931,7 @@
     if (dialog === ui["meeting-detail"]) { renderMinutes(); showResultTab(state.minutes || !ui.transcript.value.trim() ? "minutes" : "transcript"); }
     refresh();
     dialog.showModal();
-    const first = dialog === ui["ai-settings"] && !state.keyConfigured && !ui["api-key"].disabled ? ui["api-key"] : dialog.querySelector("[data-close]");
+    const first = dialog === ui.settings && !state.keyConfigured && !ui["api-key"].disabled ? ui["api-key"] : dialog.querySelector("[data-close]");
     first?.focus();
   }
 
@@ -1976,7 +1992,7 @@
     refresh();
     try {
       const result = await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ summaryModel: id }) });
-      state.summaryModel = result.summaryModel || id;
+      state.summaryModel = result.settings?.summaryModel || id;
       state.modelError = "";
       announce(`요약 모델을 ${modelInfo()?.label || state.summaryModel}(으)로 저장했습니다. 다음 분석부터 적용합니다.`);
     } catch (error) {
@@ -1992,10 +2008,172 @@
     }
   }
 
+  const STORAGE_LABELS = { audio: "오디오", transcript: "전사문", summary: "요약본" };
+  const SETTINGS_FILE_LIMIT = 128 * 1024;
+
+  function renderSettings() {
+    // 설정 창의 기본 출력 형식과 저장 위치를 서버에 저장된 값으로 다시 그린다.
+    ui["default-format"].value = outputFormat(state.settings?.defaultOutputFormat || "meeting");
+    for (const kind of STORAGE_KINDS) {
+      const folder = state.settings?.storage?.[kind] || "";
+      ui[`storage-${kind}`].textContent = folder || "사용 안 함";
+      ui[`storage-${kind}`].dataset.empty = String(!folder);
+    }
+  }
+
+  function openSettings(section, opener = ui["open-settings"]) {
+    // 설정 창을 열고, 구역을 지정하면 그 구역으로 옮겨 제목에 초점을 둔다. AI 연결은 키 입력칸에 초점을 두는 기본 동작을 따른다.
+    if (!ui.settings.open) {
+      renderSettings();
+      loadEditor();
+      openDialog(ui.settings, opener);
+    }
+    if (!section || section === "settings-ai") return;
+    ui[section].scrollIntoView?.({ block: "start" });
+    $(`${section}-title`)?.focus?.();
+  }
+
+  function followDefaultFormat(before) {
+    // 비어 있는 새 회의 양식이 아직 이전 기본 형식이면 새 기본 형식으로 바꾼다. 회의마다 고른 형식은 그대로 두되, 없어진 내 형식은 기본 형식으로 돌린다.
+    const blank = !hasMeetingRecord() && !state.meetingCustom;
+    if ((blank && ui["output-format"].value === before) || customMissing()) ui["output-format"].value = defaultFormat();
+    renderFormatExample();
+  }
+
+  async function saveSettingsChange(change, report, success) {
+    // 설정 한 가지를 서버에 저장하고 저장된 값으로 창을 다시 그린다. 녹음·분석·저장 중에는 바꾸지 않는다.
+    if (settingsLocked() || state.settingsBusy) {
+      renderSettings();
+      return report("녹음이나 분석 중에는 설정을 바꿀 수 없습니다.");
+    }
+    state.settingsBusy = true;
+    refresh();
+    try {
+      const result = await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(change) });
+      state.settings = result.settings;
+      report(success());
+    } catch (error) {
+      report(`설정을 저장하지 못했습니다. ${error.message}`);
+    } finally {
+      state.settingsBusy = false;
+      renderSettings();
+      refresh();
+    }
+  }
+
+  function saveDefaultFormat() {
+    const before = defaultFormat();
+    const format = outputFormat(ui["default-format"].value);
+    return saveSettingsChange({ defaultOutputFormat: format }, announce, () => {
+      followDefaultFormat(before);
+      return format === "custom" && !state.customFormat
+        ? "기본 출력 형식을 내 형식으로 저장했습니다. 내 형식을 저장하기 전까지 새 회의는 회의록으로 시작합니다."
+        : `기본 출력 형식을 ${formatLabels[format]}(으)로 저장했습니다. 새 회의부터 이 형식으로 시작합니다.`;
+    });
+  }
+
+  function saveStorage(kind, folder) {
+    const report = (message) => { ui["storage-status"].textContent = message; };
+    return saveSettingsChange({ storage: { [kind]: folder } }, report,
+      () => (folder ? `${STORAGE_LABELS[kind]} 사본을 고른 폴더에 씁니다.` : `${STORAGE_LABELS[kind]} 사본을 쓰지 않습니다.`));
+  }
+
+  function onHostMessage(data) {
+    // Windows 창이 폴더 선택 결과를 돌려준다. 고르지 않고 닫았거나(path가 null) 모르는 메시지는 무시한다.
+    if (data?.type !== "folder-picked" || !STORAGE_KINDS.includes(data.kind) || typeof data.path !== "string" || !data.path) return;
+    saveStorage(data.kind, data.path);
+  }
+
+  async function exportSettings() {
+    const { file } = await api("/api/settings/export");
+    download(new Blob([`${JSON.stringify(file, null, 2)}\n`], { type: "application/json;charset=utf-8" }), `${today()}-VoiceNote-설정.json`);
+    ui["settings-file-status"].textContent = "설정 파일 내려받기를 시작했습니다. 저장된 파일을 확인하세요.";
+  }
+
+  let settingsPreviewGeneration = 0;
+
+  async function previewSettings(event) {
+    // 고른 파일의 크기와 UTF-8을 이 화면에서 먼저 확인하고, 통과한 글만 서버에 보내 바뀔 내용을 받아 보여 준다.
+    // 파일을 여러 번 고르면 마지막에 고른 파일만 남긴다. 늦게 온 앞 파일의 응답은 미리보기와 적용할 파일을 바꾸지 않는다.
+    const generation = ++settingsPreviewGeneration;
+    const latest = () => generation === settingsPreviewGeneration;
+    const input = event.target;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    const report = (message) => { if (latest()) ui["settings-file-status"].textContent = message; };
+    if (file.size > SETTINGS_FILE_LIMIT) return report("설정 파일이 128KiB보다 커서 불러올 수 없습니다.");
+    let bytes, text;
+    try { bytes = await file.arrayBuffer(); } catch { return report("설정 파일을 읽지 못했습니다. 파일을 다시 골라 주세요."); }
+    // BOM은 서버의 해석기가 바이트로 받을 때처럼 하나만 지우므로, 여기서는 지우지 않고 그대로 보낸다.
+    try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch { return report("설정 파일이 UTF-8로 저장되어 있지 않아 불러올 수 없습니다."); }
+    if (!latest()) return;
+    try {
+      const { preview } = await api("/api/settings/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: text }) });
+      if (!latest()) return;
+      renderSettingsPreview(preview);
+      report("");
+      openDialog(ui["settings-import"], ui["import-settings"]);
+      state.pendingSettings = text;
+    } catch (error) { report(error.message); }
+  }
+
+  function renderSettingsPreview(preview) {
+    // 파일을 적용하면 바뀔 값을 항목마다 한 줄로 보이고, 적용하지 않는 줄에는 그 이유를 붙인다.
+    const rows = [
+      ["요약 모델", modelInfo(preview.summaryModel.value)?.label || preview.summaryModel.value, preview.summaryModel],
+      ["기본 출력 형식", formatLabels[preview.defaultOutputFormat.value] || preview.defaultOutputFormat.value, preview.defaultOutputFormat],
+      ["내 형식", preview.customFormat.name || (state.customFormat ? "없음 · 지금 저장된 내 형식을 지웁니다" : "없음"), preview.customFormat],
+      ...(preview.storage
+        ? STORAGE_KINDS.map((kind) => [`${STORAGE_LABELS[kind]} 저장 위치`, preview.storage[kind]?.value || "사용 안 함", preview.storage[kind] || { apply: true }])
+        : [["저장 위치", "파일에 없어 지금 값을 그대로 둡니다", { apply: true }]]),
+    ];
+    ui["settings-preview"].replaceChildren(...rows.map(([label, value, item]) => {
+      const row = element("div", "", "preview-row");
+      row.append(element("dt", label), element("dd", value));
+      if (!item.apply) {
+        row.dataset.skip = "true";
+        row.append(element("dd", item.reason || "적용하지 않습니다.", "preview-skip"));
+      }
+      return row;
+    }));
+  }
+
+  async function applyImportedSettings() {
+    // 미리보기에서 확인한 파일을 서버가 같은 규칙으로 다시 검사해 적용한다. 적용하지 않은 항목은 이유와 함께 알린다.
+    const file = state.pendingSettings;
+    if (!file) return;
+    const report = (message) => { ui["settings-file-status"].textContent = message; };
+    if (settingsLocked() || state.settingsBusy) return report("녹음이나 분석 중에는 설정을 바꿀 수 없습니다.");
+    const before = defaultFormat();
+    state.settingsBusy = true;
+    refresh();
+    try {
+      const result = await api("/api/settings/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file }) });
+      state.settings = result.settings;
+      state.customFormat = result.customFormat || null;
+      if (result.settings?.summaryModel) {
+        state.summaryModel = result.settings.summaryModel;
+        state.modelError = "";
+      }
+      updateCustomOption();
+      loadEditor();
+      followDefaultFormat(before);
+      ui["settings-import"].close();
+      report(result.skipped?.length ? `설정을 불러왔습니다. 적용하지 않은 항목: ${result.skipped.join(" · ")}` : "설정을 불러왔습니다.");
+    } catch (error) {
+      ui["settings-import"].close();
+      report(`설정을 불러오지 못했습니다. ${error.message}`);
+    } finally {
+      state.settingsBusy = false;
+      ui["summary-model"].value = state.summaryModel;
+      renderSettings();
+      refresh();
+    }
+  }
+
   function bind() {
     ui.prepare.addEventListener("click", prepareMeeting);
-    ui["save-preset"].addEventListener("click", () => savePreset().catch(error => workflow(error.message)));
-    ui["delete-preset"].addEventListener("click", () => deletePreset().catch(error => workflow(error.message)));
     ui["retry-analysis"].addEventListener("click", finishMeeting);
     ui["save-archive"].addEventListener("click", () => archiveResult().catch(error => workflow(error.message)));
     ui["microphone-volume"].addEventListener("click", setMicrophoneVolume);
@@ -2011,7 +2189,7 @@
       announce("전사 원문 다운로드를 시작했습니다. 저장된 파일을 확인하세요.");
     });
     ui["cancel-ai"].addEventListener("click", () => state.aiController?.abort());
-    for (const id of ["transcript", "title", "date", "participants", "meeting-notes", "meeting-context", "project-name"])
+    for (const id of ["transcript", "title", "date", "participants", "meeting-notes"])
       ui[id].addEventListener("input", () => {
         state.resultStored = false;
         state.notesSaved = false;
@@ -2031,7 +2209,8 @@
       if (confirm("등록된 API 키와 이 PC에 저장된 키 파일을 삭제할까요?")) setKey("");
     });
     ui["summary-model"].addEventListener("change", saveModel);
-    ui["open-ai-settings"].addEventListener("click", () => openDialog(ui["ai-settings"], ui["open-ai-settings"]));
+    ui["open-settings"].addEventListener("click", () => openSettings());
+    ui["open-format-settings"].addEventListener("click", () => openSettings("settings-format", ui["open-format-settings"]));
     ui["open-result"].addEventListener("click", () => openDialog(ui["meeting-detail"], ui["open-result"]));
     ui["tab-minutes"].addEventListener("click", () => showResultTab("minutes"));
     ui["tab-transcript"].addEventListener("click", () => showResultTab("transcript"));
@@ -2049,43 +2228,55 @@
       refresh();
       ui.prepare.focus();
     });
-    for (const dialog of [ui["meeting-detail"], ui["ai-settings"], ui["settings-import"]]) bindDialog(dialog);
-    ui["settings-import"].addEventListener("close", () => { state.pendingImport = null; });
-    ui["export-settings"].addEventListener("click", exportSettings);
-    ui["import-settings"].addEventListener("click", chooseSettingsFile);
-    ui["settings-file"].addEventListener("change", previewSettings);
-    ui["confirm-import"].addEventListener("click", applyImportedSettings);
+    for (const dialog of [ui["meeting-detail"], ui.settings, ui["settings-import"]]) bindDialog(dialog);
     ui["output-format"].addEventListener("change", () => {
       state.resultStored = false;
       state.notesSaved = false;
-      rememberFormat(state.slot, ui["output-format"].value);
-      if (ui["output-format"].value === "custom" && !currentCustom()) { ui["format-example"].hidden = false; loadEditor(); }
       renderFormatExample();
       refresh();
     });
     ui["format-help"].addEventListener("click", () => {
       ui["format-example"].hidden = !ui["format-example"].hidden;
-      if (!ui["format-example"].hidden) loadEditor();
       renderFormatExample();
     });
-    ui["custom-name"].addEventListener("input", renderFormatExample);
-    ui["custom-instruction"].addEventListener("input", renderFormatExample);
+    ui["custom-name"].addEventListener("input", renderCustomPreview);
+    ui["custom-instruction"].addEventListener("input", renderCustomPreview);
     ui["custom-save"].addEventListener("click", () => saveCustom().catch((error) => { ui["custom-status"].textContent = error.message; }));
     ui["custom-delete"].addEventListener("click", () => deleteCustom().catch((error) => { ui["custom-status"].textContent = error.message; }));
-    ui["ai-settings"].addEventListener("close", () => { ui["api-key"].value = ""; });
-    ui.clear.addEventListener("click", () => { if (clearLocal()) applyProject(state.slot); });
+    ui.settings.addEventListener("close", () => { ui["api-key"].value = ""; });
+    ui["default-format"].addEventListener("change", saveDefaultFormat);
+    for (const kind of STORAGE_KINDS) {
+      ui[`pick-${kind}`].addEventListener("click", () => window.chrome?.webview?.postMessage({ type: "pick-folder", kind }));
+      ui[`clear-${kind}`].addEventListener("click", () => saveStorage(kind, ""));
+    }
+    ui["export-settings"].addEventListener("click", () => exportSettings().catch((error) => { ui["settings-file-status"].textContent = `설정을 내보내지 못했습니다. ${error.message}`; }));
+    ui["import-settings"].addEventListener("click", () => ui["settings-file-input"].click());
+    ui["settings-file-input"].addEventListener("change", previewSettings);
+    ui["confirm-import"].addEventListener("click", applyImportedSettings);
+    for (let stars = 1; stars <= 5; stars++) ui[`review-star-${stars}`].addEventListener("click", () => {
+      // 같은 별을 다시 누르면 별점을 지운다. 별점은 고르지 않아도 된다.
+      state.reviewStars = state.reviewStars === stars ? null : stars;
+      refresh();
+    });
+    ui["review-comment"].addEventListener("input", refresh);
+    ui["save-review"].addEventListener("click", () => runReview(saveReview));
+    ui.refine.addEventListener("click", () => runReview(refineSummary));
+    ui["copy-again"].addEventListener("click", copyAgain);
+    ui["result-versions"].addEventListener("change", async () => {
+      const id = ui["result-versions"].value;
+      await openMeeting(state.location, id, ui["result-versions"]);
+      renderVersions();
+      if (state.resultId === id) announce("고른 결과 버전을 열었습니다. 이 결과의 평가와 사본 저장은 이 결과에 적용됩니다.");
+    });
+    ui["settings-import"].addEventListener("close", () => { state.pendingSettings = null; });
+    // 폴더 고르기와 회의자료 폴더 열기는 Windows 창 안에서만 쓸 수 있다. 창은 폴더 선택 결과를 메시지로 돌려준다.
+    const webview = window.chrome?.webview;
+    ui["settings-data"].hidden = !webview;
+    for (const kind of STORAGE_KINDS) ui[`pick-${kind}`].hidden = !webview;
+    ui["open-data-folder"].addEventListener("click", () => webview?.postMessage("open-data-folder"));
+    webview?.addEventListener("message", (event) => onHostMessage(event.data));
+    ui.clear.addEventListener("click", () => { if (clearLocal()) resetMeetingForm(); });
     ui.shutdown.addEventListener("click", shutdown);
-    ui["record-consent"].addEventListener("change", () => {
-      if (!ui["record-consent"].checked) {
-        cancelPermission();
-        stopRecording("녹음 동의를 해제해 녹음을 정지했습니다.");
-      }
-      refresh();
-    });
-    ui["ai-consent"].addEventListener("change", () => {
-      if (!ui["ai-consent"].checked) state.aiController?.abort();
-      refresh();
-    });
     for (const format of ["md", "txt", "json"])
       ui[`download-${format}`].addEventListener("click", () => saveMinutes(format));
     window.addEventListener("beforeunload", guardClose);
@@ -2104,6 +2295,7 @@
     if (!state.token) return announce("실행 도구가 제공한 주소로 창을 다시 열어 주세요.");
     try {
       const config = await api("/api/config");
+      state.settings = config.settings || null;
       state.keyConfigured = Boolean(config.keyConfigured);
       state.keySaved = Boolean(config.keySaved);
       state.keyStorageError = config.keyStorageError || "";
@@ -2113,22 +2305,15 @@
       applyModels(config);
       state.customFormat = (await api("/api/custom-format")).customFormat;
       updateCustomOption();
-      const projects = await api("/api/projects");
-      state.projects = projects.projects;
-      applyProject(state.projects.find((item) => item.name)?.slot || 1);
+      resetMeetingForm();
       await loadHistory();
       refresh();
-      announce(canAnalyze() ? "프로젝트를 고르고 ‘회의 준비’를 누르세요." : state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요." : "처음이면 상단 ‘AI 설정’에서 API 키를 등록하세요.");
+      announce(canAnalyze() ? "‘회의 시작’을 누르면 바로 녹음합니다." : state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요." : "처음이면 상단 ‘설정’에서 API 키를 등록하세요.");
     } catch (error) {
       announce(`서버 연결을 확인하지 못했습니다. ${error.message}`);
     }
   }
 
   window.meetingDesktopStatus = () => ({ unsaved: hasUnsavedWork() });
-  const openData = document.getElementById("open-data-folder");
-  if (openData) {
-    openData.hidden = !window.chrome?.webview;
-    openData.addEventListener("click", () => window.chrome?.webview?.postMessage("open-data-folder"));
-  }
   init();
 })();

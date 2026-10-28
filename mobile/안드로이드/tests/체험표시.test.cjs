@@ -1,4 +1,4 @@
-// 공용 기본 키 체험 상태에 따라 시작 가능 여부와 AI 설정 안내 문구가 바뀌는지 검증한다.
+// 공용 기본 키 체험 상태에 따라 시작 가능 여부와 설정 안내 문구가 바뀌는지 검증한다.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const Flow = require('../assets/flow.js');
@@ -26,5 +26,5 @@ test('남은 체험 횟수와 소진 안내 문구', () => {
 test('소진되면 시작 전 필요 항목이 정확한 등록 안내로 바뀐다', () => {
   const s = { busy: false, active: false, keyConfigured: false, trialExhausted: true, projectName: 'A', date: '2026-10-01', notes: '', recordConsent: true, aiConsent: true };
   assert.deepEqual(Flow.startBlockers(s).map(r => r.text), ['새로운 API키를 등록하세요.']);
-  assert.deepEqual(Flow.startBlockers({ ...s, trialExhausted: false }).map(r => r.text), ['AI 설정에서 API 키를 등록하세요.']);
+  assert.deepEqual(Flow.startBlockers({ ...s, trialExhausted: false }).map(r => r.text), ['설정의 AI 연결에서 API 키를 등록하세요.']);
 });

@@ -19,13 +19,13 @@
   function startBlockers(s) {
     const reasons = [];
     if (s.active) reasons.push({ id: 'active', text: '진행 중인 회의가 끝나야 새 회의를 시작할 수 있습니다.' });
-    if (!s.keyConfigured) reasons.push({ id: 'key', text: s.trialExhausted ? EXHAUSTED_MESSAGE : 'AI 설정에서 API 키를 등록하세요.' });
-    if (!String(s.projectName || '').trim()) reasons.push({ id: 'name', text: '프로젝트 이름을 입력하세요.' });
+    if (!s.keyConfigured) reasons.push({ id: 'key', text: s.trialExhausted ? EXHAUSTED_MESSAGE : '설정의 AI 연결에서 API 키를 등록하세요.' });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(s.date || ''))) reasons.push({ id: 'date', text: '회의 날짜를 선택하세요.' });
     if (String(s.notes || '').length > NOTES_LIMIT) reasons.push({ id: 'notes', text: '상세 안건·배경은 4,000자 이내로 줄여 주세요.' });
-    if (s.customMissing) reasons.push({ id: 'format', text: '출력 형식의 예시에서 내 형식을 먼저 저장하세요.' });
-    if (!s.recordConsent) reasons.push({ id: 'recordConsent', text: '참석자 녹음 동의를 확인하세요.' });
-    if (!s.aiConsent) reasons.push({ id: 'aiConsent', text: '외부 AI 분석 동의를 확인하세요.' });
+    if (s.customMissing) reasons.push({ id: 'format', text: '설정 › 출력 형식에서 내 형식을 먼저 만드세요.' });
+    if (s.opened) reasons.push({ id: "opened", text: "지난 회의를 닫고 새 회의를 준비하세요." });
+    if (s.permissionPending || s.filePending) reasons.push({ id: "pending", text: "권한 요청이나 파일 선택을 먼저 마쳐 주세요." });
+    if (s.modelError) reasons.push({ id: "model", text: "설정에서 요약 모델을 다시 선택하세요." });
     return reasons;
   }
   function canStart(s) {

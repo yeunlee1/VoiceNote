@@ -1,4 +1,4 @@
-# 실행 프로그램과 Windows 설치 파일을 빌드하고 배포 파일의 해시를 기록한다.
+﻿# 실행 프로그램과 Windows 설치 파일을 빌드하고 배포 파일의 해시를 기록한다.
 # 빌드 결과는 산출물 아래 내부용이다. 사용자 전달은 루트 배포준비.ps1로 배포\최신 폴더와 배포\VoiceNote-배포.zip만 갱신한다.
 param(
   [string]$BuildRoot = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) ('산출물\데스크톱\' + (Get-Date -Format 'yyyy-MM-dd-HHmmss'))),

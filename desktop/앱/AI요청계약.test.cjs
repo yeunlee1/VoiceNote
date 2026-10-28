@@ -33,7 +33,7 @@ async function start(t, reply, options = {}) {
   if (!options.noKey) await post('/api/key', { apiKey: SECRET, persist: false });
   return { calls, post, ai, config, origin, headers };
 }
-const summaryBody = extra => ({ text: '회의 발언입니다.', title: '회의', date: '2026-10-01', participants: '', context: '프로젝트 설명', ...extra });
+const summaryBody = extra => ({ text: '회의 발언입니다.', title: '회의', date: '2026-10-01', participants: '', ...extra });
 
 test('설정 조회는 모델 목록·기본값·선택값·요청 한도를 알려주고 선택을 저장한다', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'AI설정-'));
@@ -48,7 +48,7 @@ test('설정 조회는 모델 목록·기본값·선택값·요청 한도를 알
   assert.equal(config.summaryModels.length, 3);
   assert.ok(config.summaryModels.every(model => model.maxOutputTokens === 32000));
   const saved = await first.post('/api/settings', { summaryModel: 'gpt-6-luna' });
-  assert.deepEqual(saved.body, { summaryModel: 'gpt-6-luna' });
+  assert.deepEqual(saved.body.settings, { summaryModel: 'gpt-6-luna', defaultOutputFormat: 'meeting', storage: { audio: '', transcript: '', summary: '' } });
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'AI설정.json'), 'utf8')).summaryModel, 'gpt-6-luna');
   const rejected = await first.post('/api/settings', { summaryModel: 'gpt-made-up' });
   assert.equal(rejected.status, 400);
@@ -81,7 +81,7 @@ test('선택한 모델과 회의별 상세 내용을 보내고 응답에 모델�
   assert.equal('temperature' in sent || 'top_p' in sent, false);
   const user = JSON.parse(sent.input.find(item => item.role === 'user').content);
   assert.equal(user.notes, '이번 회의는 화면 개편 안건입니다.');
-  assert.equal(user.context, '프로젝트 설명');
+  assert.equal('context' in user, false);
   assert.match(sent.input.filter(item => item.role === 'system').map(item => item.content).join(' '), /notes가 있으면/);
   assert.equal(result.body.model, 'gpt-6-astra');
   assert.equal(result.body.maxOutputTokens, 32000);

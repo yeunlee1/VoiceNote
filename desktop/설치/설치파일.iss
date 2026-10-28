@@ -5,8 +5,8 @@
 [Setup]
 AppId={{EE341AE8-A356-4EF2-BA85-19860D442786}
 AppName=VoiceNote
-AppVersion=1.2.0
-AppVerName=VoiceNote 1.2.0
+AppVersion=1.3.0
+AppVerName=VoiceNote 1.3.0
 DefaultDirName={localappdata}\Programs\MeetingJournal
 DefaultGroupName=VoiceNote
 UsePreviousGroup=no
@@ -16,7 +16,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.19041
 OutputDir={#OutputDir}
-OutputBaseFilename=2026-10-02-VoiceNote-1.2.0-설치
+OutputBaseFilename=2026-10-23-VoiceNote-1.3.0-설치
 SetupIconFile={#StageDir}\회의록.ico
 UninstallDisplayIcon={app}\프로젝트 회의록.exe
 Compression=lzma2

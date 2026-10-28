@@ -1,0 +1,3 @@
+#!/bin/sh
+# push 전에 API 키·키 파일이 공개 저장소에 올라가지 않는지 검사한다. 설치는 이 파일과 push-비밀검사.cjs를 .git/hooks에 복사하거나 git config core.hooksPath .githooks로 한다.
+exec node "$(dirname "$0")/push-비밀검사.cjs" "$@"

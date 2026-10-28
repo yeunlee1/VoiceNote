@@ -19,7 +19,6 @@ async function start(t) {
       headers: { Origin: url, 'Content-Type': 'application/json', 'X-Meeting-Token': meeting.token }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, body: await response.json() };
   };
-  await request('/api/projects/1', { name: '시험', title: '회의', context: '', revision: 0 });
   return { request, dir };
 }
 const meeting = extra => ({ id: randomUUID(), title: '사용량 회의', date: '2026-10-01', participants: '', context: '', transcript: '발언',
@@ -32,30 +31,30 @@ test('저장한 회의를 열면 모델별 사용량과 분석 모델이 그대�
     { kind: 'summary', model: 'gpt-6-luna', requests: 3, measuredRequests: 2, unknownRequests: 1, inputTokens: 9000, outputTokens: 4000, totalTokens: 13000, cachedInputTokens: 1000, reasoningTokens: 2500, audioSeconds: 0 },
   ];
   const data = meeting({ analysis: { summaryModel: 'gpt-6-luna', usage } });
-  const saved = await request('/api/projects/1/meetings', data);
+  const saved = await request('/api/meetings/main', data);
   assert.equal(saved.status, 200);
-  const loaded = await request(`/api/projects/1/meetings/${data.id}`);
+  const loaded = await request(`/api/meetings/main/${data.id}`);
   assert.deepEqual(loaded.body.meeting.analysis, { summaryModel: 'gpt-6-luna', usage, callIds: [] });
-  const again = await request('/api/projects/1/meetings', data);
+  const again = await request('/api/meetings/main', data);
   assert.equal(again.status, 200);
 });
 
 test('사용량 필드가 없는 옛 기록과 잘못된 사용량 값도 회의를 막지 않는다', async t => {
   const { request, dir } = await start(t);
   const old = meeting();
-  assert.equal((await request('/api/projects/1/meetings', old)).status, 200);
-  const loadedOld = await request(`/api/projects/1/meetings/${old.id}`);
+  assert.equal((await request('/api/meetings/main', old)).status, 200);
+  const loadedOld = await request(`/api/meetings/main/${old.id}`);
   assert.equal(loadedOld.body.meeting.analysis, undefined);
   const odd = meeting({ analysis: { summaryModel: 7, usage: [{ model: 'gpt-6-sol', inputTokens: -5, outputTokens: 'x', requests: 2 }, { model: '<script>' }] } });
-  assert.equal((await request('/api/projects/1/meetings', odd)).status, 200);
-  const loadedOdd = (await request(`/api/projects/1/meetings/${odd.id}`)).body.meeting.analysis;
+  assert.equal((await request('/api/meetings/main', odd)).status, 200);
+  const loadedOdd = (await request(`/api/meetings/main/${odd.id}`)).body.meeting.analysis;
   assert.equal(loadedOdd.summaryModel, null);
   assert.equal(loadedOdd.usage.length, 1);
   assert.equal(loadedOdd.usage[0].unknownRequests, 2);
   assert.equal(loadedOdd.usage[0].totalTokens, 0);
-  const file = path.join(dir, '프로젝트-01', `회의-${odd.id}.json`);
+  const file = path.join(dir, '회의기록', `회의-${odd.id}.json`);
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   raw.analysis.usage.push({ model: 'gpt-6-sol', requests: 'broken' });
   fs.writeFileSync(file, JSON.stringify(raw));
-  assert.equal((await request(`/api/projects/1/meetings/${odd.id}`)).status, 200);
+  assert.equal((await request(`/api/meetings/main/${odd.id}`)).status, 200);
 });
