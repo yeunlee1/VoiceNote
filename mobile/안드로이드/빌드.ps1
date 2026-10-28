@@ -33,7 +33,7 @@ try {
   & node (Join-Path $PSScriptRoot '요약계약추출.cjs') $assets $ServerScript
   if($LASTEXITCODE -ne 0){throw '요약 계약 추출 실패'}
   Remove-Item -LiteralPath (Join-Path $assets '임시검증') -Recurse -Force -ErrorAction SilentlyContinue
-  if(Get-ChildItem -LiteralPath $assets -Recurse -Include 'personal.key','default.key'){throw '원본 자산에 API 키 파일이 섞였습니다.'}
+  if(Get-ChildItem -LiteralPath $assets -Recurse -File | Where-Object {$_.Name -in 'personal.key','default.key'}){throw '원본 자산에 API 키 파일이 섞였습니다.'}
   $defaultKeyAsset=Join-Path $assets 'default.key'
   if($DefaultKeyFile){
     # 키 값은 출력하지 않고 형식만 확인한 뒤 패키징 임시 자산에만 쓴다. 검증용 APK에는 넣지 않는다.
@@ -86,8 +86,10 @@ try {
   if([bool]$DefaultKeyFile -ne ($entries -contains 'assets/default.key')){throw 'APK의 공용 기본 키 포함 여부가 요청과 다릅니다.'}
   if($entries -notcontains 'assets/formats.js'){throw 'APK에 출력 형식 파일(formats.js)이 없습니다.'}
   foreach($format in 'meeting','summary','tasks'){if($entries -notcontains "assets/summary-$format.json"){throw "APK에 $format 요약 양식이 없습니다."}}
+  if($entries -notcontains 'assets/summary-feedback.json'){throw 'APK에 의견 반영 지시문(summary-feedback.json)이 없습니다.'}
+  '의견 반영 지시문 포함: 예'
   "공용 기본 키 포함: $(if($entries -contains 'assets/default.key'){'예'}else{'아니요'})"
-  $korean=Join-Path $OutputRoot $(if($DebugBuild){((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.2.0-안드로이드-검증용.apk')}else{((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.2.0-안드로이드-설치본.apk')})
+  $korean=Join-Path $OutputRoot $(if($DebugBuild){((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.3.0-안드로이드-검증용.apk')}else{((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.3.0-안드로이드-설치본.apk')})
   Copy-Item -LiteralPath (Join-Path $OutputRoot (Split-Path $output -Leaf)) -Destination $korean -Force
   Get-Item -LiteralPath $korean | Select-Object FullName,Length
 } finally {
