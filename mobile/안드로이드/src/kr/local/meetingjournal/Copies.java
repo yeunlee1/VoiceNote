@@ -45,6 +45,7 @@ final class Copies {
     interface Sink {
         Created write(String folder,String name,String mime,Source source)throws Exception;
         boolean exists(String uri)throws Exception;
+        default void checkFolder(String folder)throws Exception {}
     }
     static final class Created {final String uri,name;Created(String uri,String name){this.uri=uri;this.name=name;}}
     static String safeTitle(String title){
@@ -71,6 +72,7 @@ final class Copies {
             }throw new IOException("빈 사본 파일 이름을 찾지 못했습니다.");
         }
         public boolean exists(String uri)throws Exception{try(InputStream in=Files.newInputStream(Paths.get(URI.create(uri)))){return true;}catch(FileNotFoundException|NoSuchFileException absent){return false;}}
+        public void checkFolder(String folder)throws Exception{if(!new File(URI.create(folder)).isDirectory())throw new FolderUnavailable();}
     }
     static final class FolderUnavailable extends IOException {
         FolderUnavailable(){super("고른 폴더를 찾을 수 없거나 권한이 끊겨 다시 골라야 합니다");}
@@ -78,11 +80,15 @@ final class Copies {
     static final class TreeSink implements Sink {
         final ContentResolver resolver;TreeSink(Context context){resolver=context.getContentResolver();}
         static Uri tree(String value)throws IOException{Uri uri=Uri.parse(value);if(!ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())||!DocumentsContract.isTreeUri(uri))throw new IOException("문서 선택 창에서 폴더를 다시 골라 주세요.");return uri;}
-        Set<String> names(Uri tree)throws Exception {
+        void requireFolder(Uri tree)throws Exception {
             Uri parent=DocumentsContract.buildDocumentUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));
             try(Cursor folder=resolver.query(parent,new String[]{DocumentsContract.Document.COLUMN_MIME_TYPE},null,null,null)){
                 if(folder==null||!folder.moveToFirst()||!DocumentsContract.Document.MIME_TYPE_DIR.equals(folder.getString(0)))throw new FolderUnavailable();
             }
+        }
+        public void checkFolder(String folder)throws Exception{try{requireFolder(tree(folder));}catch(Exception unavailable){throw new FolderUnavailable();}}
+        Set<String> names(Uri tree)throws Exception {
+            requireFolder(tree);
             Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));Set<String> names=new HashSet<>();
             try(Cursor cursor=resolver.query(children,new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)){if(cursor==null)throw new FolderUnavailable();while(cursor.moveToNext())names.add(cursor.getString(0));}return names;
         }
@@ -147,9 +153,16 @@ final class Copies {
     void statusItem(JSONObject report,JSONArray entries,String key,Object value,String folder,String kind)throws Exception{
         if(folder==null||folder.isEmpty()){report.getJSONArray("skipped").put(new JSONObject().put("kind",kind).put("reason","설정에서 저장 위치를 고르지 않았습니다."));return;}
         for(int i=0;i<entries.length();i++){JSONObject item=entries.optJSONObject(i);if(!match(item,key,value,folder))continue;
-            String message=item.optString("message","파일을 쓰지 못했습니다.");boolean exists=false,inaccessible=false;try{exists=item.optBoolean("ok")&&sink.exists(item.optString("uri"));}catch(Exception ex){message=error(ex);inaccessible=true;}
+            String message="저장했던 사본을 찾을 수 없습니다";boolean exists=false;
+            try{exists=item.optBoolean("ok")&&sink.exists(item.optString("uri"));}
+            catch(FileNotFoundException|IllegalArgumentException absent){}
+            catch(SecurityException inaccessible){message=new FolderUnavailable().getMessage();}
+            catch(Exception unreadable){message="저장했던 사본을 확인하지 못했습니다";}
             if(exists)report.getJSONArray("written").put(new JSONObject().put("kind",kind).put("uri",item.optString("uri")).put("name",item.optString("name")));
-            else report.getJSONArray("failed").put(new JSONObject().put("kind",kind).put("message",item.optBoolean("ok")&&!inaccessible?"저장했던 사본을 찾을 수 없습니다":message));return;
+            else {
+                try{sink.checkFolder(folder);}catch(Exception unavailable){message=new FolderUnavailable().getMessage();}
+                report.getJSONArray("failed").put(new JSONObject().put("kind",kind).put("message",message));
+            }return;
         }
     }
     JSONObject status(String location,String id,String resultId)throws Exception{

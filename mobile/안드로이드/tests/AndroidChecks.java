@@ -481,8 +481,29 @@ public final class AndroidChecks extends Instrumentation {
         JSONObject report=Copies.report();new Copies(store,Collections.singletonMap("summary","file:/synthetic"),missing).statusItem(report,new JSONArray().put(new JSONObject().put("kind","summaryMd").put("folder","file:/synthetic").put("ok",true).put("uri","file:/missing")),"kind","summaryMd","file:/synthetic","summaryMd");
         expect(report.getJSONArray("failed").getJSONObject(0).getString("message").equals("저장했던 사본을 찾을 수 없습니다"),"사본 상태 조회 이유에는 두 번째 행동 안내를 넣지 않는다");
     }
+    void copyInspectionChecks(Store store,boolean fileOnly)throws Exception{
+        JSONObject record=store.create(new JSONObject().put("date","2099-06-03").put("title","사본 조회 공급자 예외"));String id=record.getString("id");File dir=store.directory("main",id);
+        Store.write(new File(dir,"원음-001.m4a"),"합성 원음");record.getJSONArray("audio").put("원음-001.m4a");Store.write(new File(dir,"전사.txt"),"합성 전사");store.finish(record,minutes(),null);String rid=record.getString("resultId");
+        File folder=new File(store.context.getCacheDir(),"조회-사본");folder.mkdir();Map<String,String> folders=new HashMap<>();for(String kind:Copies.KINDS)folders.put(kind,folder.toURI().toString());
+        Copies.FileSink files=new Copies.FileSink();final int[] mode={0};final String[] removed={""};Copies.Sink sink=new Copies.Sink(){
+            public Copies.Created write(String target,String name,String mime,Copies.Source source)throws Exception{if(mode[0]==1)throw new Copies.FolderUnavailable();return files.write(target,name,mime,source);}
+            public boolean exists(String uri)throws Exception{if(mode[0]==1||(mode[0]==2&&uri.equals(removed[0])))throw new IllegalArgumentException("Failed to determine if synthetic document is child of synthetic folder");if(mode[0]==3)throw new IOException("합성 조회 실패");return files.exists(uri);}
+            public void checkFolder(String target)throws Exception{if(mode[0]==1)throw new Copies.FolderUnavailable();}
+        };
+        Copies copies=new Copies(store,folders,sink);JSONObject first=copies.copyResult("main",id,rid);JSONArray written=first.getJSONArray("written");expect(written.length()==4,"조회 경계의 사본 네 종류를 먼저 저장한다");
+        Map<String,String> originals=new HashMap<>();for(int i=0;i<written.length();i++){JSONObject item=written.getJSONObject(i);originals.put(item.getString("uri"),Store.read(new File(java.net.URI.create(item.getString("uri")))));if(item.getString("kind").equals("summaryTxt"))removed[0]=item.getString("uri");}
+        if(!fileOnly){mode[0]=1;JSONObject unavailable=copies.status("main",id,rid);expect(unavailable.getJSONArray("failed").length()==4,"폴더가 없어 exists가 IllegalArgumentException이면 네 종류를 조회 실패로 센다");
+        for(int i=0;i<4;i++)expect(unavailable.getJSONArray("failed").getJSONObject(i).getString("message").equals("고른 폴더를 찾을 수 없거나 권한이 끊겨 다시 골라야 합니다"),"폴더 없음의 조회 이유는 쓰기 실패 대신 다시 고르라는 한 절이다");
+        JSONObject failed=copies.copyResult("main",id,rid);expect(failed.getJSONArray("failed").length()==4&&Copies.log(new File(dir,"사본기록-"+rid+".json")).getJSONObject(0).getBoolean("ok"),"저장 경로는 폴더 없음 실패와 앞선 성공 기록을 그대로 유지한다");
+        mode[0]=0;JSONObject recovered=copies.copyResult("main",id,rid);expect(recovered.getJSONArray("written").length()==0&&recovered.getJSONArray("skipped").length()==4&&folder.listFiles().length==4,"폴더 복구 뒤 사본 네 개를 (2) 없이 건너뛴다");}
+        expect(new File(java.net.URI.create(removed[0])).delete(),"사본 파일 하나만 지우는 반례를 만든다");mode[0]=2;JSONObject missing=copies.status("main",id,rid);
+        expect(missing.getJSONArray("failed").length()==1&&missing.getJSONArray("written").length()==3&&missing.getJSONArray("failed").getJSONObject(0).getString("message").equals("저장했던 사본을 찾을 수 없습니다"),"폴더는 있고 파일만 없어 exists가 IllegalArgumentException이면 그 파일만 없다고 알린다");
+        JSONObject restored=copies.copyResult("main",id,rid);expect(restored.getJSONArray("written").length()==1&&restored.getJSONArray("skipped").length()==3&&restored.getJSONArray("written").getJSONObject(0).getString("uri").equals(removed[0])&&folder.listFiles().length==4,"파일 하나가 없으면 그 파일만 원래 이름으로 다시 저장한다");
+        for(Map.Entry<String,String> item:originals.entrySet())expect(Store.read(new File(java.net.URI.create(item.getKey()))).equals(item.getValue()),"폴더·파일 복구 뒤 사본 내용이 처음과 같다");
+        mode[0]=3;expect(!copies.status("main",id,rid).toString().contains("쓰지 못"),"일반 조회 예외에도 쓰지 못했다는 이유를 붙이지 않는다");
+    }
     @Override public void onStart(){Bundle result=new Bundle();try{
-        if(!probe.isEmpty()&&!probe.startsWith("f-")){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
+        if(!probe.isEmpty()&&!probe.startsWith("f-")&&!probe.startsWith("g-")){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
         for(String name:new String[]{"first","open","review","draft","finish","n1new","n1old","n1meta"})regressionCheck(name);
         archiveChecks(new Store(testContext()));
         settingsChecks(new Store(testContext()));
@@ -497,6 +518,7 @@ public final class AndroidChecks extends Instrumentation {
             public InputStream getErrorStream(){try{return getInputStream();}catch(IOException ex){throw new RuntimeException(ex);}}
         };}}:null);
         if(probe.startsWith("f-")){if(probe.equals("f-attempt"))serviceAttemptChecks();else dispatchFCopyChecks();result.putString("stream","PASS "+checks+" Dispatch F checks: "+probe+"\n");finish(-1,result);return;}
+        if(probe.startsWith("g-")){copyInspectionChecks(new Store(testContext()),probe.equals("g-file"));result.putString("stream","PASS "+checks+" Dispatch G checks\n");finish(-1,result);return;}
         Store store=new Store(testContext());
         String previousModel=store.summaryModel();store.summaryModel(null);
         boolean bundledKey=true;try{getTargetContext().getAssets().open("personal.key").close();}catch(FileNotFoundException absent){bundledKey=false;}
@@ -559,6 +581,7 @@ public final class AndroidChecks extends Instrumentation {
         copyRecoveryCheck(new Store(testContext()));
         serviceRefineFailureCheck(new Store(testContext()));
         dispatchFCopyChecks();serviceAttemptChecks();
+        copyInspectionChecks(new Store(testContext()),false);
         store.summaryModel(previousModel);
         result.putString("stream","PASS "+checks+" native storage and recovery checks; real API calls=0\n");finish(-1,result);
     }catch(Throwable ex){result.putString("stream","FAIL "+ex.toString()+"\n");finish(0,result);}}
