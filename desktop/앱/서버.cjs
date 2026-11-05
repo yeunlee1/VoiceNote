@@ -20077,7 +20077,7 @@ openQuestions는 '미확정 사항'입니다. 다음 회의에서 실제로 확�
               ...input2.customFormat ? [{ role: "system", content: meetingFormats.customInstruction(input2.customFormat) }] : [],
               {
                 role: "system",
-                content: "최종 출력은 전체 회의를 다룬 완성된 회의록이어야 합니다. previousMinutes가 있으면 같은 회의의 앞 구간을 이미 요약한 누적 기록입니다. 최근 구간만 요약하지 마세요. 이전 topics의 제목을 그대로 유지하고 해당 points를 유지하거나 새 발언과 통합하세요. 이전에만 나온 문서 표준화 같은 주제를 생략하지 마세요. 기존 decisions, actions, openQuestions도 새 구간에서 명시적으로 변경·철회·해결되지 않았다면 모두 유지하세요. 결정·할 일·미확정은 각각 40개, 주제와 주제별 문단은 각각 30개를 넘을 수 없습니다. 넘칠 것 같으면 항목을 버리지 말고 비슷한 항목을 하나로 합치세요. 주제를 합칠 때는 제목을 새로 써도 됩니다. 같은 발언이 반복되면 중복 추가하지 마세요. 개요에 '이번 구간', '이전 회의록', '누적 기록' 같은 처리 과정 설명을 쓰지 마세요. 기한이 제안·희망·추정일 뿐 확정되지 않았다면 actions.due는 null로 두고 그 논의를 topics나 openQuestions에 남기세요."
+                content: "최종 출력은 전체 회의를 다룬 완성된 회의록이어야 합니다. previousMinutes가 있으면 같은 회의의 앞 구간을 이미 요약한 누적 기록입니다. 최근 구간만 요약하지 마세요. 이전 topics의 제목을 그대로 유지하고 해당 points를 유지하거나 새 발언과 통합하세요. 이전에만 나온 문서 표준화 같은 주제를 생략하지 마세요. 기존 decisions, actions, openQuestions도 새 구간에서 명시적으로 변경·철회·해결되지 않았다면 모두 유지하세요. 결정·할 일·미확정은 각각 40개, 주제와 주제별 문단은 각각 30개를 넘을 수 없습니다. 넘칠 것 같으면 항목을 버리지 말고 비슷한 항목을 하나로 합치세요. 합칠 수 없는 할 일이 40개를 넘을 때만 마지막 항목 하나에 '그 외 할 일'로 모으고 각 일의 담당과 기한을 그 문장 안에 적으세요. 주제를 합칠 때는 제목을 새로 써도 됩니다. 같은 발언이 반복되면 중복 추가하지 마세요. 개요에 '이번 구간', '이전 회의록', '누적 기록' 같은 처리 과정 설명을 쓰지 마세요. 기한이 제안·희망·추정일 뿐 확정되지 않았다면 actions.due는 null로 두고 그 논의를 topics나 openQuestions에 남기세요."
               },
               {
                 role: "system",
@@ -20133,8 +20133,8 @@ openQuestions는 '미확정 사항'입니다. 다음 회의에서 실제로 확�
     // 사용량은 응답이 알려준 실제 모델(스냅샷 이름 포함)로 기록하고, 없거나 형식이 틀리면 요청 모델로 남긴다.
     call.model = reportedModel(raw?.model, modelOptions.model);
     call.usage = aiModels.responseUsage(raw?.usage);
-    if (raw?.status === "incomplete" && raw.incomplete_details?.reason === "max_output_tokens")
-      throw new MeetingError("AI_OUTPUT_LIMIT", "요약이 출력 한도에 도달해 끝나지 않았습니다. 전사 원문은 유지됩니다." + (requestId ? ` (요청 ID: ${requestId})` : ""), 503);
+    const outputLimit = () => new MeetingError("AI_OUTPUT_LIMIT", "요약이 출력 한도에 도달해 끝나지 않았습니다. 전사 원문은 유지됩니다." + (requestId ? ` (요청 ID: ${requestId})` : ""), 503);
+    if (raw?.status === "incomplete" && raw.incomplete_details?.reason === "max_output_tokens") throw outputLimit();
     if (raw?.status === "incomplete" && raw.incomplete_details?.reason === "content_filter")
       throw new MeetingError("AI_CONTENT_FILTER", "AI가 내용 제한으로 요약을 완료하지 못했습니다. 전사 원문은 유지됩니다." + (requestId ? ` (요청 ID: ${requestId})` : ""), 503);
     if (!raw || raw.status !== "completed" || !Array.isArray(raw.output)) throw malformed();
@@ -20144,8 +20144,10 @@ openQuestions는 '미확정 사항'입니다. 다음 회의에서 실제로 확�
     if (message?.role !== "assistant" || message.status !== "completed" || !Array.isArray(message.content) || message.content.length !== 1)
       throw malformed();
     const content = object2(message.content[0]);
-    if (content?.type !== "output_text" || typeof content.text !== "string" || content.text.length > 64e3)
+    if (content?.type !== "output_text" || typeof content.text !== "string")
       throw malformed();
+    // 결과가 너무 길면 형식 오류가 아니라 출력 한도와 같게 다뤄 화면이 구간을 나눠 다시 처리하게 한다.
+    if (content.text.length > 64e3) throw outputLimit();
     let parsed;
     try {
       parsed = JSON.parse(content.text);
