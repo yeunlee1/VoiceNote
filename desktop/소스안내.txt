@@ -27,3 +27,6 @@ DependencyRoot 아래에 WebView2 패키지를 WebView2 폴더로 풀고 Microso
 실행 예: .\설치\빌드.ps1 -BuildRoot "D:\VoiceNote빌드" -NodePath "D:\도구\node.exe" -DependencyRoot "D:\VoiceNote빌드\의존성"
 테스트 예: node --test 앱/*.test.cjs tests/*.test.cjs
 공개 저장소라 push 전 비밀 검사 훅을 씁니다. 저장소를 받은 PC마다 한 번 .githooks\pre-push와 .githooks\push-비밀검사.cjs를 .git\hooks에 복사합니다. 훅은 보낼 원격에 아직 없는 커밋과 태그의 바뀐 파일 전체 내용(바이너리·UTF-16 포함), 파일 이름, 커밋·태그 메시지에서 이 PC에 저장된 실제 API 키 값(%LOCALAPPDATA%\MeetingJournal\.env.회의록키)과 키 모양 문자열을 찾고, 키·서명 파일과 속을 읽을 수 없는 압축·실행 파일을 이름으로 막습니다. 찾으면 push를 멈추고 값은 출력하지 않습니다. 훅 시험은 sh .githooks/push-비밀검사-시험.sh입니다.
+자동 배포는 .github/workflows/자동배포.yml이 맡습니다. vX.Y.Z 태그를 올리면 시험과 빌드를 거쳐 GitHub 릴리즈를 만듭니다. 이름에 자동배포가 든 work 브랜치와 수동 실행은 버리는 서명으로 빌드까지만 시험합니다.
+태그를 올리기 전에 설치설치파일.iss, 프로그램.cs, 안드로이드 AndroidManifest.xml의 버전을 같은 값으로 올립니다. 값이 다르거나 태그 커밋이 main에 없으면 배포를 멈춥니다. 릴리즈 설명에는 태그 메시지를 씁니다.
+Android 서명은 저장소 주인이 .github서명등록.ps1을 한 번 실행해 GitHub 환경 release의 비밀 값으로 등록합니다. API 키는 작업 흐름에 넣지 않습니다. 이 PC의 배포최신 폴더는 자동 배포가 고치지 않으므로 필요하면 배포준비.ps1로 따로 갱신합니다.

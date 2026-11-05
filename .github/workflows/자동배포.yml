@@ -1,0 +1,66 @@
+# 버전 태그를 올리면 시험과 빌드를 거쳐 GitHub 릴리즈를 만든다. 이름에 자동배포가 든 작업 브랜치와 수동 실행은 버리는 서명으로 빌드까지만 시험한다.
+name: 자동 배포
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+    branches:
+      - 'work/*자동배포*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rehearsal:
+    name: 빌드 시험
+    if: github.ref_type == 'branch'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: 소스 받기
+        shell: pwsh
+        run: |
+          git -c core.autocrlf=false clone --quiet --depth 1 --branch "$env:GITHUB_REF_NAME" "https://github.com/$env:GITHUB_REPOSITORY.git" source
+          if ((git -C source rev-parse HEAD) -ne $env:GITHUB_SHA) { throw '받은 소스가 실행을 시작한 커밋과 다릅니다.' }
+      - name: 시험과 빌드
+        shell: pwsh
+        run: ./source/.github/자동배포.ps1 -OutputDir "$env:RUNNER_TEMP/배포물"
+
+  release:
+    name: 릴리즈 만들기
+    if: github.ref_type == 'tag'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: 소스 받기
+        shell: pwsh
+        run: |
+          git -c core.autocrlf=false clone --quiet --depth 1 --branch "$env:GITHUB_REF_NAME" "https://github.com/$env:GITHUB_REPOSITORY.git" source
+          if ((git -C source rev-parse HEAD) -ne $env:GITHUB_SHA) { throw '받은 소스가 실행을 시작한 커밋과 다릅니다.' }
+      - name: 태그가 main에 들어간 커밋인지 확인
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $status = gh api "repos/$env:GITHUB_REPOSITORY/compare/main...$env:GITHUB_SHA" --jq .status
+          if ($status -notin 'identical', 'behind') { throw "main에 들어가지 않은 커밋은 배포하지 않습니다: $status" }
+      - name: 시험과 빌드
+        shell: pwsh
+        env:
+          VOICENOTE_SIGN_P12_B64: ${{ secrets.VOICENOTE_SIGN_P12_B64 }}
+          VOICENOTE_SIGN_PASS_B64: ${{ secrets.VOICENOTE_SIGN_PASS_B64 }}
+        run: ./source/.github/자동배포.ps1 -Tag "$env:GITHUB_REF_NAME" -OutputDir "$env:RUNNER_TEMP/배포물"
+      - name: 릴리즈 올리기
+        shell: pwsh
+        working-directory: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = (Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/배포물" -File).FullName
+          gh release create "$env:GITHUB_REF_NAME" @files --title "VoiceNote $($env:GITHUB_REF_NAME.Substring(1))" --notes-from-tag --verify-tag
+          if ($LASTEXITCODE -ne 0) { throw '릴리즈를 만들지 못했습니다.' }
