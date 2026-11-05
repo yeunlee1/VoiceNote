@@ -25,6 +25,13 @@ test('Java가 실제로 컴파일·실행되고 자기 위치에 한글이 없�
   }
 });
 
+test('시험은 공통 코드를 거쳐서만 Java를 부른다', () => {
+  // 직접 부르는 시험은 이 PC에서는 통과해도 영어 Windows 러너에서 실패한다.
+  const own = new Set(['자바도구.cjs', '자바도구.test.cjs']);
+  const direct = fs.readdirSync(__dirname).filter(name => name.endsWith('.cjs') && !own.has(name) && /javac?\.exe|'도구', 'JDK'/.test(fs.readFileSync(path.join(__dirname, name), 'utf8')));
+  assert.deepEqual(direct, []);
+});
+
 test('한글이 든 인자는 Java를 부르기 전에 막는다', () => {
   assert.throws(() => tools.java(['-cp', path.join(os.tmpdir(), '한글폴더'), 'Home']), /한글/);
   assert.throws(() => tools.javac(['-d', os.tmpdir(), path.join(os.tmpdir(), '다시.java')]), /한글/);

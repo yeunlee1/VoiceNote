@@ -3,10 +3,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), { execFileSync } = require('node:child_process');
 const formats = require('../../../desktop/앱/출력형식.js');
+const { android, javac, java } = require('./자바도구.cjs');
 
 const root = path.join(__dirname, '..');
-const toolRoot = process.env.VOICENOTE_TOOLS || 'C:/DEV/VoiceNote/2026-09-30-회의록도구-안드로이드';
-const jdk = path.join(toolRoot, '도구', 'JDK', fs.readdirSync(path.join(toolRoot, '도구', 'JDK'))[0], 'bin');
 const shaped = (body, kept) => ({ overview: '가'.repeat(body), topics: [], decisions: kept ? ['나'.repeat(kept)] : [], actions: [], openQuestions: [] });
 
 test('Java 길이 판정과 이름 힌트가 데스크톱과 같다', () => {
@@ -21,11 +20,11 @@ test('Java 길이 판정과 이름 힌트가 데스크톱과 같다', () => {
     Array.from({ length: 25 }, (_, index) => `이름${index}`).join(', '), '   ', ',,,', '가', '12 34', 'a b cd'];
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'vn-summary-rules-'));
   try {
-    const sources = ['JsonText', 'SummaryRules'].map(name => path.join(root, 'src/kr/local/meetingjournal', `${name}.java`));
-    execFileSync(path.join(jdk, 'javac.exe'), ['-encoding', 'UTF-8', '-d', work, ...sources, path.join(__dirname, 'SummaryRulesTest.java')]);
+    const sources = ['JsonText', 'SummaryRules'].map(name => path.join(android, 'src/kr/local/meetingjournal', `${name}.java`));
+    javac(['-encoding', 'UTF-8', '-d', work, ...sources, path.join(android, 'tests', 'SummaryRulesTest.java')]);
     const input = path.join(work, 'in.txt'), output = path.join(work, 'out.txt');
     fs.writeFileSync(input, [...targets.map(item => `T ${item.format} ${item.body} ${item.kept}`), ...keywordCases.map(value => `K ${Buffer.from(value, 'utf8').toString('base64')}`)].join('\n') + '\n');
-    execFileSync(path.join(jdk, 'java.exe'), ['-Dfile.encoding=UTF-8', '-cp', work, 'kr.local.meetingjournal.SummaryRulesTest', input, output]);
+    java(['-Dfile.encoding=UTF-8', '-cp', work, 'kr.local.meetingjournal.SummaryRulesTest', input, output]);
     const results = fs.readFileSync(output, 'utf8').trim().split('\n');
     assert.equal(results.length, targets.length + keywordCases.length);
     targets.forEach((item, index) => assert.equal(Number(results[index]), formats.compactTarget(shaped(item.body, item.kept), item.format), JSON.stringify(item)));
