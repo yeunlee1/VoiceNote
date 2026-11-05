@@ -1193,7 +1193,7 @@
       previousMinutes = await shortenMinutes(previousMinutes);
       if (summaryInput() !== source)
         throw new Error("전송 중 입력을 수정했습니다. 수정 내용은 유지했습니다. 다시 만들면 변경 내용을 반영합니다.");
-      const shortenNote = shortenFailed ? " 길이를 줄이지 못해 전체 내용을 그대로 저장했습니다. 의견 칸에 요청을 적고 ‘의견 반영해 다시 정리’를 누르면 다시 줄입니다." : "";
+      const shortenNote = shortenFailed ? " 길이를 줄이지 못해 전체 내용을 그대로 저장했습니다." : "";
       state.minutes = previousMinutes;
       state.minutesFormat = metadata.outputFormat;
       await settleTrial("finish", state.analysisId);
@@ -1208,7 +1208,7 @@
       renderMinutes();
       refresh();
       await archiveResult();
-      workflow(`회의록 저장 완료.${shortenNote} ‘지난 회의’에서 다시 열 수 있습니다.`);
+      workflow(`회의록 저장 완료.${shortenNote}${shortenFailed ? " 의견 칸에 요청을 적고 ‘의견 반영해 다시 정리’를 누르면 다시 줄입니다." : ""} ‘지난 회의’에서 다시 열 수 있습니다.`);
       ui["retry-analysis"].hidden = true;
       const copyFailure = state.copies?.failed?.length ? ` ${copyMessage(state.copies)}` : "";
       announce(withTrialWarning(`${state.audioStored ? "음성과 " : ""}회의록을 보관했습니다. 내용을 검토하세요.${shortenNote}${copyFailure}`));
