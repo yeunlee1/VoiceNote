@@ -15,7 +15,7 @@ permissions:
 jobs:
   rehearsal:
     name: 빌드 시험
-    if: github.ref_type == 'branch'
+    if: github.event_name == 'workflow_dispatch' || github.ref_type == 'branch'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -30,7 +30,7 @@ jobs:
 
   release:
     name: 릴리즈 만들기
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: windows-latest
     timeout-minutes: 40
     environment: release

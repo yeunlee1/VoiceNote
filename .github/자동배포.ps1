@@ -66,8 +66,13 @@ try {
   New-Item -ItemType Directory -Path (Join-Path $tools '도구\JDK') -Force | Out-Null
   New-Item -ItemType Junction -Path (Join-Path $tools 'SDK') -Target $AndroidSdk | Out-Null
   New-Item -ItemType Junction -Path (Join-Path $tools '도구\JDK\jdk') -Target $Jdk | Out-Null
+  # 시험도 설치파일에 넣는 것과 같은 Node로 돌린다.
+  $nodeDirectory = Join-Path $work 'node'
+  New-Item -ItemType Directory -Path $nodeDirectory -Force | Out-Null
+  $node = Join-Path $nodeDirectory 'node.exe'
+  Get-VerifiedFile $nodeUrl $node $nodeSha256
   $env:VOICENOTE_TOOLS = $tools
-  $env:PATH = (Join-Path $Jdk 'bin') + [IO.Path]::PathSeparator + $env:PATH
+  $env:PATH = $nodeDirectory + [IO.Path]::PathSeparator + (Join-Path $Jdk 'bin') + [IO.Path]::PathSeparator + $env:PATH
 
   Write-Host '== 데스크톱 시험'
   Invoke-Tests (Join-Path $root 'desktop') @('앱/*.test.cjs', 'tests/*.test.cjs')
@@ -76,15 +81,10 @@ try {
   Write-Host '== 화면 검사'
   & node (Join-Path $root 'mobile/안드로이드/tests/화면검증-브라우저.cjs') (Join-Path $work 'captures')
   if ($LASTEXITCODE -ne 0) { throw '화면 검사가 실패했습니다.' }
-  Write-Host '== push 비밀 검사 훅 시험'
-  & (Join-Path $env:ProgramFiles 'Git\bin\bash.exe') (Join-Path $root '.githooks/push-비밀검사-시험.sh')
-  if ($LASTEXITCODE -ne 0) { throw 'push 비밀 검사 훅 시험이 실패했습니다.' }
 
   Write-Host '== Windows 의존성 받기'
   $dependencies = Join-Path $work 'dependencies'
   New-Item -ItemType Directory -Path $dependencies -Force | Out-Null
-  $node = Join-Path $work 'node.exe'
-  Get-VerifiedFile $nodeUrl $node $nodeSha256
   $package = Join-Path $work 'WebView2.nupkg'
   Get-VerifiedFile $webViewUrl $package $webViewSha256
   [IO.Compression.ZipFile]::ExtractToDirectory($package, (Join-Path $dependencies 'WebView2'))
@@ -148,4 +148,9 @@ finally {
   # 서명 파일은 성공·실패와 관계없이 지운다.
   $env:MEETING_SIGN_PASS = $null
   if (Test-Path -LiteralPath $signing) { Remove-Item -LiteralPath $signing -Recurse -Force }
+  # 정션을 둔 채 임시 폴더를 지우면 원본 SDK·JDK까지 지워질 수 있으므로 정션부터 푼다.
+  foreach ($link in (Join-Path $work 'android-toolsSDK'), (Join-Path $work 'android-tools도구JDKjdk')) {
+    if (Test-Path -LiteralPath $link) { (Get-Item -LiteralPath $link).Delete() }
+  }
+  Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }

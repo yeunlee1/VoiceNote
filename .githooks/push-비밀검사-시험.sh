@@ -1,22 +1,29 @@
 #!/bin/sh
 # push 비밀 검사 훅을 임시 저장소와 임시 원격으로 시험한다. 실제 키 대신 임시 키 파일(VOICENOTE_KEY_FILES)을 쓰고 키 값은 출력하지 않는다. 실행: sh .githooks/push-비밀검사-시험.sh
 set -u
-H=$(cd "$(dirname "$0")" && pwd); S=$(mktemp -d)
+# 경로 변환을 끈 환경이면 Windows의 git이 임시 폴더를 다른 곳에 만들어 이동에 실패한다. 이 시험은 언제나 변환을 켠 채로 돈다.
+unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
+fails=0
+stop() { echo "시험 중단: $1"; [ -n "${S:-}" ] && rm -rf "$S"; exit 2; }
+H=$(cd "$(dirname "$0")" && pwd) || stop "훅 폴더를 찾지 못했습니다"
+S=$(mktemp -d) || stop "임시 폴더를 만들지 못했습니다"
 W="$S/훅시험-작업"
-rm -rf "$W"; mkdir -p "$W"
-git init -q --bare "$W/원격.git"; git init -q --bare "$W/다른원격.git"
-git init -q "$W/저장소"
-cd "$W/저장소"
+mkdir -p "$W" || stop "임시 폴더를 만들지 못했습니다"
+git init -q --bare "$W/원격.git" && git init -q --bare "$W/다른원격.git" && git init -q "$W/저장소" || stop "임시 저장소를 만들지 못했습니다"
+cd "$W/저장소" || stop "임시 저장소로 이동하지 못했습니다"
+# 아래 명령은 강제 push와 reset --hard를 쓴다. 다른 저장소에서 돌면 그 저장소와 원격 main까지 되돌리므로 임시 저장소가 아니면 바로 멈춘다(2026-11-05 사고).
+case "$(git rev-parse --show-toplevel)" in */훅시험-작업/저장소) ;; *) stop "임시 저장소 안이 아닙니다" ;; esac
 git config user.name t; git config user.email t@t; git config core.autocrlf false; git checkout -q -b main
 mkdir -p .git/hooks
 cp "$H/pre-push" "$H/push-비밀검사.cjs" .git/hooks/
-git remote add origin "$W/원격.git"; git remote add 다른곳 "$W/다른원격.git"
+git remote add origin "$W/원격.git" && git remote add 다른곳 "$W/다른원격.git" || stop "임시 원격을 넣지 못했습니다"
+case "$(git remote get-url origin)" in */훅시험-작업/원격.git) ;; *) stop "origin이 임시 원격이 아닙니다" ;; esac
 FAKE_REAL="sk-proj-$(node -e "process.stdout.write(require('crypto').randomBytes(24).toString('hex'))")"
 SHAPE="sk-$(node -e "process.stdout.write(require('crypto').randomBytes(20).toString('hex'))")"
 printf '{"apiKey":"%s"}' "$FAKE_REAL" > "$W/임시키.json"
 export VOICENOTE_KEY_FILES="$W/임시키.json" FAKE_REAL SHAPE
-show() { if grep -q "$FAKE_REAL" "$W/out.txt" || grep -q "$SHAPE" "$W/out.txt"; then echo "실패 $1: 키 값이 출력에 보임"; fi; }
-judge() { name="$1"; expect="$2"; code="$3"; if [ "$expect" = 막음 ] && [ $code -ne 0 ] && grep -q "push를 멈췄습니다" "$W/out.txt"; then echo "통과 $name"; elif [ "$expect" = 허용 ] && [ $code -eq 0 ]; then echo "통과 $name"; else echo "실패 $name (종료 $code)"; cat "$W/out.txt"; fi; show "$name"; }
+show() { if grep -q "$FAKE_REAL" "$W/out.txt" || grep -q "$SHAPE" "$W/out.txt"; then echo "실패 $1: 키 값이 출력에 보임"; fails=$((fails+1)); fi; }
+judge() { name="$1"; expect="$2"; code="$3"; if [ "$expect" = 막음 ] && [ $code -ne 0 ] && grep -q "push를 멈췄습니다" "$W/out.txt"; then echo "통과 $name"; elif [ "$expect" = 허용 ] && [ $code -eq 0 ]; then echo "통과 $name"; else echo "실패 $name (종료 $code)"; fails=$((fails+1)); cat "$W/out.txt"; fi; show "$name"; }
 try() { git push -q -f origin HEAD:main > "$W/out.txt" 2>&1; judge "$1" "$2" $?; }
 undo() { git reset -q --hard HEAD~1; }
 echo "평범한 내용" > a.txt; git add a.txt; git commit -q -m "첫 커밋"; try "평범한 첫 push" 허용
@@ -36,3 +43,5 @@ git update-ref refs/remotes/다른곳/새가지 HEAD; git push -q -f origin 새�
 git tag -a 표시 -m "태그 메모 $SHAPE" main; git push -q origin 표시 > "$W/out.txt" 2>&1; judge "태그 메시지 안의 키 모양을 막음" 막음 $?
 git checkout -q main; echo "둘째 평범" > f.txt; git add f.txt; git commit -q -m "둘째"; try "평범한 이어 push는 허용" 허용
 cd /; rm -rf "$S"
+# 판정 결과를 종료 코드로도 알려 자동 실행에서 실패를 놓치지 않게 한다.
+if [ "$fails" -ne 0 ]; then echo "실패 합계 $fails건"; exit 1; fi
