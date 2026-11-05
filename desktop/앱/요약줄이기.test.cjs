@@ -197,25 +197,37 @@ test('회의록은 결정을 할 일로 되풀이하지 않되 합의한 일은 
   assert.match(systems, /decisions에 쓴 결정을 '적용합니다'나 '반영합니다'로 바꿔 되풀이하지/);
   assert.match(systems, /실행을 합의한 일은 담당이나 날짜가 없어도 남기/);
   assert.match(systems, /제안·검토 단계인 일을 확정된 할 일로 바꾸지/);
-  assert.match(systems, /한 항목은 100자 안에서 쓰고 전체는 많아도 25개로 정리/);
+  assert.match(systems, /한 항목은 100자 안에서 쓰고 전체는 25개 안팎으로 정리/);
   assert.match(systems, /한 일을 여러 항목으로 쪼개지 말고/);
-  assert.match(systems, /같은 화면·업무·담당·기한의 세부 항목은 대표 작업 하나로 묶되 세부 내용은 topics에 남/);
-  assert.doesNotMatch(systems, /한 가지 일로/);
+  assert.match(systems, /담당과 기한이 같은 세부 항목은 화면·업무별 대표 작업 하나로 묶/);
+  assert.match(systems, /개수를 맞추려고 합의한 일을 빼거나 담당·기한이 다른 일을 합치지/);
+  assert.match(systems, /topics를 쓰지 않는 형식이면 대표 작업 문장에 핵심만/);
+  assert.doesNotMatch(systems, /한 가지 일로|많아도 25개/);
   assert.doesNotMatch(systems, /적용 범위는 전사 표현을 따르고/);
 });
 
 const emptyMinutes = { suggestedTitle: '회의', overview: '회의', topics: [], decisions: [], actions: [], openQuestions: [] };
 const listLimits = [
-  ['주제', schema => schema.properties.topics.maxItems, count => ({ topics: Array.from({ length: count }, () => ({ title: '주제', points: [] })) })],
-  ['주제별 문단', schema => schema.properties.topics.items.properties.points.maxItems, count => ({ topics: [{ title: '주제', points: Array(count).fill('문단') }] })],
-  ['결정', schema => schema.properties.decisions.maxItems, count => ({ decisions: Array(count).fill('결정') })],
-  ['할 일', schema => schema.properties.actions.maxItems, count => ({ actions: Array.from({ length: count }, () => ({ task: '할 일', owner: null, due: null })) })],
-  ['미확정', schema => schema.properties.openQuestions.maxItems, count => ({ openQuestions: Array(count).fill('미정') })],
+  ['주제 수', schema => schema.properties.topics.maxItems, count => ({ topics: Array.from({ length: count }, () => ({ title: '주제', points: [] })) })],
+  ['주제별 문단 수', schema => schema.properties.topics.items.properties.points.maxItems, count => ({ topics: [{ title: '주제', points: Array(count).fill('문단') }] })],
+  ['결정 수', schema => schema.properties.decisions.maxItems, count => ({ decisions: Array(count).fill('결정') })],
+  ['할 일 수', schema => schema.properties.actions.maxItems, count => ({ actions: Array.from({ length: count }, () => ({ task: '할 일', owner: null, due: null })) })],
+  ['미확정 수', schema => schema.properties.openQuestions.maxItems, count => ({ openQuestions: Array(count).fill('미정') })],
+];
+const textLimits = [
+  ['개요 길이', schema => schema.properties.overview.maxLength, length => ({ overview: text(length) })],
+  ['주제 제목 길이', schema => schema.properties.topics.items.properties.title.maxLength, length => ({ topics: [{ title: text(length), points: [] }] })],
+  ['주제 문단 길이', schema => schema.properties.topics.items.properties.points.items.maxLength, length => ({ topics: [{ title: '주제', points: [text(length)] }] })],
+  ['결정 길이', schema => schema.properties.decisions.items.maxLength, length => ({ decisions: [text(length)] })],
+  ['할 일 길이', schema => schema.properties.actions.items.properties.task.maxLength, length => ({ actions: [{ task: text(length), owner: null, due: null }] })],
+  ['담당 길이', schema => schema.properties.actions.items.properties.owner.maxLength, length => ({ actions: [{ task: '할 일', owner: text(length), due: null }] })],
+  ['기한 길이', schema => schema.properties.actions.items.properties.due.maxLength, length => ({ actions: [{ task: '할 일', owner: null, due: text(length) }] })],
+  ['미확정 길이', schema => schema.properties.openQuestions.items.maxLength, length => ({ openQuestions: [text(length)] })],
 ];
 
 // 앱이 받는 한도와 AI에 알리는 한도가 다르면, 한도를 넘긴 유료 응답을 통째로 버리게 된다.
-for (const [name, limitOf, listOf] of listLimits) {
-  test(`${name} 수의 한도를 AI에 그대로 알리고 앱도 그 수까지 받는다`, async t => {
+for (const [name, limitOf, listOf] of [...listLimits, ...textLimits]) {
+  test(`${name} 한도를 AI에 그대로 알리고 앱도 그 값까지 받는다`, async t => {
     let answer = emptyMinutes;
     const server = await start(t, () => [200, completed(answer)]);
     const meeting = { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '' };
@@ -229,12 +241,15 @@ for (const [name, limitOf, listOf] of listLimits) {
   });
 }
 
-test('줄이기 요청도 주제와 문단 수 한도를 AI에 알린다', async t => {
+test('줄이기 요청도 개요·주제·문단 한도를 AI에 알린다', async t => {
   const server = await start(t, () => [200, completed({ overview: '짧게', topics: [{ title: '양식', points: ['짧게'] }] })]);
   assert.equal((await server.post('/api/summary/compact', request())).status, 200);
   const { properties } = server.calls[0].body.text.format.schema;
   assert.equal(properties.topics.maxItems, 30);
   assert.equal(properties.topics.items.properties.points.maxItems, 30);
+  assert.equal(properties.overview.maxLength, 8000);
+  assert.equal(properties.topics.items.properties.title.maxLength, 500);
+  assert.equal(properties.topics.items.properties.points.items.maxLength, 2000);
 });
 
 for (const outputFormat of ['meeting', 'summary', 'tasks']) {
@@ -244,8 +259,19 @@ for (const outputFormat of ['meeting', 'summary', 'tasks']) {
     const systems = server.calls[0].body.input.filter(item => item.role === 'system').map(item => item.content).join('\n');
     assert.match(systems, /결정·할 일·미확정은 각각 40개, 주제와 주제별 문단은 각각 30개를 넘을 수 없습니다/);
     assert.match(systems, /항목을 버리지 말고 비슷한 항목을 하나로 합치세요/);
+    assert.match(systems, /주제를 합칠 때는 제목을 새로 써도/);
   });
 }
+
+test('할 일만 고른 내 형식에는 세부 내용을 topics로 옮기라고 강요하지 않는다', async t => {
+  const server = await start(t, () => [200, completed(emptyMinutes)]);
+  const customFormat = { name: '할 일만', sections: [{ key: 'actions', title: '할 일' }], instruction: '' };
+  assert.equal((await server.post('/api/summary', { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '', outputFormat: 'custom', customFormat })).status, 200);
+  const systems = server.calls[0].body.input.filter(item => item.role === 'system').map(item => item.content).join('\n');
+  assert.match(systems, /목록에 없는 항목은 빈 배열/);
+  assert.match(systems, /topics를 쓰지 않는 형식이면 대표 작업 문장에 핵심만/);
+  assert.doesNotMatch(systems, /세부 내용은 topics에 남깁니다/);
+});
 
 test('요약과 줄이기 모두 일본어·중국어 글자를 섞지 말라고 지시한다', async t => {
   const server = await start(t, (count) => [200, completed(count === 1 ? emptyMinutes : { overview: '짧게', topics: [{ title: '양식', points: ['짧게'] }] })]);
