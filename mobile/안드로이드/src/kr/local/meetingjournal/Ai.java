@@ -80,7 +80,7 @@ final class Ai {
     void noteShorten(JSONObject record)throws Exception {
         // 길이를 줄이지 못해도 전체 결과는 저장돼 있으므로 안내만 덧붙인다.
         if(!shortenFailed)return;
-        record.put("message",record.optString("message")+" · 길이를 줄이지 못해 전체 내용을 그대로 저장했습니다.");
+        record.put("message",record.optString("message")+" · 길이를 줄이지 못해 전체 내용을 그대로 저장했습니다. ‘의견 반영해 다시 정리’를 누르면 다시 줄입니다.");
         try{store.save(record);}catch(Exception ignored){}
     }
     void finishAccess(JSONObject record)throws Exception {
@@ -161,7 +161,7 @@ final class Ai {
         if(target==0)return minutes;
         check();
         try{
-            progress.update("회의록이 길어 읽기 좋은 길이로 줄이는 중입니다.");
+            progress.update("회의록이 길어 읽기 좋은 길이로 줄이는 중…");
             CustomFormat custom="custom".equals(format)?Store.custom(record):null;
             JSONObject input=new JSONObject().put("title",record.optString("title")).put("date",record.optString("date")).put("participants",record.optString("participants")).put("targetCharacters",target).put("minutes",minutes);
             if(feedback!=null)input.put("feedback",feedback);

@@ -1172,7 +1172,7 @@
         const body = JSON.stringify({ title, date, participants, outputFormat: format, ...(customFormat ? { customFormat } : {}), targetCharacters, minutes, ...(feedback ? { feedback } : {}), ...(state.models.length && state.summaryModel ? { model: state.summaryModel } : {}) });
         const cached = state.summarySteps.find((step) => step.body === body);
         if (cached?.minutes) return cached.minutes;
-        workflow("회의록이 길어 읽기 좋은 길이로 줄이는 중입니다.");
+        workflow("회의록이 길어 읽기 좋은 길이로 줄이는 중…");
         try {
           const result = await aiApi("summary", "/api/summary/compact", { method: "POST", body, headers: aiHeaders("application/json"), signal });
           assertAI(signal);
@@ -1188,7 +1188,7 @@
       previousMinutes = await shortenMinutes(previousMinutes);
       if (summaryInput() !== source)
         throw new Error("전송 중 입력을 수정했습니다. 수정 내용은 유지했습니다. 다시 만들면 변경 내용을 반영합니다.");
-      const shortenNote = shortenFailed ? " 길이를 줄이지 못해 전체 내용을 그대로 저장했습니다." : "";
+      const shortenNote = shortenFailed ? " 길이를 줄이지 못해 전체 내용을 그대로 저장했습니다. ‘의견 반영해 다시 정리’를 누르면 다시 줄입니다." : "";
       state.minutes = previousMinutes;
       state.minutesFormat = metadata.outputFormat;
       await settleTrial("finish", state.analysisId);
