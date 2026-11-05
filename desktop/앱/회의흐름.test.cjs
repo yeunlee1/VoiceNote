@@ -298,6 +298,21 @@ test('줄이기가 실패해도 전체 결과를 저장하고 알린다', async 
   assert.equal(savedMeeting(posts).minutes.overview, longResult.overview);
   assert.match(ui.status.textContent, /길이를 줄이지 못해/);
   assert.match(ui['workflow-status'].textContent, /길이를 줄이지 못해/);
+  assert.match(ui['workflow-status'].textContent, /의견 칸에 요청을 적고/);
+});
+
+test('모델이 줄이지 못한 답을 주면 실패로 알리고 다음 분석에서 다시 시도한다', async () => {
+  let attempts = 0;
+  const { state, ui, summarize, compactBodies, summaryBodies } = analyzeLong(body => (++attempts === 1 ? Response.json({ minutes: body.minutes, shortened: false }) : shortened(body)));
+  ui.title.value = '긴 회의';
+  assert.equal(await summarize(true), true);
+  assert.equal(state.minutes.overview, longResult.overview);
+  assert.match(ui['workflow-status'].textContent, /길이를 줄이지 못해/);
+  assert.equal(await summarize(true), true);
+  assert.equal(summaryBodies.length, 1);
+  assert.equal(compactBodies.length, 2, '효과 없던 줄이기는 성공으로 재사용하지 않는다');
+  assert.equal(state.minutes.overview, '전체 방향 | 짧게');
+  assert.doesNotMatch(ui['workflow-status'].textContent, /길이를 줄이지 못해/);
 });
 
 test('줄이는 중에 멈추면 저장하지 않는다', async () => {

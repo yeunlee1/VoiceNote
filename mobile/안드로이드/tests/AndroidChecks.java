@@ -339,9 +339,12 @@ public final class AndroidChecks extends Instrumentation {
         replies.add(replyWith(full));replies.add("{\"status\":\"failed\"}");new Ai(store,message->{}).run(failing);
         expect(failing.getString("state").equals("complete")&&failing.getString("message").contains("길이를 줄이지 못해"),"줄이기 실패는 안내만 하고 완료한다");
         expect(new JSONObject(Store.read(new File(store.directory("main",failing.getString("id")),"요약.json"))).getString("overview").equals(full.getString("overview")),"줄이기 실패 때 전체 결과를 저장한다");
-        JSONObject longer=analyzable(store,"줄이기 무효");
+        JSONObject longer=analyzable(store,full.getString("suggestedTitle"));File longerDir=store.directory("main",longer.getString("id"));
         replies.add(replyWith(full));replies.add(replyWith(new JSONObject().put("overview",repeated(5000,'다')).put("topics",new JSONArray())));new Ai(store,message->{}).run(longer);
-        expect(new JSONObject(Store.read(new File(store.directory("main",longer.getString("id")),"요약.json"))).getString("overview").equals(full.getString("overview")),"더 길어진 답은 버리고 원래 결과를 쓴다");
+        expect(new JSONObject(Store.read(new File(longerDir,"요약.json"))).getString("overview").equals(full.getString("overview")),"더 길어진 답은 버리고 원래 결과를 쓴다");
+        expect(longer.getString("message").contains("길이를 줄이지 못해")&&longer.getString("message").contains("의견 칸에 요청을 적고"),"줄이지 못한 답도 실패로 알리고 다음 행동을 안내한다");
+        before=requests.size();replies.add(replyWith(shortPart()));new Ai(store,message->{}).run(longer);
+        expect(requests.size()==before+1&&new JSONObject(Store.read(new File(longerDir,"요약.json"))).getString("overview").equals("전체 방향 | 짧게"),"줄이지 못한 답은 재사용하지 않고 다음 분석에서 다시 줄인다");
         before=requests.size();replies.add(replyWith(full));replies.add(replyWith(shortPart()));
         refine(new Ai(store,message->{}),record,record.getString("resultId"),"일정을 자세히");
         expect(user(requests.get(before+1)).getString("feedback").equals("일정을 자세히"),"의견 반영의 줄이기에도 의견을 싣는다");

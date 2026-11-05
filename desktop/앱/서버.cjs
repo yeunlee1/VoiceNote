@@ -20152,8 +20152,10 @@ openQuestions는 '미확정 사항'입니다. 다음 회의에서 실제로 확�
     }
     const minutes = (compact ? compactSchema : minutesSchema).safeParse(parsed);
     if (!minutes.success) throw malformed();
+    const merged = compact ? mergeCompact(input2.minutes, minutes.data) : minutes.data;
     return {
-      minutes: compact ? mergeCompact(input2.minutes, minutes.data) : minutes.data,
+      minutes: merged,
+      ...compact ? { shortened: merged !== input2.minutes } : {},
       model: modelOptions.model,
       maxOutputTokens: modelOptions.max_output_tokens,
       usage: call.usage,

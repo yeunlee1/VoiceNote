@@ -80,7 +80,7 @@ final class Ai {
     void noteShorten(JSONObject record)throws Exception {
         // 길이를 줄이지 못해도 전체 결과는 저장돼 있으므로 안내만 덧붙인다.
         if(!shortenFailed)return;
-        record.put("message",record.optString("message")+" · 길이를 줄이지 못해 전체 내용을 그대로 저장했습니다. ‘의견 반영해 다시 정리’를 누르면 다시 줄입니다.");
+        record.put("message",record.optString("message")+" · 길이를 줄이지 못해 전체 내용을 그대로 저장했습니다. 의견 칸에 요청을 적고 ‘의견 반영해 다시 정리’를 누르면 다시 줄입니다.");
         try{store.save(record);}catch(Exception ignored){}
     }
     void finishAccess(JSONObject record)throws Exception {
@@ -172,6 +172,8 @@ final class Ai {
             JSONObject body=requestBody(instructions,custom);
             body.getJSONArray("input").put(new JSONObject().put("role","user").put("content",input.toString()));
             JSONObject merged=mergeCompact(minutes,new JSONObject(minutesText(record,body)));
+            // 모델이 줄이지 못한 답을 주면 실패로 알리고, 성공으로 재사용하지 않게 저장하지 않는다.
+            if(merged==minutes){shortenFailed=true;return minutes;}
             Store.write(cache,merged.toString());return merged;
         }catch(Exception ex){check();shortenFailed=true;return minutes;}
     }

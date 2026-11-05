@@ -1176,6 +1176,11 @@
         try {
           const result = await aiApi("summary", "/api/summary/compact", { method: "POST", body, headers: aiHeaders("application/json"), signal });
           assertAI(signal);
+          // 모델이 줄이지 못한 답을 주면 실패로 알리고, 성공으로 재사용하지 않게 저장하지 않는다.
+          if (result.shortened === false) {
+            shortenFailed = true;
+            return minutes;
+          }
           state.summarySteps.push({ body, minutes: result.minutes });
           return result.minutes;
         } catch {
@@ -1188,7 +1193,7 @@
       previousMinutes = await shortenMinutes(previousMinutes);
       if (summaryInput() !== source)
         throw new Error("전송 중 입력을 수정했습니다. 수정 내용은 유지했습니다. 다시 만들면 변경 내용을 반영합니다.");
-      const shortenNote = shortenFailed ? " 길이를 줄이지 못해 전체 내용을 그대로 저장했습니다. ‘의견 반영해 다시 정리’를 누르면 다시 줄입니다." : "";
+      const shortenNote = shortenFailed ? " 길이를 줄이지 못해 전체 내용을 그대로 저장했습니다. 의견 칸에 요청을 적고 ‘의견 반영해 다시 정리’를 누르면 다시 줄입니다." : "";
       state.minutes = previousMinutes;
       state.minutesFormat = metadata.outputFormat;
       await settleTrial("finish", state.analysisId);

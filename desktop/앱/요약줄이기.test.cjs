@@ -93,6 +93,7 @@ test('overview와 topics만 줄이고 제목·결정·할 일·미확정은 원�
   const result = await server.post('/api/summary/compact', request());
   assert.equal(result.status, 200);
   assert.deepEqual(result.body.minutes, { ...source, ...shorter });
+  assert.equal(result.body.shortened, true);
   assert.equal(result.body.aiCall.kind, 'summary');
   assert.equal(server.calls.length, 1);
   const body = server.calls[0].body;
@@ -129,6 +130,7 @@ for (const [name, answer] of [
     const result = await server.post('/api/summary/compact', request());
     assert.equal(result.status, 200);
     assert.deepEqual(result.body.minutes, source);
+    assert.equal(result.body.shortened, false);
   });
 }
 
