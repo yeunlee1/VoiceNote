@@ -313,6 +313,55 @@ public final class AndroidChecks extends Instrumentation {
         expect(after.getString("resultId").equals(latest)&&after.getString("state").equals("complete"),"실패한 의견 반영은 최신 결과 포인터와 완료 상태를 지킨다");
         expect(Store.read(new File(dir,"결과-"+latest+".json")).equals(latestResult)&&Store.read(new File(dir,"평가-"+old+".json")).equals(savedReview),"실패 때 최신 결과 본문과 평가 파일을 지킨다");
     }
+    static String replyWith(JSONObject value)throws Exception{return new JSONObject().put("status","completed").put("output",new JSONArray().put(new JSONObject().put("type","message").put("content",new JSONArray().put(new JSONObject().put("type","output_text").put("text",value.toString()))))).toString();}
+    static String repeated(int count,char value){return new String(new char[count]).replace('\0',value);}
+    static JSONObject longMinutes()throws Exception{return minutes().put("overview","전체 방향 | "+repeated(3000,'가')).put("topics",new JSONArray().put(new JSONObject().put("title","주제").put("points",new JSONArray().put(repeated(1000,'나')))));}
+    static JSONObject shortPart()throws Exception{return new JSONObject().put("overview","전체 방향 | 짧게").put("topics",new JSONArray().put(new JSONObject().put("title","주제").put("points",new JSONArray().put("짧은 문단"))));}
+    static void shortenChecks(Store store)throws Exception{
+        expect(Ai.bodyLength(new JSONObject("{\"overview\":\"12345\",\"topics\":[{\"title\":\"가나\",\"points\":[\"다라마\",\"바\"]}]}"))==11&&Ai.keptLength(new JSONObject("{\"decisions\":[\"1234\"],\"actions\":[{\"task\":\"일\",\"owner\":\"김과장\",\"due\":\"내일\"},{\"task\":\"둘\",\"owner\":null,\"due\":null}],\"openQuestions\":[\"미정\"]}"))==13,"글자 수는 데스크톱과 같은 항목을 세고 null 담당은 0자로 센다");
+        JSONObject full=longMinutes();
+        // AI 제목이 회의명을 바꾸면 입력이 달라져 재사용되지 않으므로, 재사용을 보려고 같은 제목으로 시작한다.
+        JSONObject record=analyzable(store,full.getString("suggestedTitle"));File dir=store.directory("main",record.getString("id"));int before=requests.size();
+        replies.add(replyWith(full));replies.add(replyWith(shortPart()));new Ai(store,message->{}).run(record);
+        expect(requests.size()==before+2,"긴 결과는 요약 뒤 한 번 줄인다");
+        JSONObject asset=store.asset("summary-compact.json"),request=new JSONObject(requests.get(before+1));
+        expect(request.getJSONObject("text").toString().equals(asset.getJSONObject("text").toString())&&firstSystem(requests.get(before+1)).equals(asset.getJSONArray("input").getJSONObject(0).getString("content"))&&request.getJSONArray("input").length()==2,"줄이기는 데스크톱에서 뽑은 지시문과 응답 형식을 쓴다");
+        expect(request.getString("model").equals("gpt-6.1-sol")&&request.getInt("max_output_tokens")==32000,"줄이기도 같은 모델과 출력 한도를 쓴다");
+        JSONObject payload=user(requests.get(before+1));
+        expect(payload.names().join(",").equals("\"title\",\"date\",\"participants\",\"targetCharacters\",\"minutes\""),"줄이기 입력 순서가 데스크톱과 같다");
+        expect(payload.getInt("targetCharacters")==SummaryRules.compactTarget("meeting",Ai.bodyLength(full),Ai.keptLength(full))&&payload.getJSONObject("minutes").toString().equals(full.toString()),"목표 글자 수와 전체 결과를 보낸다");
+        JSONObject saved=new JSONObject(Store.read(new File(dir,"요약.json")));
+        expect(saved.getString("overview").equals("전체 방향 | 짧게")&&saved.getJSONArray("topics").length()==1,"줄인 본문을 저장한다");
+        expect(saved.getString("suggestedTitle").equals(full.getString("suggestedTitle"))&&saved.getJSONArray("decisions").toString().equals(full.getJSONArray("decisions").toString())&&saved.getJSONArray("actions").toString().equals(full.getJSONArray("actions").toString())&&saved.getJSONArray("openQuestions").toString().equals(full.getJSONArray("openQuestions").toString()),"제목·결정·할 일·미확정은 원문 그대로 저장한다");
+        expect(!record.getString("message").contains("줄이지 못해"),"성공하면 실패 안내가 없다");
+        before=requests.size();new Ai(store,message->{}).run(record);expect(requests.size()==before,"성공한 요약과 줄이기는 다시 요청하지 않는다");
+        JSONObject failing=analyzable(store,"줄이기 실패");
+        replies.add(replyWith(full));replies.add("{\"status\":\"failed\"}");new Ai(store,message->{}).run(failing);
+        expect(failing.getString("state").equals("complete")&&failing.getString("message").contains("길이를 줄이지 못해"),"줄이기 실패는 안내만 하고 완료한다");
+        expect(new JSONObject(Store.read(new File(store.directory("main",failing.getString("id")),"요약.json"))).getString("overview").equals(full.getString("overview")),"줄이기 실패 때 전체 결과를 저장한다");
+        JSONObject longer=analyzable(store,full.getString("suggestedTitle"));File longerDir=store.directory("main",longer.getString("id"));
+        replies.add(replyWith(full));replies.add(replyWith(new JSONObject().put("overview",repeated(5000,'다')).put("topics",new JSONArray())));new Ai(store,message->{}).run(longer);
+        expect(new JSONObject(Store.read(new File(longerDir,"요약.json"))).getString("overview").equals(full.getString("overview")),"더 길어진 답은 버리고 원래 결과를 쓴다");
+        expect(longer.getString("message").contains("길이를 줄이지 못해")&&longer.getString("message").contains("의견 칸에 요청을 적고"),"줄이지 못한 답도 실패로 알리고 다음 행동을 안내한다");
+        before=requests.size();replies.add(replyWith(shortPart()));new Ai(store,message->{}).run(longer);
+        expect(requests.size()==before+1&&new JSONObject(Store.read(new File(longerDir,"요약.json"))).getString("overview").equals("전체 방향 | 짧게"),"줄이지 못한 답은 재사용하지 않고 다음 분석에서 다시 줄인다");
+        before=requests.size();replies.add(replyWith(full));replies.add(replyWith(shortPart()));
+        refine(new Ai(store,message->{}),record,record.getString("resultId"),"일정을 자세히");
+        expect(user(requests.get(before+1)).getString("feedback").equals("일정을 자세히"),"의견 반영의 줄이기에도 의견을 싣는다");
+        JSONObject custom=store.create(new JSONObject().put("date","2099-01-06").put("title","내 형식 줄이기").put("outputFormat","custom").put("customFormat",new JSONObject().put("name","주간").put("sections",new JSONArray().put(new JSONObject().put("key","overview").put("title","요약")).put(new JSONObject().put("key","topics").put("title","내용")))));
+        custom.getJSONArray("audio").put("원음-001.m4a");store.save(custom);Store.write(new File(store.directory("main",custom.getString("id")),"전사-001.txt"),"내 형식 전사");
+        before=requests.size();replies.add(replyWith(full));replies.add(replyWith(shortPart()));new Ai(store,message->{}).run(custom);
+        expect(new JSONObject(requests.get(before+1)).getJSONArray("input").getJSONObject(1).getString("content").equals(Store.custom(custom).instruction()),"내 형식 지시를 줄이기 지침 바로 다음에 넣는다");
+        JSONObject named=store.create(new JSONObject().put("date","2099-01-07").put("title","이름 힌트").put("participants","김과장, <이대리>"));
+        File audio=new File(store.directory("main",named.getString("id")),"원음-시험.m4a");Store.write(audio,"시험 원음");
+        before=requests.size();replies.add("{\"text\":\"전사\"}");new Ai(store,message->{}).transcribe(named,audio);
+        String multipart=requests.get(before);
+        expect(multipart.contains("name=\"keywords[]\"\r\n\r\n김과장\r\n")&&multipart.contains("name=\"keywords[]\"\r\n\r\n이대리\r\n")&&multipart.indexOf("name=\"languages[]\"")<multipart.indexOf("name=\"keywords[]\"")&&multipart.indexOf("name=\"keywords[]\"")<multipart.indexOf("name=\"response_format\""),"참석자 이름을 전사 힌트로 보낸다");
+        JSONObject anonymous=store.create(new JSONObject().put("date","2099-01-07").put("title","힌트 없음"));
+        File silent=new File(store.directory("main",anonymous.getString("id")),"원음-시험.m4a");Store.write(silent,"시험 원음");
+        before=requests.size();replies.add("{\"text\":\"전사\"}");new Ai(store,message->{}).transcribe(anonymous,silent);
+        expect(!requests.get(before).contains("keywords[]"),"참석자가 없으면 힌트를 보내지 않는다");
+    }
     static void templateCacheChecks(Store store)throws Exception{
         JSONObject record=analyzable(store,"자산 캐시");File dir=store.directory("main",record.getString("id"));Map<String,String> assets=new HashMap<>();
         for(String name:new String[]{"summary-meeting.json","summary-feedback.json"})try(InputStream in=store.context.getAssets().open(name)){assets.put(name,Store.read(in));}
@@ -572,6 +621,7 @@ public final class AndroidChecks extends Instrumentation {
         settingsFormatAndTrial(store);
         requestContract(new Store(testContext()));
         refinementChecks(new Store(testContext()));
+        shortenChecks(new Store(testContext()));
         templateCacheChecks(new Store(testContext()));
         documentChecks(new Store(testContext()));
         copyChecks(new Store(testContext()));

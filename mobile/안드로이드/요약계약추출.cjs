@@ -5,7 +5,7 @@ const destination=process.argv[2];
 if(!destination)throw new Error('빌드 자산 경로가 필요합니다.');
 const formats=['meeting','summary','tasks'],sent={};
 let current='';
-const server=createMeetingServer({dataDir:path.join(destination,'임시검증'),apiFetch:async(url,options)=>{sent[current]=JSON.parse(options.body);return Response.json({status:'completed',usage:{input_tokens:1,output_tokens:1},output:[{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:JSON.stringify({suggestedTitle:'시험',overview:'시험',topics:[],decisions:[],actions:[],openQuestions:[]})}]}]});}});
+const server=createMeetingServer({dataDir:path.join(destination,'임시검증'),apiFetch:async(url,options)=>{sent[current]=JSON.parse(options.body);return Response.json({status:'completed',usage:{input_tokens:1,output_tokens:1},output:[{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:JSON.stringify(current==='compact'?{overview:'시험',topics:[]}:{suggestedTitle:'시험',overview:'시험',topics:[],decisions:[],actions:[],openQuestions:[]})}]}]});}});
 const userFields=body=>Object.keys(JSON.parse(body.input.find(item=>item.role==='user').content)).sort().join(',');
 const systems=body=>body.input.filter(item=>item.role==='system');
 (async()=>{await new Promise(resolve=>server.server.listen(0,'127.0.0.1',resolve));try{const origin=`http://127.0.0.1:${server.server.address().port}`,headers={Origin:origin,'X-Meeting-Token':server.token,'Content-Type':'application/json'};await fetch(origin+'/api/key',{method:'POST',headers,body:JSON.stringify({apiKey:'mock-only',persist:false})});
@@ -26,4 +26,8 @@ const systems=body=>body.input.filter(item=>item.role==='system');
   try{assert.deepEqual(withFeedback.slice(0,-1),plain);}catch{throw new Error('의견 반영 요청의 기존 지침이 일반 요청과 다릅니다.');}
   if(withFeedback.length!==plain.length+1||input.at(-1).role!=='user'||input.at(-2)!==withFeedback.at(-1))throw new Error('의견 지시문이 user 바로 앞에 하나만 있지 않습니다.');
   fs.writeFileSync(path.join(destination,'summary-feedback.json'),JSON.stringify(withFeedback.at(-1)));
-  console.log('요약 요청 양식 3종과 의견 지시문 추출 완료');}finally{await new Promise(resolve=>server.server.close(resolve));}})().catch(error=>{console.error(error.message);process.exitCode=1;});
+  // 결과 줄이기 요청도 같은 방식으로 뽑는다. 휴대폰 Ai.java는 사용자 메시지를 title·date·participants·targetCharacters·minutes(+feedback)로 직접 만든다.
+  current='compact';const compactResponse=await fetch(origin+'/api/summary/compact',{method:'POST',headers:{...headers,'X-Operation-Id':crypto.randomUUID()},body:JSON.stringify({title:'시험',date:'2026-09-30',participants:'',targetCharacters:1000,minutes:{overview:'시험 결과',topics:[],decisions:[],actions:[],openQuestions:[]}})});if(!compactResponse.ok)throw new Error(`줄이기 양식 추출 실패: ${await compactResponse.text()}`);
+  if(userFields(sent.compact)!=='date,minutes,participants,targetCharacters,title')throw new Error('데스크톱 줄이기 사용자 메시지 필드가 휴대폰과 다릅니다: '+userFields(sent.compact));
+  fs.writeFileSync(path.join(destination,'summary-compact.json'),JSON.stringify({...sent.compact,input:systems(sent.compact)}));
+  console.log('요약 요청 양식 3종과 의견 지시문, 줄이기 양식 추출 완료');}finally{await new Promise(resolve=>server.server.close(resolve));}})().catch(error=>{console.error(error.message);process.exitCode=1;});

@@ -1003,10 +1003,11 @@
         throw new Error("전사할 수 있는 22MB 이하 원음이 없습니다.");
       const before = ui.transcript.value;
       const type = part.blob.type.split(";")[0] || "audio/webm";
+      const keywords = Formats.participantKeywords(ui.participants.value);
       const result = await aiApi("transcription", "/api/transcribe", {
         method: "POST",
         body: part.blob,
-        headers: aiHeaders(type),
+        headers: { ...aiHeaders(type), ...(keywords.length ? { "X-Transcribe-Keywords": encodeURIComponent(keywords.join(",")) } : {}) },
         signal,
       });
       assertAI(signal);
@@ -1162,7 +1163,37 @@
             "전송 중 입력을 수정했습니다. 수정 내용은 유지했습니다. 다시 만들면 변경 내용을 반영합니다.",
           );
       }
+      let shortenFailed = false;
+      async function shortenMinutes(minutes) {
+        // 결과가 형식의 목표 길이를 넘을 때만 overview와 topics를 한 번 줄인다. 제목·결정·할 일·미확정은 서버가 원문 그대로 되붙이고, 실패해도 완성한 전체 결과는 저장한다.
+        const targetCharacters = Formats.compactTarget(minutes, metadata.outputFormat);
+        if (!targetCharacters) return minutes;
+        const { title, date, participants, outputFormat: format, customFormat } = metadata;
+        const body = JSON.stringify({ title, date, participants, outputFormat: format, ...(customFormat ? { customFormat } : {}), targetCharacters, minutes, ...(feedback ? { feedback } : {}), ...(state.models.length && state.summaryModel ? { model: state.summaryModel } : {}) });
+        const cached = state.summarySteps.find((step) => step.body === body);
+        if (cached?.minutes) return cached.minutes;
+        workflow("회의록이 길어 읽기 좋은 길이로 줄이는 중…");
+        try {
+          const result = await aiApi("summary", "/api/summary/compact", { method: "POST", body, headers: aiHeaders("application/json"), signal });
+          assertAI(signal);
+          // 모델이 줄이지 못한 답을 주면 실패로 알리고, 성공으로 재사용하지 않게 저장하지 않는다.
+          if (result.shortened === false) {
+            shortenFailed = true;
+            return minutes;
+          }
+          state.summarySteps.push({ body, minutes: result.minutes });
+          return result.minutes;
+        } catch {
+          assertAI(signal);
+          shortenFailed = true;
+          return minutes;
+        }
+      }
       for (const text of splitTranscript(transcript)) await summarizeSection(text);
+      previousMinutes = await shortenMinutes(previousMinutes);
+      if (summaryInput() !== source)
+        throw new Error("전송 중 입력을 수정했습니다. 수정 내용은 유지했습니다. 다시 만들면 변경 내용을 반영합니다.");
+      const shortenNote = shortenFailed ? " 길이를 줄이지 못해 전체 내용을 그대로 저장했습니다." : "";
       state.minutes = previousMinutes;
       state.minutesFormat = metadata.outputFormat;
       await settleTrial("finish", state.analysisId);
@@ -1177,10 +1208,10 @@
       renderMinutes();
       refresh();
       await archiveResult();
-      workflow("회의록 저장 완료. ‘지난 회의’에서 다시 열 수 있습니다.");
+      workflow(`회의록 저장 완료.${shortenNote}${shortenFailed ? " 의견 칸에 요청을 적고 ‘의견 반영해 다시 정리’를 누르면 다시 줄입니다." : ""} ‘지난 회의’에서 다시 열 수 있습니다.`);
       ui["retry-analysis"].hidden = true;
       const copyFailure = state.copies?.failed?.length ? ` ${copyMessage(state.copies)}` : "";
-      announce(withTrialWarning(`${state.audioStored ? "음성과 " : ""}회의록을 보관했습니다. 내용을 검토하세요.${copyFailure}`));
+      announce(withTrialWarning(`${state.audioStored ? "음성과 " : ""}회의록을 보관했습니다. 내용을 검토하세요.${shortenNote}${copyFailure}`));
     });
   }
 

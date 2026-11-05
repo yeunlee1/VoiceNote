@@ -87,6 +87,7 @@ try {
   if($entries -notcontains 'assets/formats.js'){throw 'APK에 출력 형식 파일(formats.js)이 없습니다.'}
   foreach($format in 'meeting','summary','tasks'){if($entries -notcontains "assets/summary-$format.json"){throw "APK에 $format 요약 양식이 없습니다."}}
   if($entries -notcontains 'assets/summary-feedback.json'){throw 'APK에 의견 반영 지시문(summary-feedback.json)이 없습니다.'}
+  if($entries -notcontains 'assets/summary-compact.json'){throw 'APK에 결과 줄이기 지시문(summary-compact.json)이 없습니다.'}
   '의견 반영 지시문 포함: 예'
   "공용 기본 키 포함: $(if($entries -contains 'assets/default.key'){'예'}else{'아니요'})"
   $korean=Join-Path $OutputRoot $(if($DebugBuild){((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.3.0-안드로이드-검증용.apk')}else{((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.3.0-안드로이드-설치본.apk')})
