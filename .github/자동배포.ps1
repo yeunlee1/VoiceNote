@@ -148,9 +148,11 @@ finally {
   # 서명 파일은 성공·실패와 관계없이 지운다.
   $env:MEETING_SIGN_PASS = $null
   if (Test-Path -LiteralPath $signing) { Remove-Item -LiteralPath $signing -Recurse -Force }
-  # 정션을 둔 채 임시 폴더를 지우면 원본 SDK·JDK까지 지워질 수 있으므로 정션부터 푼다.
-  foreach ($link in (Join-Path $work 'android-toolsSDK'), (Join-Path $work 'android-tools도구JDKjdk')) {
+  # 정션을 둔 채 임시 폴더를 지우면 원본 SDK·JDK까지 지워질 수 있으므로 정션부터 풀고, 정션이 하나도 남지 않았을 때만 지운다.
+  foreach ($link in (Join-Path $work 'android-tools\SDK'), (Join-Path $work 'android-tools\도구\JDK\jdk')) {
     if (Test-Path -LiteralPath $link) { (Get-Item -LiteralPath $link).Delete() }
   }
-  Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+  if (-not @(Get-ChildItem -LiteralPath $work -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue).Count) {
+    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+  }
 }

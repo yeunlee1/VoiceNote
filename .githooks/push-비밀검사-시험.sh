@@ -8,6 +8,8 @@ stop() { echo "시험 중단: $1"; [ -n "${S:-}" ] && rm -rf "$S"; exit 2; }
 H=$(cd "$(dirname "$0")" && pwd) || stop "훅 폴더를 찾지 못했습니다"
 S=$(mktemp -d) || stop "임시 폴더를 만들지 못했습니다"
 W="$S/훅시험-작업"
+# 훅은 자료 폴더의 키 파일과 비교한다. 시험에서는 이 PC의 실제 키 파일을 읽지 않도록 자료 폴더를 임시 폴더로 바꾼다.
+export LOCALAPPDATA="$W"
 mkdir -p "$W" || stop "임시 폴더를 만들지 못했습니다"
 git init -q --bare "$W/원격.git" && git init -q --bare "$W/다른원격.git" && git init -q "$W/저장소" || stop "임시 저장소를 만들지 못했습니다"
 cd "$W/저장소" || stop "임시 저장소로 이동하지 못했습니다"
