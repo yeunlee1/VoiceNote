@@ -190,6 +190,25 @@ test('일반 요약은 말한 사람을 추측하지 말고 이름과 담당을 
   assert.match(systems, /이전 topics의 제목을 그대로 유지/);
 });
 
+test('모든 형식에 날짜·시간·조건의 범위를 바꾸지 말라고 지시한다', async t => {
+  const server = await start(t, () => [200, completed({ overview: '회의', topics: [], decisions: [], actions: [], openQuestions: [] })]);
+  for (const outputFormat of ['meeting', 'summary', 'tasks']) {
+    const result = await server.post('/api/summary', { text: `회의 발언 ${outputFormat}`, title: '회의', date: '2026-11-05', participants: '김과장', outputFormat });
+    assert.equal(result.status, 200, outputFormat);
+    const systems = server.calls.at(-1).body.input.filter(item => item.role === 'system').map(item => item.content).join('\n');
+    assert.match(systems, /적용 범위는 전사 표현을 따르고 임의로 좁히거나 넓히지/, outputFormat);
+  }
+});
+
+test('회의록은 결정을 할 일로 되풀이하지 않되 합의한 일은 담당이 없어도 남기라고 지시한다', async t => {
+  const server = await start(t, () => [200, completed({ overview: '회의', topics: [], decisions: [], actions: [], openQuestions: [] })]);
+  await server.post('/api/summary', { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '김과장' });
+  const systems = server.calls[0].body.input.filter(item => item.role === 'system').map(item => item.content).join('\n');
+  assert.match(systems, /decisions에 쓴 결정을 '적용합니다'나 '반영합니다'로 바꿔 되풀이하지/);
+  assert.match(systems, /실행을 합의한 일은 담당이나 날짜가 없어도 남기/);
+  assert.match(systems, /제안·검토 단계인 일을 확정된 할 일로 바꾸지/);
+});
+
 const audio = new Uint8Array([26, 69, 223, 163, 0, 0, 0, 0, 0, 0, 0, 0]);
 const transcribed = { text: '전사 결과', usage: { type: 'duration', seconds: 1 } };
 
