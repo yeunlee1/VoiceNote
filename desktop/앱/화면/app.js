@@ -1267,7 +1267,7 @@
           "p",
           ui.transcript.value.trim() || state.audioStored
           ? "아직 회의록이 없습니다. 아래 ‘전사 원문 확인 · 다시 분석’에서 분석을 다시 요청할 수 있습니다."
-          : "회의록을 만들면 회의 핵심, 합의된 방향, 주제별 설명, 다음 할 일, 미확정 사항이 여기에 표시됩니다.",
+          : "회의록을 만들면 회의 핵심, 다음 할 일, 합의된 방향, 주제별 설명, 미확정 사항이 여기에 표시됩니다.",
           "empty-state",
         ),
       );
@@ -1326,6 +1326,11 @@
     overview.className = "summary-overview";
     overview.append(element("h3", "핵심 요약"), element("p", minutes.overview));
     target.append(overview);
+    renderList(target, "다음 할 일", minutes.actions, (action) =>
+      [action.task, action.owner && `담당 ${action.owner}`, action.due && `기한 ${action.due}`]
+        .filter(Boolean)
+        .join(" · "),
+    );
     target.append(element("h3", "상세 회의 내용"));
     const decisions = document.createElement("section");
     decisions.append(element("h3", "합의된 방향"));
@@ -1341,11 +1346,6 @@
       topics.append(group);
     });
     target.append(topics);
-    renderList(target, "다음 할 일", minutes.actions, (action) =>
-      [action.task, action.owner && `담당 ${action.owner}`, action.due && `기한 ${action.due}`]
-        .filter(Boolean)
-        .join(" · "),
-    );
     renderList(target, "미확정 사항", minutes.openQuestions);
   }
 
@@ -1472,6 +1472,12 @@
       "## 핵심 요약",
       minutes.overview,
       "",
+      "## 다음 할 일",
+      ...(minutes.actions || []).map(
+        (item) =>
+          `- ${[item.task, item.owner && `담당 ${item.owner}`, item.due && `기한 ${item.due}`].filter(Boolean).join(" · ")}`,
+      ),
+      "",
       "## 상세 회의 내용",
       "",
       "## 합의된 방향",
@@ -1482,12 +1488,6 @@
         ...topic.points.flatMap((point) => [point, ""]),
         "",
       ]),
-      "## 다음 할 일",
-      ...(minutes.actions || []).map(
-        (item) =>
-          `- ${[item.task, item.owner && `담당 ${item.owner}`, item.due && `기한 ${item.due}`].filter(Boolean).join(" · ")}`,
-      ),
-      "",
       "## 미확정 사항",
       ...(minutes.openQuestions || []).map((item) => `- ${item}`),
       "",

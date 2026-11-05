@@ -84,7 +84,7 @@ test('녹음·회의 기록·목록·파일 출력에 형식을 보존하고 형
   assert.doesNotMatch(markdown(tasks.body.meeting), /## 상세 회의 내용|## 합의된 방향|## 결정 사항/);
   assert.match(markdown(summary.body.meeting), /## 핵심 요약[\s\S]*## 주요 내용[\s\S]*### 주제[\s\S]*## 후속 작업/);
   assert.doesNotMatch(markdown(summary.body.meeting), /## 상세 회의 내용|## 결정 사항/);
-  assert.match(markdown(meeting.body.meeting), /## 상세 회의 내용[\s\S]*## 합의된 방향/);
+  assert.match(markdown(meeting.body.meeting), /## 핵심 요약[\s\S]*## 다음 할 일[\s\S]*## 상세 회의 내용[\s\S]*## 합의된 방향[\s\S]*## 미확정 사항/);
 
   const list = (await request('/api/meetings')).body.meetings;
   assert.deepEqual(new Set(list.map(item => item.outputFormat)), new Set(['tasks', 'summary', 'meeting']));

@@ -77,7 +77,7 @@
     switch (outputFormat(format)) {
       case 'summary': return [overview('핵심 요약'), topics('주요 내용'), list('합의된 방향', m.decisions), list('다음 할 일', actions(false)), list('미확정 사항', m.openQuestions)];
       case 'tasks': return [overview('업무 요약'), list('할 일', actions(true), '정해진 할 일이 없습니다.'), list('확인 필요', m.openQuestions), list('결정 사항', m.decisions), topics('관련 논의')];
-      default: return [overview('핵심 요약'), list('합의된 방향', m.decisions), topics(''), list('다음 할 일', actions(false)), list('미확정 사항', m.openQuestions)];
+      default: return [overview('핵심 요약'), list('다음 할 일', actions(false)), list('합의된 방향', m.decisions), topics(''), list('미확정 사항', m.openQuestions)];
     }
   }
   const api = { NOTES_LIMIT, EXHAUSTED_MESSAGE, canAnalyze, accessText, FORMAT_LABELS, outputFormat, actionLine, minutesSections, startBlockers, canStart, usageRows, tokens };

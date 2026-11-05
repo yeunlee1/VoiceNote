@@ -31,10 +31,11 @@ final class MeetingDocument {
             Collections.addAll(out,"## 업무 요약",minutes.getString("overview"),"","## 할 일");if(actions.length()==0)out.add("- 확인된 할 일 없음");for(int i=0;i<actions.length();i++)out.add(action(actions.getJSONObject(i)));out.add("");
             list(out,"미확정 항목",questions,false);list(out,"결정 사항",decisions,false);topicSection(out,"참고 내용",topics);
         }else{
-            Collections.addAll(out,"## 핵심 요약",minutes.getString("overview"),"","## 상세 회의 내용","","## 합의된 방향");
+            Collections.addAll(out,"## 핵심 요약",minutes.getString("overview"),"","## 다음 할 일");for(int i=0;i<actions.length();i++)out.add(action(actions.getJSONObject(i)));
+            Collections.addAll(out,"","## 상세 회의 내용","","## 합의된 방향");
             for(int i=0;i<decisions.length();i++){out.add(decisions.getString(i));out.add("");}
             for(int i=0;i<topics.length();i++){JSONObject topic=topics.getJSONObject(i);out.add("## "+topic.getString("title"));out.add("");JSONArray points=topic.getJSONArray("points");for(int j=0;j<points.length();j++){out.add(points.getString(j));out.add("");}}
-            out.add("## 다음 할 일");for(int i=0;i<actions.length();i++)out.add(action(actions.getJSONObject(i)));out.add("");out.add("## 미확정 사항");for(int i=0;i<questions.length();i++)out.add("- "+questions.getString(i));out.add("");
+            out.add("## 미확정 사항");for(int i=0;i<questions.length();i++)out.add("- "+questions.getString(i));out.add("");
         }return String.join("\n",out);
     }
     static String text(JSONObject record,JSONObject minutes) throws Exception {
@@ -64,9 +65,8 @@ final class MeetingDocument {
             out.append("\n확인 필요\n");append(out,minutes.getJSONArray("openQuestions"));out.append("\n결정 사항\n");append(out,minutes.getJSONArray("decisions"));
             out.append("\n관련 논의\n");topics(out,minutes);return out.toString();
         }
-        out.append("\n\n핵심 요약\n").append(minutes.getString("overview")).append("\n\n상세 회의 내용\n\n합의된 방향\n");
-        append(out,minutes.getJSONArray("decisions"));topics(out,minutes);
-        out.append("\n다음 할 일\n");actions(out,minutes,false);
+        out.append("\n\n핵심 요약\n").append(minutes.getString("overview")).append("\n\n다음 할 일\n");actions(out,minutes,false);
+        out.append("\n상세 회의 내용\n\n합의된 방향\n");append(out,minutes.getJSONArray("decisions"));topics(out,minutes);
         out.append("\n미확정 사항\n");append(out,minutes.getJSONArray("openQuestions"));return out.toString();
     }
     static void topics(StringBuilder out,JSONObject minutes) throws Exception {JSONArray topics=minutes.getJSONArray("topics");for(int i=0;i<topics.length();i++){JSONObject topic=topics.getJSONObject(i);out.append("\n").append(topic.getString("title")).append("\n");append(out,topic.getJSONArray("points"));}}

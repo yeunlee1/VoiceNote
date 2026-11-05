@@ -177,13 +177,15 @@ test('일부 구간이 성공해도 자동 추가 요청은 6회를 넘지 않�
 });
 
 test('AI 제목을 화면과 저장 자료에 적용해도 결과가 오래된 것으로 처리되지 않는다', async () => {
-  const { state, ui, summarize, lines } = fixture(() => Response.json({ minutes: { suggestedTitle: '문서 표준화와 개발 순서', overview: '전체 방향 | 제조지시서를 먼저 만듭니다.\n주요 결정 | JPA를 사용합니다.\n다음 할 일 | 화면을 그립니다.\n남은 쟁점 | 기준 제품 미정.', topics: [{title:'상세 설명',points:['전체 양식을 확정하기보다 먼저 사용할 화면을 검토합니다.']}], decisions: [], actions: [], openQuestions: [] } }));
+  const { state, ui, summarize, lines } = fixture(() => Response.json({ minutes: { suggestedTitle: '문서 표준화와 개발 순서', overview: '전체 방향 | 제조지시서를 먼저 만듭니다.\n주요 결정 | JPA를 사용합니다.\n다음 할 일 | 화면을 그립니다.\n남은 쟁점 | 기준 제품 미정.', topics: [{title:'상세 설명',points:['전체 양식을 확정하기보다 먼저 사용할 화면을 검토합니다.']}], decisions: [], actions: [{task:'화면 시안 작성',owner:null,due:null}], openQuestions: ['기준 제품'] } }));
   state.keyConfigured = true; ui.transcript.value = '제조지시서부터 개발합니다.';
   assert.equal(await summarize(true), true);
   assert.equal(ui.title.value, '문서 표준화와 개발 순서');
   assert.equal(state.resultStored, true);
   const output = lines().join('\n');
-  assert.ok(output.indexOf('핵심 요약') < output.indexOf('상세 회의 내용'));
+  const positions = ['## 핵심 요약', '## 다음 할 일', '## 상세 회의 내용', '## 합의된 방향', '## 상세 설명', '## 미확정 사항'].map(title => output.indexOf(title));
+  assert.ok(positions.every(position => position >= 0), '회의록 절이 모두 있어야 합니다');
+  assert.deepEqual(positions, [...positions].sort((a, b) => a - b), '핵심 요약 다음에 다음 할 일이 와야 합니다');
   assert.match(output, /전체 양식을 확정하기보다/);
 });
 test('수동 재분석 경로도 음성을 저장한 다음 AI를 호출한다', async () => {

@@ -81,6 +81,16 @@ test('선택한 출력 형식을 요청·저장·내보내기·화면에 쓰고 
   assert.ok(texts(review.ui.minutes).includes('업무 요약'));
 });
 
+test('회의록 화면은 핵심 요약 바로 다음에 다음 할 일을 보여 준다', async () => {
+  const review = fixture();
+  review.state.keyConfigured = true;
+  review.ui['output-format'].value = 'meeting';
+  review.ui.transcript.value = '초안을 작성합니다.';
+  await review.summarize(true);
+  const order = ['핵심 요약', '다음 할 일', '상세 회의 내용', '합의된 방향', '미확정 사항'];
+  assert.deepEqual(texts(review.ui.minutes).filter((value) => order.includes(value)), order);
+});
+
 test('분석이 실패하면 체험 예약을 회수하고 소진 응답이면 새 키 등록 안내와 설정 창을 연다', async () => {
   const review = fixture({ routes: { '/api/summary': () => Response.json({ error: { code: 'TRIAL_EXHAUSTED', message: '새로운 API키를 등록하세요.', mustRegister: true } }, { status: 403 }),
     '/api/config': () => Response.json({ accessMode: 'exhausted', trialLimit: 3, trialRemaining: 0, mustRegister: true }) } });

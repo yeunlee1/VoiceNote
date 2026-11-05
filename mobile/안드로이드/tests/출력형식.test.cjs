@@ -13,9 +13,9 @@ test('형식 값이 없거나 모르는 값이면 기존 회의록으로 읽는�
   assert.deepEqual(Object.values(Flow.FORMAT_LABELS), ['회의록', '핵심 요약', '업무 정리', '내 형식']);
 });
 
-test('회의록은 기존 화면 순서를 유지하고 정해지지 않은 담당·기한을 쓰지 않는다', () => {
-  assert.deepEqual(titles('meeting'), ['핵심 요약', '합의된 방향', '', '다음 할 일', '미확정 사항']);
-  assert.deepEqual(Flow.minutesSections('meeting', minutes)[3].items, ['화면 기획', '양식 초안 · 담당 화면 담당 · 기한 10월 7일']);
+test('회의록은 핵심 요약 바로 다음에 다음 할 일을 보여 주고 정해지지 않은 담당·기한을 쓰지 않는다', () => {
+  assert.deepEqual(titles('meeting'), ['핵심 요약', '다음 할 일', '합의된 방향', '', '미확정 사항']);
+  assert.deepEqual(Flow.minutesSections('meeting', minutes)[1].items, ['화면 기획', '양식 초안 · 담당 화면 담당 · 기한 10월 7일']);
 });
 
 test('핵심 요약은 개요와 주요 내용을 앞에 둔다', () => {
