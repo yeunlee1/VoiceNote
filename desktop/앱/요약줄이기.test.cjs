@@ -197,9 +197,61 @@ test('회의록은 결정을 할 일로 되풀이하지 않되 합의한 일은 
   assert.match(systems, /decisions에 쓴 결정을 '적용합니다'나 '반영합니다'로 바꿔 되풀이하지/);
   assert.match(systems, /실행을 합의한 일은 담당이나 날짜가 없어도 남기/);
   assert.match(systems, /제안·검토 단계인 일을 확정된 할 일로 바꾸지/);
-  assert.match(systems, /한 항목은 100자 안에서 한 가지 일로/);
-  assert.match(systems, /같은 담당·기한의 세부 항목이 많으면 대표 작업으로 묶/);
+  assert.match(systems, /한 항목은 100자 안에서 쓰고 전체는 많아도 25개로 정리/);
+  assert.match(systems, /한 일을 여러 항목으로 쪼개지 말고/);
+  assert.match(systems, /같은 화면·업무·담당·기한의 세부 항목은 대표 작업 하나로 묶되 세부 내용은 topics에 남/);
+  assert.doesNotMatch(systems, /한 가지 일로/);
   assert.doesNotMatch(systems, /적용 범위는 전사 표현을 따르고/);
+});
+
+const emptyMinutes = { suggestedTitle: '회의', overview: '회의', topics: [], decisions: [], actions: [], openQuestions: [] };
+const listLimits = [
+  ['주제', schema => schema.properties.topics.maxItems, count => ({ topics: Array.from({ length: count }, () => ({ title: '주제', points: [] })) })],
+  ['주제별 문단', schema => schema.properties.topics.items.properties.points.maxItems, count => ({ topics: [{ title: '주제', points: Array(count).fill('문단') }] })],
+  ['결정', schema => schema.properties.decisions.maxItems, count => ({ decisions: Array(count).fill('결정') })],
+  ['할 일', schema => schema.properties.actions.maxItems, count => ({ actions: Array.from({ length: count }, () => ({ task: '할 일', owner: null, due: null })) })],
+  ['미확정', schema => schema.properties.openQuestions.maxItems, count => ({ openQuestions: Array(count).fill('미정') })],
+];
+
+// 앱이 받는 한도와 AI에 알리는 한도가 다르면, 한도를 넘긴 유료 응답을 통째로 버리게 된다.
+for (const [name, limitOf, listOf] of listLimits) {
+  test(`${name} 수의 한도를 AI에 그대로 알리고 앱도 그 수까지 받는다`, async t => {
+    let answer = emptyMinutes;
+    const server = await start(t, () => [200, completed(answer)]);
+    const meeting = { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '' };
+    assert.equal((await server.post('/api/summary', meeting)).status, 200);
+    const limit = limitOf(server.calls[0].body.text.format.schema);
+    assert.ok(Number.isInteger(limit) && limit > 0, `${name} 한도를 보내지 않았습니다`);
+    answer = { ...emptyMinutes, ...listOf(limit) };
+    assert.equal((await server.post('/api/summary', meeting)).status, 200);
+    answer = { ...emptyMinutes, ...listOf(limit + 1) };
+    assert.equal((await server.post('/api/summary', meeting)).body.error.code, 'AI_RESPONSE_INVALID');
+  });
+}
+
+test('줄이기 요청도 주제와 문단 수 한도를 AI에 알린다', async t => {
+  const server = await start(t, () => [200, completed({ overview: '짧게', topics: [{ title: '양식', points: ['짧게'] }] })]);
+  assert.equal((await server.post('/api/summary/compact', request())).status, 200);
+  const { properties } = server.calls[0].body.text.format.schema;
+  assert.equal(properties.topics.maxItems, 30);
+  assert.equal(properties.topics.items.properties.points.maxItems, 30);
+});
+
+for (const outputFormat of ['meeting', 'summary', 'tasks']) {
+  test(`${outputFormat} 형식도 목록이 넘치면 버리지 말고 합치라고 지시한다`, async t => {
+    const server = await start(t, () => [200, completed(emptyMinutes)]);
+    assert.equal((await server.post('/api/summary', { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '', outputFormat })).status, 200);
+    const systems = server.calls[0].body.input.filter(item => item.role === 'system').map(item => item.content).join('\n');
+    assert.match(systems, /결정·할 일·미확정은 각각 40개, 주제와 주제별 문단은 각각 30개를 넘을 수 없습니다/);
+    assert.match(systems, /항목을 버리지 말고 비슷한 항목을 하나로 합치세요/);
+  });
+}
+
+test('요약과 줄이기 모두 일본어·중국어 글자를 섞지 말라고 지시한다', async t => {
+  const server = await start(t, (count) => [200, completed(count === 1 ? emptyMinutes : { overview: '짧게', topics: [{ title: '양식', points: ['짧게'] }] })]);
+  await server.post('/api/summary', { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '' });
+  await server.post('/api/summary/compact', request());
+  for (const call of server.calls) assert.match(call.body.input.filter(item => item.role === 'system').map(item => item.content).join('\n'), /일본어·중국어 글자를 섞지/);
 });
 
 const audio = new Uint8Array([26, 69, 223, 163, 0, 0, 0, 0, 0, 0, 0, 0]);
