@@ -32,6 +32,20 @@ test('임시 폴더를 지우기 전에 SDK와 JDK 정션을 정확한 경로로
   assert.match(cleanup, /Attributes ReparsePoint/);
 });
 
+test('영어 Windows 러너에서도 Java가 읽도록 Android 빌드는 한글 없는 경로만 넘긴다', () => {
+  const build = fs.readFileSync(path.join(root, 'mobile/안드로이드/빌드.ps1'), 'utf8').replace(/\r\n/g, '\n');
+  // JDK와 소스는 임시 정션으로 넘기고, 끝나면 JAVA_HOME을 되돌려 지워진 정션을 가리키지 않게 한다.
+  assert.ok(build.includes('$env:JAVA_HOME=$jdkLink'));
+  assert.ok(build.includes("Join-Path $sourceLink 'src'"));
+  assert.ok(build.includes("Join-Path $sourceLink 'tests\\AndroidChecks.java'"));
+  assert.ok(build.includes('$env:JAVA_HOME=$previousJavaHome'));
+  assert.ok(build.includes('$keystore=Join-Path $SigningDir $KeystoreName'));
+  // 서명 파일 이름도 keytool과 apksigner에 그대로 넘어가므로 자동 배포에서는 한글을 쓰지 않는다.
+  assert.ok(script.includes("$keystore = Join-Path $signing 'release.p12'"));
+  assert.ok(script.includes("-KeystoreName 'release.p12'"));
+  assert.ok(script.includes('$env:JAVA_HOME = $Jdk'));
+});
+
 test('훅 시험은 이 PC의 실제 키 파일을 읽지 않도록 자료 폴더를 임시 폴더로 바꾼다', () => {
   const exported = hookTest.indexOf('export LOCALAPPDATA="$W"');
   assert.ok(exported > 0, '자료 폴더를 바꾸는 줄이 없습니다');

@@ -1,20 +1,17 @@
 // 기기 없이 JVM만으로 돌릴 수 있는 Android 시험을 시험마다 필요한 소스만 컴파일해 실행한다. 로컬과 자동 배포가 같은 명령으로 돌린다.
 const test = require('node:test');
-const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), { execFileSync } = require('node:child_process');
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+const { android, androidJar, javac, java } = require('./자바도구.cjs');
 
-const root = path.join(__dirname, '..');
-const toolRoot = process.env.VOICENOTE_TOOLS || 'C:/DEV/VoiceNote/2026-09-30-회의록도구-안드로이드';
-const jdk = path.join(toolRoot, '도구', 'JDK', fs.readdirSync(path.join(toolRoot, '도구', 'JDK'))[0], 'bin');
-const androidJar = path.join(toolRoot, 'SDK', 'platforms', 'android-36', 'android.jar');
-const sourceDir = path.join(root, 'src', 'kr', 'local', 'meetingjournal');
+const sourceDir = path.join(android, 'src', 'kr', 'local', 'meetingjournal');
 const source = name => path.join(sourceDir, `${name}.java`);
 const allSources = () => fs.readdirSync(sourceDir).filter(name => name.endsWith('.java')).map(name => path.join(sourceDir, name));
 
 function run(name, sources, classpath) {
   const output = fs.mkdtempSync(path.join(os.tmpdir(), 'vn-jvm-'));
   try {
-    execFileSync(path.join(jdk, 'javac.exe'), ['-encoding', 'UTF-8', '-nowarn', '-d', output, ...(classpath ? ['-cp', classpath] : []), ...sources, path.join(__dirname, `${name}.java`)], { stdio: 'pipe' });
-    execFileSync(path.join(jdk, 'java.exe'), ['-Dfile.encoding=UTF-8', '-cp', [output, classpath].filter(Boolean).join(path.delimiter), `kr.local.meetingjournal.${name}`], { stdio: 'pipe' });
+    javac(['-encoding', 'UTF-8', '-nowarn', '-d', output, ...(classpath ? ['-cp', classpath] : []), ...sources, path.join(android, 'tests', `${name}.java`)]);
+    java(['-Dfile.encoding=UTF-8', '-cp', [output, classpath].filter(Boolean).join(path.delimiter), `kr.local.meetingjournal.${name}`]);
   } finally {
     fs.rmSync(output, { recursive: true, force: true });
   }

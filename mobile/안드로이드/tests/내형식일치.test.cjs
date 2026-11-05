@@ -1,12 +1,11 @@
 // 휴대폰 CustomFormat.java와 화면용 formats.js가 데스크톱 출력형식.js와 같은 판정·같은 AI 지시문을 만드는지 검증한다.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), { execFileSync } = require('node:child_process');
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+const { android, javac, java } = require('./자바도구.cjs');
 const formats = require('../../../desktop/앱/출력형식.js');
 
 const root = path.join(__dirname, '..');
-const toolRoot = process.env.VOICENOTE_TOOLS || 'C:/DEV/VoiceNote/2026-09-30-회의록도구-안드로이드';
-const jdk = path.join(toolRoot, '도구', 'JDK', fs.readdirSync(path.join(toolRoot, '도구', 'JDK'))[0], 'bin');
 
 test('휴대폰 화면용 formats.js는 데스크톱 출력형식.js와 같은 파일이다', () => {
   assert.deepEqual(fs.readFileSync(path.join(root, 'assets', 'formats.js')), fs.readFileSync(path.join(__dirname, '../../../desktop/앱/출력형식.js')));
@@ -46,10 +45,10 @@ test('Java 내 형식 검증과 AI 지시문이 데스크톱과 같다', () => {
     { name: 7, sections: [{ key: 'overview', title: '요약' }] },
   ];
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'vn-custom-'));
-  execFileSync(path.join(jdk, 'javac.exe'), ['-encoding', 'UTF-8', '-d', work, path.join(root, 'src/kr/local/meetingjournal/JsonText.java'), path.join(root, 'src/kr/local/meetingjournal/CustomFormat.java'), path.join(__dirname, 'CustomFormatTest.java')]);
+  javac(['-encoding', 'UTF-8', '-d', work, path.join(android, 'src/kr/local/meetingjournal/JsonText.java'), path.join(android, 'src/kr/local/meetingjournal/CustomFormat.java'), path.join(android, 'tests', 'CustomFormatTest.java')]);
   const input = path.join(work, 'in.jsonl'), output = path.join(work, 'out.jsonl');
   fs.writeFileSync(input, cases.map(value => JSON.stringify(value)).join('\n') + '\n');
-  execFileSync(path.join(jdk, 'java.exe'), ['-Dfile.encoding=UTF-8', '-cp', work, 'kr.local.meetingjournal.CustomFormatTest', input, output]);
+  java(['-Dfile.encoding=UTF-8', '-cp', work, 'kr.local.meetingjournal.CustomFormatTest', input, output]);
   const results = fs.readFileSync(output, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   assert.equal(results.length, cases.length);
   cases.forEach((value, index) => {

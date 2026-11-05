@@ -1,20 +1,18 @@
 // Windows 설정파일.cjs와 Android SettingsFile의 정규화·거절 문구·바이트 경계를 직접 대조한다.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), { execFileSync } = require('node:child_process');
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+const { android, javac, java: runJava } = require('./자바도구.cjs');
 const desktop = require('../../../desktop/앱/설정파일.cjs');
-const root = path.join(__dirname, '..');
-const toolRoot = process.env.VOICENOTE_TOOLS || 'C:/DEV/VoiceNote/2026-09-30-회의록도구-안드로이드';
-const jdk = path.join(toolRoot, '도구', 'JDK', fs.readdirSync(path.join(toolRoot, '도구', 'JDK'))[0], 'bin');
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'vn-settings-v2-'));
-const source = name => path.join(root, 'src/kr/local/meetingjournal', name + '.java');
-execFileSync(path.join(jdk, 'javac.exe'), ['-encoding', 'UTF-8', '-d', work, source('JsonText'), source('CustomFormat'), source('SettingsFile'), path.join(__dirname, 'SettingsFileTest.java')]);
-const java = args => execFileSync(path.join(jdk, 'java.exe'), ['-Dfile.encoding=UTF-8', '-Dstdout.encoding=UTF-8', '-Dstderr.encoding=UTF-8', '-cp', work, 'kr.local.meetingjournal.SettingsFileTest', ...args], { encoding: 'utf8' });
+const source = name => path.join(android, 'src/kr/local/meetingjournal', name + '.java');
+javac(['-encoding', 'UTF-8', '-d', work, source('JsonText'), source('CustomFormat'), source('SettingsFile'), path.join(android, 'tests', 'SettingsFileTest.java')]);
+const java = args => runJava(['-Dfile.encoding=UTF-8', '-Dstdout.encoding=UTF-8', '-Dstderr.encoding=UTF-8', '-cp', work, 'kr.local.meetingjournal.SettingsFileTest', ...args], { encoding: 'utf8' });
 const custom = { name: ' 주간 보고 😀 ', sections: [{ key: 'actions', title: ' 할 일 ' }, { key: 'overview', title: '요약' }], instruction: '  첫 줄\n따옴표 " \\ 와 탭\t  ' };
 const valid = desktop.buildSettingsFile({ summaryModel: 'gpt-6.1-sol', defaultOutputFormat: 'custom', customFormat: custom, storage: { audio: 'D:\\합성\\원음', transcript: '', summary: '\\\\서버\\합성' } });
 const phone = value => { const { storage, ...rest } = value; return rest; };
 test('Windows 파일을 Android가 읽고 다시 내보내면 저장 위치만 빠진 같은 설정이다', () => {
-  const from = path.join(work, 'Windows.json'), to = path.join(work, 'Android.json'), again = path.join(work, '다시.json');
+  const from = path.join(work, 'Windows.json'), to = path.join(work, 'Android.json'), again = path.join(work, 'again.json');
   fs.writeFileSync(from, JSON.stringify(valid, null, 2));
   java(['--roundtrip', from, to]);
   assert.deepEqual(desktop.parseSettingsFile(fs.readFileSync(to)), phone(desktop.parseSettingsFile(fs.readFileSync(from))));
@@ -58,11 +56,13 @@ test('같은 바이트를 주면 Windows와 Android의 값·거절 문구가 같
     '작은따옴표':json(valid).replace('"format"',"'format'"),'주석':'// 주석\n'+json(valid),
     'UTF8오류':Buffer.from([0xC3,0x28]),'UTF16':Buffer.from(json(valid),'utf16le'),
   };
-  const files = Object.entries(cases).map(([name,text])=>{const file=path.join(work,name+'.json');fs.writeFileSync(file,text);return file;});
+  // Java 명령줄에 한글을 넘기지 않도록 파일 이름은 번호로 하고, 실패 때 보여 줄 사례 이름은 따로 둔다.
+  const labels = new Map();
+  const files = Object.entries(cases).map(([name,text],index)=>{const file=path.join(work,`case-${index}.json`);labels.set(path.basename(file),name);fs.writeFileSync(file,text);return file;});
   const mobile = new Map(java(['--verdict',...files]).trim().split(/\r?\n/).map(line=>{const row=JSON.parse(line);return [row.file,row];}));
   for(const file of files){
     let expected;try{const value=phone(desktop.parseSettingsFile(fs.readFileSync(file)));expected={ok:true,value:{format:desktop.FORMAT,version:desktop.VERSION,...value}};}catch(error){expected={ok:false,message:error.message};}
-    const {file: label,...actual}=mobile.get(path.basename(file));assert.deepEqual(actual,expected,label);
+    const {file: label,...actual}=mobile.get(path.basename(file));assert.deepEqual(actual,expected,labels.get(label));
   }
   console.log('설정 2판 호환 사례 '+files.length+'건 일치');
 });

@@ -59,7 +59,7 @@ function Get-VerifiedFile([string]$url, [string]$file, [string]$sha256) {
 try {
   $version = Get-AppVersion
   if ($Tag -and $Tag -ne "v$version") { throw "태그($Tag)와 앱 버전($version)이 다릅니다." }
-  Write-Host "== 버전 $version"
+  Write-Host "== 버전 $version | 시스템 코드 페이지 $((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\CodePage').ACP)"
 
   # Android 빌드와 시험이 기대하는 도구 폴더 모양을 러너의 SDK·JDK로 맞춘다.
   $tools = Join-Path $work 'android-tools'
@@ -72,6 +72,7 @@ try {
   $node = Join-Path $nodeDirectory 'node.exe'
   Get-VerifiedFile $nodeUrl $node $nodeSha256
   $env:VOICENOTE_TOOLS = $tools
+  $env:JAVA_HOME = $Jdk
   $env:PATH = $nodeDirectory + [IO.Path]::PathSeparator + (Join-Path $Jdk 'bin') + [IO.Path]::PathSeparator + $env:PATH
 
   Write-Host '== 데스크톱 시험'
@@ -112,7 +113,8 @@ try {
 
   Write-Host '== Android 서명 준비'
   $passwordFile = Join-Path $signing '서명암호.txt'
-  $keystore = Join-Path $signing '회의록서명.p12'
+  # Java 도구가 읽을 수 있게 서명 파일 이름에 한글을 쓰지 않는다.
+  $keystore = Join-Path $signing 'release.p12'
   if ($Tag) {
     if (-not $env:VOICENOTE_SIGN_P12_B64 -or -not $env:VOICENOTE_SIGN_PASS_B64) { throw '서명 값이 없습니다. .github/서명등록.ps1로 release 환경에 등록하세요.' }
     [IO.File]::WriteAllBytes($keystore, [Convert]::FromBase64String($env:VOICENOTE_SIGN_P12_B64))
@@ -130,7 +132,7 @@ try {
 
   Write-Host '== Android 빌드'
   $androidBuild = Join-Path $work 'android'
-  & (Join-Path $root 'mobile/안드로이드/빌드.ps1') -ToolRoot $tools -OutputRoot $androidBuild -SigningDir $signing
+  & (Join-Path $root 'mobile/안드로이드/빌드.ps1') -ToolRoot $tools -OutputRoot $androidBuild -SigningDir $signing -KeystoreName 'release.p12'
   $apk = Join-Path $androidBuild 'VoiceNote-android.apk'
   if ($Tag) {
     $certificates = & (Join-Path $AndroidSdk 'build-tools\36.0.0\apksigner.bat') verify --print-certs $apk
