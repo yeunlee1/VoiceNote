@@ -20,7 +20,7 @@ Windows 앱과 같은 요약 요청 양식을 쓰는 Android 네이티브 앱입
 
 요약 요청 양식
 
-desktop\앱\서버.cjs를 빌드 입력으로 씁니다(ServerScript로 변경 가능). 서버를 잠시 로컬로 열고 모의 응답으로 회의록·핵심 요약·업무 정리의 summary-<형식>.json과 의견 반영 지시문 summary-feedback.json을 추출합니다. 외부 AI는 호출하지 않습니다. 요청 필드와 지시문 순서가 계약과 다르면 빌드를 멈춥니다. 완성 APK에 세 요약 양식·의견 지시문·formats.js가 모두 있는지 확인합니다.
+desktop\앱\서버.cjs를 빌드 입력으로 씁니다(ServerScript로 변경 가능). 서버를 잠시 로컬로 열고 모의 응답으로 회의록·핵심 요약·업무 정리의 summary-<형식>.json과 의견 반영 지시문 summary-feedback.json, 긴 결과를 줄이는 summary-compact.json을 추출합니다. 외부 AI는 호출하지 않습니다. 요청 필드와 지시문 순서가 계약과 다르면 빌드를 멈춥니다. 완성 APK에 세 요약 양식·의견 지시문·줄이기 지시문·formats.js가 모두 있는지 확인합니다.
 
 공용 기본 키와 서명
 

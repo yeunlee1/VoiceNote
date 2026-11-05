@@ -15,6 +15,8 @@
   const KEYS = Object.freeze(['overview', 'topics', 'decisions', 'actions', 'openQuestions']);
   const KEY_LABELS = Object.freeze({ overview: '핵심 요약', topics: '주요 내용', decisions: '결정 사항', actions: '할 일', openQuestions: '확인 필요' });
   const LIMITS = Object.freeze({ name: 30, title: 30, instruction: 1000 });
+  // 결과 문서의 목표 글자 수다. 휴대폰 SummaryRules.java와 같은 값을 쓴다.
+  const LENGTH_GOALS = Object.freeze({ meeting: 3000, summary: 1000, tasks: 2000, custom: 3000 });
   // 예시 화면에만 쓰는 가상의 회의 결과다. 실제 회의 내용과 관계없다.
   const SAMPLE = Object.freeze({
     title: '사내 회의실 예약 화면 개편 회의',
@@ -98,5 +100,36 @@
     return { name: '', sections: KEYS.map(key => ({ key, title: KEY_LABELS[key] })), instruction: '' };
   }
 
-  return { LABELS, DESCRIPTIONS, KEYS, KEY_LABELS, LIMITS, SAMPLE, format, validateCustom, customInstruction, actionLine, customSections, customText, defaultCustom };
+  function minutesLengths(minutes) {
+    // 줄일 수 있는 본문(overview·topics)과 그대로 둘 목록(결정·할 일·미확정)의 글자 수를 따로 센다. 휴대폰 Ai.java도 같은 항목을 센다.
+    const m = minutes || {};
+    const size = list => (list || []).reduce((sum, value) => sum + String(value ?? '').length, 0);
+    return {
+      body: String(m.overview || '').length + (m.topics || []).reduce((sum, topic) => sum + String(topic.title || '').length + size(topic.points), 0),
+      kept: size(m.decisions) + size(m.openQuestions) + (m.actions || []).reduce((sum, action) => sum + size([action.task, action.owner, action.due]), 0),
+    };
+  }
+
+  function compactTarget(minutes, outputFormat) {
+    // 결과가 목표의 1.2배를 넘고 줄일 본문이 남아 있으면 본문에 허용할 글자 수를, 아니면 0을 돌려준다. 휴대폰 SummaryRules.java와 같은 규칙이다.
+    const goal = LENGTH_GOALS[format(outputFormat) || 'meeting'];
+    const { body, kept } = minutesLengths(minutes);
+    if (body + kept <= goal * 6 / 5) return 0;
+    const target = Math.max(goal / 2, goal - kept);
+    return body > target ? target : 0;
+  }
+
+  function participantKeywords(value) {
+    // 참석자 칸을 전사 힌트 단어로 바꾼다. 꺾쇠·줄바꿈이 들어가면 OpenAI가 요청 전체를 거절하므로 글자·숫자·밑줄·하이픈만 남긴다. 휴대폰 SummaryRules.java와 같은 규칙이다.
+    const words = [];
+    for (const piece of String(value ?? '').split(/[\s,，、;；/|·・]+/u)) {
+      const word = piece.replace(/[^\p{L}\p{N}_-]/gu, '');
+      if (word.length < 2 || word.length > 30 || words.includes(word)) continue;
+      words.push(word);
+      if (words.length === 20) break;
+    }
+    return words;
+  }
+
+  return { LABELS, DESCRIPTIONS, KEYS, KEY_LABELS, LIMITS, LENGTH_GOALS, SAMPLE, format, validateCustom, customInstruction, actionLine, customSections, customText, defaultCustom, minutesLengths, compactTarget, participantKeywords };
 });
