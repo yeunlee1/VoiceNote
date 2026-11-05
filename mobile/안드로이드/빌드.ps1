@@ -19,12 +19,13 @@ $outLink=Join-Path $env:TEMP ('vn-out-'+$suffix)
 # Java 도구는 자기 위치와 명령줄을 시스템 코드 페이지로 읽어 영어 Windows에서 한글 경로를 열지 못하므로 JDK와 소스도 한글 없는 정션으로 넘긴다.
 $sourceLink=Join-Path $env:TEMP ('vn-src-'+$suffix)
 $jdkLink=Join-Path $env:TEMP ('vn-jdk-'+$suffix)
-New-Item -ItemType Junction -Path $toolLink -Target $ToolRoot | Out-Null
-New-Item -ItemType Junction -Path $outLink -Target $OutputRoot | Out-Null
-New-Item -ItemType Junction -Path $sourceLink -Target $PSScriptRoot | Out-Null
-New-Item -ItemType Junction -Path $jdkLink -Target (Get-ChildItem -LiteralPath (Join-Path $ToolRoot '도구\JDK') -Directory | Select-Object -First 1).FullName | Out-Null
 $previousJavaHome=$env:JAVA_HOME
 try {
+  # 준비 중 실패해도 finally가 이미 만든 정션을 풀도록 try 안에서 만든다.
+  New-Item -ItemType Junction -Path $toolLink -Target $ToolRoot | Out-Null
+  New-Item -ItemType Junction -Path $outLink -Target $OutputRoot | Out-Null
+  New-Item -ItemType Junction -Path $sourceLink -Target $PSScriptRoot | Out-Null
+  New-Item -ItemType Junction -Path $jdkLink -Target (Get-ChildItem -LiteralPath (Join-Path $ToolRoot '도구\JDK') -Directory | Select-Object -First 1).FullName | Out-Null
   $env:JAVA_HOME=$jdkLink
   $javaBin=Join-Path $env:JAVA_HOME 'bin'
   $sdk=Join-Path $toolLink 'SDK'

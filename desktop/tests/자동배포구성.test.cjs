@@ -39,6 +39,7 @@ test('영어 Windows 러너에서도 Java가 읽도록 Android 빌드는 한글 
   assert.ok(build.includes("Join-Path $sourceLink 'src'"));
   assert.ok(build.includes("Join-Path $sourceLink 'tests\\AndroidChecks.java'"));
   assert.ok(build.includes('$env:JAVA_HOME=$previousJavaHome'));
+  assert.ok(build.indexOf('try {') < build.indexOf('New-Item -ItemType Junction'), '정션은 정리 범위인 try 안에서 만들어야 합니다');
   assert.ok(build.includes('$keystore=Join-Path $SigningDir $KeystoreName'));
   // 서명 파일 이름도 keytool과 apksigner에 그대로 넘어가므로 자동 배포에서는 한글을 쓰지 않는다.
   assert.ok(script.includes("$keystore = Join-Path $signing 'release.p12'"));
