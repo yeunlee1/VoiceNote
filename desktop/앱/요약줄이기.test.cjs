@@ -260,8 +260,20 @@ for (const outputFormat of ['meeting', 'summary', 'tasks']) {
     assert.match(systems, /결정·할 일·미확정은 각각 40개, 주제와 주제별 문단은 각각 30개를 넘을 수 없습니다/);
     assert.match(systems, /항목을 버리지 말고 비슷한 항목을 하나로 합치세요/);
     assert.match(systems, /주제를 합칠 때는 제목을 새로 써도/);
+    assert.match(systems, /합칠 수 없는 할 일이 40개를 넘을 때만 마지막 항목 하나에 '그 외 할 일'로 모으고 각 일의 담당과 기한을 그 문장 안에/);
   });
 }
+
+test('전체 결과가 64000자를 넘으면 형식 오류가 아니라 출력 한도로 알려 나눠 처리하게 한다', async t => {
+  let count = 33;
+  const server = await start(t, () => [200, completed({ ...emptyMinutes, decisions: Array(count).fill(text(1900)) })]);
+  const meeting = { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '' };
+  assert.equal((await server.post('/api/summary', meeting)).status, 200);
+  count = 34;
+  const result = await server.post('/api/summary', meeting);
+  assert.equal(result.status, 503);
+  assert.equal(result.body.error.code, 'AI_OUTPUT_LIMIT');
+});
 
 test('할 일만 고른 내 형식에는 세부 내용을 topics로 옮기라고 강요하지 않는다', async t => {
   const server = await start(t, () => [200, completed(emptyMinutes)]);
