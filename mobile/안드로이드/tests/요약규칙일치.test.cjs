@@ -48,8 +48,11 @@ test('빌드가 데스크톱 서버에서 줄이기 지시문을 뽑는다', () 
     const meeting = JSON.parse(fs.readFileSync(path.join(destination, 'summary-meeting.json'), 'utf8'));
     assert.match(meeting.input.map(item => item.content).join('\n'), /누가 말했는지 추측하지/);
     assert.deepEqual(meeting.text.format.schema.required, ['suggestedTitle', 'overview', 'topics', 'decisions', 'actions', 'openQuestions']);
-    assert.equal(meeting.text.format.schema.properties.actions.maxItems, 40);
+    const fields = meeting.text.format.schema.properties;
+    assert.deepEqual([fields.topics.maxItems, fields.topics.items.properties.points.maxItems, fields.decisions.maxItems, fields.actions.maxItems, fields.openQuestions.maxItems], [30, 30, 40, 40, 40]);
+    assert.deepEqual([fields.overview.maxLength, fields.topics.items.properties.points.items.maxLength, fields.actions.items.properties.owner.maxLength], [8000, 2000, 200]);
     assert.equal(asset.text.format.schema.properties.topics.maxItems, 30);
+    assert.equal(asset.text.format.schema.properties.overview.maxLength, 8000);
   } finally {
     fs.rmSync(destination, { recursive: true, force: true });
   }
