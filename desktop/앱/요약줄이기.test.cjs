@@ -201,6 +201,7 @@ test('회의록은 결정을 할 일로 되풀이하지 않되 합의한 일은 
   assert.match(systems, /한 일을 여러 항목으로 쪼개지 말고/);
   assert.match(systems, /담당과 기한이 같은 세부 항목은 화면·업무별 대표 작업 하나로 묶/);
   assert.match(systems, /개수를 맞추려고 합의한 일을 빼거나 담당·기한이 다른 일을 합치지/);
+  assert.match(systems, /묶어도 '이번 스프린트', '이관 전'처럼 일마다 말한 시점은 그 일 옆에 남깁니다/);
   assert.match(systems, /topics를 쓰지 않는 형식이면 대표 작업 문장에 핵심만/);
   assert.doesNotMatch(systems, /한 가지 일로|많아도 25개/);
   assert.doesNotMatch(systems, /적용 범위는 전사 표현을 따르고/);
