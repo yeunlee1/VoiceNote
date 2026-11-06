@@ -272,3 +272,43 @@ details.more { margin-top: 20px; border-top: 1px solid var(--rule); padding-top:
   .custom-row .move:first-of-type { grid-column: 2; }
   .custom-row .move:last-of-type { grid-column: 3; }
 }
+
+/* 앱 업데이트: 첫 화면 안내 줄과 프로그램 정보(버전·업데이트·버전별 바뀐 점) */
+/* 안내 줄은 본문 흐름 안에 두어 하단 조작부와 겹치지 않는다. 새 버전이 있을 때만 보이고 누르면 프로그램 정보가 열린다. */
+.update-note { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--tap); padding: 8px 12px; border: 1px solid rgba(15, 84, 87, .32); border-radius: var(--radius-m); background: var(--teal-wash); color: var(--teal-deep); font-size: 14px; font-weight: 600; text-align: left; font-variant-numeric: tabular-nums; }
+.update-note .icon { color: var(--teal); }
+.update-note > span:nth-of-type(1) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.update-note-more { flex: none; font-size: 13px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.head-actions { display: flex; align-items: center; gap: 4px; }
+.about-identity { display: grid; gap: 2px; padding-top: 4px; }
+.about-name { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.about-version { color: var(--teal-deep); font-variant-numeric: tabular-nums; }
+/* 업데이트 칸은 진행 상태 줄과 같은 왼쪽 청록 선을 쓴다. 확인 실패·직접 받기는 선을 흐리게 바꾼다. */
+.update-panel { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--rule); border-left: 3px solid var(--teal); border-radius: var(--radius-m); background: var(--well); min-width: 0; }
+.update-panel[data-status="unknown"], .update-panel[data-status="manual"] { border-left-color: var(--rule-strong); }
+.update-panel h3, .about-notes h3 { font-size: 15px; }
+.update-state { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.update-progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.update-progress progress { width: 100%; height: 8px; border: 0; border-radius: 999px; background: rgba(64, 48, 22, .1); color: var(--teal); overflow: hidden; -webkit-appearance: none; appearance: none; }
+.update-progress progress::-webkit-progress-bar { background: rgba(64, 48, 22, .1); border-radius: 999px; }
+.update-progress progress::-webkit-progress-value { background: var(--teal); border-radius: 999px; }
+.update-progress .hint { font-variant-numeric: tabular-nums; }
+.update-detail { font-size: 13px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.update-detail[data-tone="error"] { color: var(--rec-deep); }
+.update-lock { padding: 10px 12px; border: 1px dashed var(--rule-strong); border-radius: var(--radius-s); background: var(--sheet); font-size: 13px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.update-page { justify-self: start; margin-left: -8px; }
+/* 버전별 바뀐 점은 진행 단계의 점과 선을 세로로 세운 연표다. 지금 쓰는 버전의 점은 청록으로 채운다. */
+.about-notes { display: grid; gap: 10px; }
+.release-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.release { position: relative; display: grid; gap: 4px; padding: 0 0 18px 26px; min-width: 0; }
+.release::before { content: ""; position: absolute; left: 5px; top: 20px; bottom: 0; width: 2px; background: var(--rule-strong); }
+.release:last-child { padding-bottom: 0; }
+.release:last-child::before { display: none; }
+.release::after { content: ""; position: absolute; left: 0; top: 6px; width: 12px; height: 12px; border: 2px solid var(--rule-strong); border-radius: 50%; background: var(--sheet); box-sizing: border-box; }
+.release[data-current="true"]::after { border-color: var(--teal); background: var(--teal); box-shadow: 0 0 0 3px var(--teal-wash); }
+.release-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.release-version { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.release-date { font-size: 12px; color: var(--ink-faint); }
+.release-badge { display: inline-flex; align-items: center; min-height: 22px; padding: 1px 8px; border-radius: 999px; background: var(--teal-wash); color: var(--teal-deep); font-size: 12px; font-weight: 600; }
+.release-title { font-size: 14px; font-weight: 700; }
+.release-items { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; color: var(--ink-soft); overflow-wrap: anywhere; }

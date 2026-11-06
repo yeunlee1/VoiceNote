@@ -553,12 +553,48 @@ public final class AndroidChecks extends Instrumentation {
         for(Map.Entry<String,String> item:originals.entrySet())expect(Store.read(new File(java.net.URI.create(item.getKey()))).equals(item.getValue()),"폴더·파일 복구 뒤 사본 내용이 처음과 같다");
         mode[0]=3;expect(!copies.status("main",id,rid).toString().contains("쓰지 못"),"일반 조회 예외에도 쓰지 못했다는 이유를 붙이지 않는다");
     }
+    // 앱 업데이트: 깃허브 대신 가짜 연결로 최신·직접 받기·확인 실패를 보고, 받기 전 설치와 새 버전 없는 받기를 거절하는지 본다.
+    static HttpURLConnection fakeConnection(URL url,int status,String body){
+        return new HttpURLConnection(url){public void connect(){}public void disconnect(){}public boolean usingProxy(){return false;}
+            public int getResponseCode(){return status;}
+            public InputStream getInputStream(){return new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8));}};
+    }
+    void updateChecks()throws Exception{
+        android.content.Context context=getTargetContext();
+        String current=Updates.currentVersion(context);int[] parts=UpdateRules.parseVersion(current);
+        expect(parts!=null,"앱 버전은 숫자 세 마디다: "+current);
+        String older="{\"tag_name\":\"v0.0.1\",\"draft\":false,\"prerelease\":false,\"assets\":[]}";
+        String manual="{\"tag_name\":\"v"+(parts[0]+1)+".0.0\",\"draft\":false,\"prerelease\":false,\"published_at\":\"2026-11-20T01:00:00Z\",\"assets\":[]}";
+        Object[][] cases={{200,older,"latest"},{200,manual,"manual"},{-1,null,"unknown"},{403,"{}","unknown"},{404,"{}","latest"}};
+        for(Object[] item:cases){
+            Updates.resetForTest();int status=(Integer)item[0];String body=(String)item[1];
+            Updates.opener=url->{if(status<0)throw new UnknownHostException("시험 중 오프라인");if(!url.toString().equals(UpdateRules.RELEASE_API))throw new IOException("릴리즈 확인 외 주소: "+url);return fakeConnection(url,status,body);};
+            Updates.check(context,false);Updates.awaitIdleForTest(5000);
+            JSONObject snapshot=Updates.snapshot(context);
+            expect(item[2].equals(snapshot.getString("status")),"업데이트 상태 "+item[2]+" ← "+snapshot);
+            expect(current.equals(snapshot.getString("currentVersion")),"지금 버전 표시");
+            if("manual".equals(item[2]))expect(snapshot.getJSONObject("error").getString("message").contains("깃허브"),"직접 받기 안내");
+            if(status<0)expect(snapshot.getJSONObject("error").getString("message").contains("인터넷"),"인터넷 확인 안내");
+            if(status==403)expect("UPDATE_RATE_LIMITED".equals(snapshot.getJSONObject("error").getString("code")),"확인 횟수 제한 안내");
+        }
+        Updates.resetForTest();
+        expect(!Updates.installing(),"설치 확인 대기가 아니면 회의 시작을 막지 않는다");
+        try{Updates.install(context);throw new AssertionError("받기 전 설치는 거절해야 합니다.");}catch(UpdateRules.Failure expected){expect("UPDATE_NOT_READY".equals(expected.code),"받기 전 설치 거절");}
+        try{Updates.download(context);throw new AssertionError("새 버전 없이 받기는 거절해야 합니다.");}catch(UpdateRules.Failure expected){expect("UPDATE_NOT_AVAILABLE".equals(expected.code),"새 버전 없이 받기 거절");}
+        expect("RSA".equals(Updates.ownKey(context).getAlgorithm()),"앱 서명 인증서의 공개 키를 읽는다");
+        // 이 뒤 시험은 화면을 띄우므로, 업데이트 확인이 AI 모의 응답을 가져가지 않게 연결을 다시 끊어 둔다.
+        Updates.opener=url->{throw new IOException("기기 시험 중에는 업데이트를 확인하지 않습니다.");};
+        Updates.resetForTest();
+    }
     @Override public void onStart(){Bundle result=new Bundle();try{
+        // 기기 시험 중에는 업데이트 확인이 실제 깃허브나 아래 AI 모의 응답에 닿지 않게 한다.
+        Updates.opener=url->{throw new IOException("기기 시험 중에는 업데이트를 확인하지 않습니다.");};
         if(!probe.isEmpty()&&!probe.startsWith("f-")&&!probe.startsWith("g-")){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
         for(String name:new String[]{"first","open","review","draft","finish","n1new","n1old","n1meta"})regressionCheck(name);
         archiveChecks(new Store(testContext()));
         settingsChecks(new Store(testContext()));
         draftFailureCheck();
+        updateChecks();
         URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){protected URLConnection openConnection(URL url){return new HttpURLConnection(url){
             final ByteArrayOutputStream sent=new ByteArrayOutputStream();
             public void connect(){}public void disconnect(){}public boolean usingProxy(){return false;}

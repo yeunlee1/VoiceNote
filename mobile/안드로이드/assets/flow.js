@@ -80,7 +80,46 @@
       default: return [overview('핵심 요약'), list('다음 할 일', actions(false)), list('합의된 방향', m.decisions), topics(''), list('미확정 사항', m.openQuestions)];
     }
   }
-  const api = { NOTES_LIMIT, EXHAUSTED_MESSAGE, canAnalyze, accessText, FORMAT_LABELS, outputFormat, actionLine, minutesSections, startBlockers, canStart, usageRows, tokens };
+  // 앱 업데이트 상태(네이티브가 알려 준 그대로)와 지금 설치를 막는 이유로 첫 화면 안내 줄과 프로그램 정보의 문장·단추를 정한다.
+  // 받기는 회의 중에도 하고, 시스템 설치 화면으로 넘기는 설치만 막는다.
+  function updateView(update, reasons) {
+    const u = update && typeof update.status === 'string' ? update : { status: 'checking' };
+    const version = u.version || '', blocked = Array.isArray(reasons) && reasons.length ? reasons[0] : null;
+    const megabytes = bytes => `${(Number(bytes || 0) / 1048576).toFixed(1)} MB`;
+    const percent = u.size ? Math.min(100, Math.round((Number(u.received) || 0) / u.size * 100)) : 0;
+    let published = '';
+    try { if (u.publishedAt) published = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric' }).format(new Date(u.publishedAt)); } catch { published = ''; }
+    const facts = [published && `${published} 게시`, u.size && megabytes(u.size)].filter(Boolean).join(' · ');
+    const texts = {
+      latest: `지금 쓰는 ${u.currentVersion || ''} 버전이 최신입니다.`,
+      unknown: (u.error && u.error.message) || '새 버전을 확인하지 못했습니다. 잠시 뒤 다시 확인을 눌러 주세요.',
+      available: `${version} 버전이 나왔습니다.${facts ? ` (${facts})` : ''}`,
+      manual: `${version} 버전이 나왔지만 앱에서 바로 설치할 수 없습니다.`,
+      downloading: `${version} 버전을 받는 중입니다.`,
+      ready: u.needsPermission ? `${version} 버전을 받았습니다. 설치하려면 VoiceNote의 설치 허용을 먼저 켜 주세요.` : `${version} 버전을 받았습니다. 설치를 누르면 휴대폰 설치 화면이 열립니다.`,
+      confirming: u.canContinue ? '설치 화면에서 ‘업데이트’를 누르면 끝납니다. 설치 화면이 닫혔으면 ‘설치 계속’을 누르세요.' : '휴대폰 설치 화면을 여는 중입니다.',
+      installed: '설치를 마쳤습니다. VoiceNote를 다시 열어 주세요.',
+    };
+    const notes = { available: `새 버전 ${version}`, manual: `새 버전 ${version}`, downloading: `받는 중 ${percent}%`, ready: '설치 준비됨', confirming: '설치 확인 대기' };
+    let action = null;
+    if (u.status === 'available') action = { kind: 'download', label: blocked ? '받아 두기' : '지금 업데이트', disabled: false };
+    else if (u.status === 'ready') action = u.needsPermission ? { kind: 'permission', label: '설치 허용 켜기', disabled: false } : { kind: 'install', label: '설치', disabled: Boolean(blocked) };
+    else if (u.status === 'confirming' && u.canContinue) action = { kind: 'confirm', label: '설치 계속', disabled: false };
+    const error = u.error && u.status !== 'unknown' ? { text: u.error.message, tone: u.status === 'manual' ? 'info' : 'error' } : null;
+    const lockable = (u.status === 'available' || (u.status === 'ready' && !u.needsPermission)) && blocked;
+    return {
+      status: u.status,
+      note: notes[u.status] || null,
+      text: texts[u.status] || '새 버전을 확인하는 중입니다.',
+      detail: error,
+      lock: lockable ? (u.status === 'available' ? `${blocked} 지금 누르면 받아 두기만 합니다.` : blocked) : null,
+      progress: u.status === 'downloading' ? { percent, text: `${megabytes(u.received)} / ${megabytes(u.size)}` } : null,
+      action,
+      check: { hidden: ['downloading', 'ready', 'confirming', 'installed'].includes(u.status), disabled: ['idle', 'checking'].includes(u.status) },
+      fine: ['available', 'downloading', 'ready', 'confirming'].includes(u.status),
+    };
+  }
+  const api = { NOTES_LIMIT, EXHAUSTED_MESSAGE, canAnalyze, accessText, FORMAT_LABELS, outputFormat, actionLine, minutesSections, startBlockers, canStart, usageRows, tokens, updateView };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.VoiceFlow = api;
 })(typeof window === 'object' ? window : globalThis);

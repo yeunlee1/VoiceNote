@@ -19,6 +19,7 @@ public final class MainActivity extends Activity {
     private WebView view; private Store store; private String permissionId; private JSONObject permissionInput;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private static final int EXPORT_SETTINGS=21,IMPORT_SETTINGS=22,PICK_FOLDER=23;
+    private static final String UPDATE_WAIT="업데이트 설치 확인 화면을 먼저 마치거나 취소하세요.";
     private volatile String folderKind;
     // 파일 선택 창이 열린 요청, 내보낼 내용, 확인을 기다리는 불러온 설정이다. 확인 전에는 아무것도 저장하지 않는다.
     private volatile String fileRequest; private volatile byte[] exportBytes; private volatile SettingsFile.Value importPending; private volatile String importToken;
@@ -32,7 +33,7 @@ public final class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView web,WebResourceRequest request){return true;}
             @Override public WebResourceResponse shouldInterceptRequest(WebView web,WebResourceRequest request){
                 Uri uri=request.getUrl();String file=uri.getPath();
-                if("app.meeting.local".equals(uri.getHost())&&("/index.html".equals(file)||"/app.js".equals(file)||"/flow.js".equals(file)||"/formats.js".equals(file)||"/app.css".equals(file))){try{return new WebResourceResponse(file.endsWith(".css")?"text/css":file.endsWith(".js")?"application/javascript":"text/html","UTF-8",getAssets().open(file.substring(1)));}catch(IOException ignored){}}
+                if("app.meeting.local".equals(uri.getHost())&&("/index.html".equals(file)||"/app.js".equals(file)||"/flow.js".equals(file)||"/formats.js".equals(file)||"/release-notes.js".equals(file)||"/app.css".equals(file))){try{return new WebResourceResponse(file.endsWith(".css")?"text/css":file.endsWith(".js")?"application/javascript":"text/html","UTF-8",getAssets().open(file.substring(1)));}catch(IOException ignored){}}
                 return new WebResourceResponse("text/plain","UTF-8",403,"Forbidden",Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));
             }});view.loadUrl("https://app.meeting.local/index.html");
     }
@@ -43,10 +44,26 @@ public final class MainActivity extends Activity {
     private void dispatch(String id,String method,JSONObject data)throws Exception {
         String location=data.optString("location","main");
         switch(method){
-            case "init":{JSONObject custom=store.customFormat();answer(id,new JSONObject().put("connection",connection()).put("settings",store.settings()).put("customFormat",custom==null?JSONObject.NULL:custom),null);break;}
+            case "init":{JSONObject custom=store.customFormat();answer(id,new JSONObject().put("connection",connection()).put("settings",store.settings()).put("customFormat",custom==null?JSONObject.NULL:custom).put("update",Updates.snapshot(this)),null);break;}
+            // 앱 업데이트: 처음 조회 때 한 번 확인하고, 다시 확인·받기·설치·설치 계속·설치 허용 설정·깃허브 열기를 받는다. 진행 상태는 status 응답에도 싣는다.
+            case "update": Updates.check(this,false);answer(id,Updates.snapshot(this),null);break;
+            case "updateCheck": Updates.check(this,true);answer(id,Updates.snapshot(this),null);break;
+            case "updateDownload": answer(id,Updates.download(this),null);break;
+            case "updateInstall":
+                // 설치 확인 화면이 뜨면 회의를 시작하지 못하게 같은 작업 스레드에서 녹음·분석 시작과 서로 막는다. 서비스가 막 시작되는 중이어도 막는다.
+                if(MeetingService.active||MeetingService.starting())throw new IOException("녹음이나 분석이 끝난 뒤 설치하세요.");
+                if(permissionId!=null||fileRequest!=null||importPending!=null)throw new IOException("진행 중인 권한 요청이나 설정 파일 작업을 먼저 마치세요.");
+                answer(id,Updates.install(this),null);break;
+            case "updateConfirm":{
+                runOnUiThread(()->{if(!Updates.openConfirm(this))answer(id,null,"이어서 열 설치 화면이 없습니다. 설치를 다시 눌러 주세요.");else{try{answer(id,Updates.snapshot(this),null);}catch(Exception ex){answer(id,null,"업데이트 상태를 읽지 못했습니다.");}}});break;
+            }
+            case "updatePermission":
+                runOnUiThread(()->{try{startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+getPackageName())));answer(id,true,null);}catch(Exception ex){answer(id,null,"설치 허용 설정을 열지 못했습니다. 휴대폰 설정에서 VoiceNote의 '이 출처 허용'을 켜 주세요.");}});break;
+            case "updatePage":
+                runOnUiThread(()->{try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(UpdateRules.RELEASE_PAGE)));answer(id,true,null);}catch(Exception ex){answer(id,null,"브라우저를 열지 못했습니다.");}});break;
             case "saveCustomFormat": settingsIdle();answer(id,store.saveCustomFormat(data.getJSONObject("customFormat")),null);break;
             case "deleteCustomFormat": settingsIdle();store.deleteCustomFormat();answer(id,JSONObject.NULL,null);break;
-            case "status": answer(id,new JSONObject().put("active",MeetingService.active).put("meeting",new JSONObject(MeetingService.snapshot)).put("connection",connection()),null);break;
+            case "status": answer(id,new JSONObject().put("active",MeetingService.active).put("meeting",new JSONObject(MeetingService.snapshot)).put("connection",connection()).put("update",Updates.snapshot(this)),null);break;
             case "history": answer(id,store.history(),null);break;
             case "results": answer(id,store.results(location,data.getString("id")),null);break;
             case "review":{
@@ -89,6 +106,7 @@ public final class MainActivity extends Activity {
             }
             case "start":
                 if(MeetingService.active)throw new IOException("이미 진행 중인 회의가 있습니다.");
+                if(Updates.installing())throw new IOException(UPDATE_WAIT);
                 fileIdle();store.requireAccess();Store.notes(data);
                 if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
                     permissionId=id;permissionInput=data;
@@ -97,11 +115,13 @@ public final class MainActivity extends Activity {
             case "finish": runOnUiThread(()->startService(new Intent(this,MeetingService.class).setAction("finish")));answer(id,true,null);break;
             case "analyze":{
                 if(MeetingService.active)throw new IOException("진행 중인 회의가 있습니다.");
+                if(Updates.installing())throw new IOException(UPDATE_WAIT);
                 fileIdle();store.requireAccess();
                 String meetingId=data.getString("id");store.load(location,meetingId);launch(id,"analyze",location,meetingId);break;
             }
             case "refine":{
                 if(MeetingService.active)throw new IOException("진행 중인 회의가 있습니다.");
+                if(Updates.installing())throw new IOException(UPDATE_WAIT);
                 fileIdle();store.requireAccess();String meetingId=data.getString("id"),resultId=nullableString(data,"resultId"),feedback=Ai.checkedFeedback(data.opt("feedback"));
                 JSONObject selected=store.result(location,meetingId,resultId);
                 if(selected.optJSONObject("minutes")==null)throw new IOException("정리된 결과에만 의견을 반영할 수 있습니다.");
@@ -207,7 +227,13 @@ public final class MainActivity extends Activity {
     private void begin(String id,JSONObject data)throws Exception {
         store.draft();JSONObject record=store.create(data);store.clearDraft();launch(id,"record","main",record.getString("id"));
     }
-    private void launch(String id,String action,String location,String meetingId){runOnUiThread(()->{try{startForegroundService(new Intent(this,MeetingService.class).setAction(action).putExtra("location",location).putExtra("id",meetingId));answer(id,new JSONObject().put("id",meetingId),null);}catch(Exception ex){answer(id,null,"녹음 또는 분석 서비스를 시작하지 못했습니다. 마이크 권한을 확인하세요.");}});}
+    private void launch(String id,String action,String location,String meetingId){
+        // 서비스가 active를 켜기 전까지 업데이트 설치가 끼어들지 못하게 시작 중임을 먼저 표시한다.
+        MeetingService.startingAt=System.currentTimeMillis();
+        runOnUiThread(()->{try{startForegroundService(new Intent(this,MeetingService.class).setAction(action).putExtra("location",location).putExtra("id",meetingId));answer(id,new JSONObject().put("id",meetingId),null);}catch(Exception ex){MeetingService.startingAt=0;answer(id,null,"녹음 또는 분석 서비스를 시작하지 못했습니다. 마이크 권한을 확인하세요.");}});
+    }
+    @Override protected void onResume(){super.onResume();Updates.resumed(this);}
+    @Override protected void onPause(){Updates.paused(this);super.onPause();}
     @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){super.onRequestPermissionsResult(code,permissions,results);if(code==12){String id=permissionId;JSONObject data=permissionInput;permissionId=null;permissionInput=null;if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)worker.submit(()->{try{begin(id,data);}catch(Exception ex){answer(id,null,MeetingService.safeMessage(ex));}});else answer(id,null,"녹음하려면 마이크 권한이 필요합니다.");}}
     private void share(String requestId,String location,String id,String resultId,String kind)throws Exception {
         JSONObject record=store.result(location,id,resultId);File dir=store.directory(location,id),cache=new File(getCacheDir(),"공유");cache.mkdirs();

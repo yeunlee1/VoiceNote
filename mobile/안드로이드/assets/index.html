@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="app.css">
 <script src="formats.js" defer></script>
 <script src="flow.js" defer></script>
+<script src="release-notes.js" defer></script>
 <script src="app.js" defer></script>
 </head>
 <body>
@@ -25,6 +26,7 @@
   <symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h10.5v10.5H9zM15 9V4.5H4.5V15H9"/></symbol>
   <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="m6 12.5 4 4 8-9"/></symbol>
+  <symbol id="i-update" viewBox="0 0 24 24"><path d="M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5 15.5v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></symbol>
 </svg>
 
 <header class="topbar">
@@ -34,6 +36,7 @@
 </header>
 
 <main id="main">
+<button id="update-note" class="update-note" type="button" aria-haspopup="dialog" aria-controls="about" hidden><svg class="icon" aria-hidden="true"><use href="#i-update"/></svg><span id="update-note-label">새 버전</span><span class="update-note-more" aria-hidden="true">자세히</span></button>
 <section class="console" aria-labelledby="console-heading">
     <div class="console-head">
       <h1 id="console-heading">새 회의</h1>
@@ -151,7 +154,7 @@
 
 <dialog id="settings" aria-labelledby="settings-title">
   <div class="modal">
-    <div class="modal-head"><h2 id="settings-title">설정</h2><button id="close-settings" class="link close-dialog" type="button" data-close="settings">닫기</button></div>
+    <div class="modal-head"><h2 id="settings-title">설정</h2><div class="head-actions"><button id="open-about" class="link" type="button" aria-haspopup="dialog" aria-controls="about">프로그램 정보</button><button id="close-settings" class="link close-dialog" type="button" data-close="settings">닫기</button></div></div>
     <p id="settings-lock" class="notice" hidden>녹음이나 분석이 진행 중입니다. 설정은 끝난 뒤 바꿀 수 있습니다.</p>
     <nav class="settings-nav" aria-label="설정 구역"><button class="link" data-settings-section="ai" type="button">AI 연결</button><button class="link" data-settings-section="format" type="button">출력 형식</button><button class="link" data-settings-section="storage" type="button">저장 위치</button><button class="link" data-settings-section="file" type="button">설정 파일</button></nav>
     <section id="settings-ai" class="settings-section" tabindex="-1" aria-labelledby="ai-heading"><h3 id="ai-heading">AI 연결</h3>
@@ -195,6 +198,24 @@
   </div>
 </dialog>
 <dialog id="settings-preview" aria-labelledby="preview-title"><div class="modal"><div class="modal-head"><h2 id="preview-title">설정 불러오기 확인</h2><button class="link" id="cancel-settings" type="button">취소</button></div><p id="preview-file" class="hint"></p><div id="settings-preview-body" class="preview-rows"></div><button id="apply-settings" class="button primary" type="button">이 설정 적용</button></div></dialog>
+
+<dialog id="about" aria-labelledby="about-title">
+  <div class="modal">
+    <div class="modal-head"><h2 id="about-title">프로그램 정보</h2><button class="link close-dialog" type="button" data-close="about">닫기</button></div>
+    <div class="about-identity"><p class="about-name">VoiceNote <span id="about-version" class="about-version"></span></p><p id="about-version-meta" class="hint">지금 쓰는 버전</p></div>
+    <section id="about-update" class="update-panel" aria-labelledby="about-update-title" data-status="checking">
+      <h3 id="about-update-title">앱 업데이트</h3>
+      <p id="update-state" class="update-state" role="status">새 버전을 확인하는 중입니다.</p>
+      <div id="update-progress-row" class="update-progress" hidden><progress id="update-progress" max="100" value="0" aria-labelledby="update-state"></progress><span id="update-progress-text" class="hint"></span></div>
+      <p id="update-detail" class="update-detail" hidden></p>
+      <p id="update-lock" class="update-lock" hidden></p>
+      <div class="row"><button id="update-action" class="button primary" type="button" hidden>지금 업데이트</button><button id="update-check" class="button" type="button">다시 확인</button></div>
+      <button id="update-page" class="link update-page" type="button">깃허브에서 보기</button>
+      <p id="update-fine" class="hint" hidden>설치하면 VoiceNote가 닫히고 새 버전으로 바뀝니다. 회의 기록과 설정은 그대로 남습니다.</p>
+    </section>
+    <section class="about-notes" aria-labelledby="about-notes-title"><h3 id="about-notes-title">버전별 바뀐 점</h3><ol id="release-list" class="release-list"></ol></section>
+  </div>
+</dialog>
 
 <div id="message" class="toast" role="alert" hidden></div>
 </body>
