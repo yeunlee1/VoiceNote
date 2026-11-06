@@ -32,7 +32,10 @@ const MESSAGES = {
   UPDATE_DOWNLOAD_FAILED: '설치파일을 받지 못했습니다. 인터넷 연결을 확인한 뒤 다시 받아 주세요.',
   UPDATE_NOT_READY: '설치할 업데이트가 아직 준비되지 않았습니다.',
   UPDATE_LAUNCH_FAILED: `설치파일을 실행하지 못했습니다. 보안 프로그램이 막았는지 확인하거나 ${DIRECT}`,
+  UPDATE_LAUNCH_BUSY: '앞서 띄운 설치파일을 정리하는 중입니다. 잠시 뒤 다시 눌러 주세요.',
 };
+// 끝내지 못한 설치파일이 취소 표시를 보고 지울 때까지 기다리는 최대 시간이다. 설치파일은 앱이 켜져 있는 동안 0.25초마다 이 표시를 본다.
+const CANCEL_GRACE = 3 * 60 * 1000;
 
 function fail(code, message = MESSAGES[code], status = 409) {
   return Object.assign(new Error(message), { code, status });
@@ -62,8 +65,12 @@ const hasUninstaller = (folder) => {
 };
 
 // 설치파일(Inno 로더)은 실제 설치를 자식 프로세스로 띄우고 기다린다. 시작 확인에 실패하면 로더만이 아니라 그 자식까지 함께 끝낸다.
+// 끝냈거나(0) 이미 없으면(128) true다. 로더는 자식이 끝나야 끝나므로 로더가 없으면 자식도 없다.
 const endProcessTree = (pid) => {
-  try { childProcess.spawnSync('taskkill', ['/pid', String(pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore', timeout: 10000 }); } catch {}
+  try {
+    const result = childProcess.spawnSync('taskkill', ['/pid', String(pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore', timeout: 10000 });
+    return !result.error && (result.status === 0 || result.status === 128);
+  } catch { return false; }
 };
 
 function createUpdater({ enabled = false, currentVersion, appDir, hostPid = 0, serverPid = process.pid, tempRoot = os.tmpdir(), fetch = globalThis.fetch, spawn = childProcess.spawn, publicKey, now = Date.now, startTimeout = START_TIMEOUT, killTree = endProcessTree } = {}) {
@@ -225,8 +232,13 @@ function createUpdater({ enabled = false, currentVersion, appDir, hostPid = 0, s
       state = { ...state, status: 'available', received: 0, error: reason(error, 'UPDATE_DOWNLOAD_FAILED') };
       throw fail(state.error.code, state.error.message);
     }
-    // 설치파일은 '<상태 파일>.cancel'이 있으면 아무것도 바꾸지 않고 끝난다. 지난 시도의 표시가 남아 있으면 새 설치가 바로 멈추므로 먼저 지운다.
+    // 설치파일은 '<상태 파일>.cancel'이 있으면 그 표시를 지우고 아무것도 바꾸지 않고 끝난다.
+    // 지난 시도의 설치파일을 끝내지 못해 표시가 남아 있으면, 그 설치파일이 표시를 보고 지울 때까지 새로 띄우지 않는다. 두 설치가 겹치지 않게 한다.
+    // 오래 남은 표시는 남은 설치파일이 없는 것으로 보고 지운다(가짜 시계를 쓰는 시험과 섞이지 않게 실제 시각으로 잰다).
     const cancelFile = `${statusFile}.cancel`;
+    let pending = null;
+    try { pending = fs.statSync(cancelFile); } catch {}
+    if (pending && Date.now() - pending.mtimeMs < CANCEL_GRACE) throw fail('UPDATE_LAUNCH_BUSY');
     await fs.promises.rm(statusFile, { force: true }).catch(() => {});
     await fs.promises.rm(cancelFile, { force: true }).catch(() => {});
     let child = null;
@@ -248,10 +260,11 @@ function createUpdater({ enabled = false, currentVersion, appDir, hostPid = 0, s
       }
     } catch {
       // 남은 실제 설치가 나중에 앱이 닫힐 때 이어서 설치하지 않도록, 먼저 취소 표시를 남기고 프로세스 묶음 전체를 끝낸다.
-      // 묶음을 끝내지 못해도 설치파일은 앱이 닫히기를 기다리는 동안 이 표시를 보고 멈춘다.
+      // 묶음을 끝냈으면 남은 설치가 없으므로 표시를 지운다. 끝내지 못했으면 남은 설치파일이 표시를 보고 지울 때까지 둔다.
       try { fs.writeFileSync(cancelFile, 'cancel'); } catch {}
-      if (child?.pid) killTree(child.pid);
+      const ended = child?.pid ? killTree(child.pid) : true;
       try { child?.kill(); } catch {}
+      if (ended) { try { fs.rmSync(cancelFile, { force: true }); } catch {} }
       state = { ...state, error: { code: 'UPDATE_LAUNCH_FAILED', message: MESSAGES.UPDATE_LAUNCH_FAILED } };
       throw fail('UPDATE_LAUNCH_FAILED');
     }

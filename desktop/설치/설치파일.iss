@@ -73,6 +73,7 @@ var
   Installed: Boolean;
   RestoreFailed: Boolean;
   LeftoverBackup: Boolean;
+  CancelSeen: Boolean;
   AppFolder: String;
   BackupFolder: String;
 
@@ -141,14 +142,23 @@ begin
   end;
 end;
 
-{ 앱이 설치 시작 확인에 실패해 이번 설치를 취소했으면 <상태 파일>.cancel 이 생긴다. 앱이 이 설치 프로세스를 끝내지 못했어도 이것을 보고 멈춘다. }
+{ 앱이 설치 시작 확인에 실패해 이번 설치를 취소했으면 <상태 파일>.cancel 이 생긴다. 앱이 이 설치 프로세스를 끝내지 못했어도 이것을 보고 멈춘다.
+  본 표시는 지워서 앱에게 알린다. 앱은 표시가 사라진 뒤에야 다음 설치파일을 띄운다. 한 번 본 취소는 끝까지 기억한다. }
 function UpdateCancelled: Boolean;
 var
   Target: String;
 begin
-  Target := ExpandConstant('{param:status|}');
-  Result := (Target <> '') and FileExists(Target + '.cancel');
-  if Result then Log('앱이 이번 업데이트를 취소했습니다.');
+  if not CancelSeen then
+  begin
+    Target := ExpandConstant('{param:status|}');
+    if (Target <> '') and FileExists(Target + '.cancel') then
+    begin
+      CancelSeen := True;
+      DeleteFile(Target + '.cancel');
+      Log('앱이 이번 업데이트를 취소했습니다.');
+    end;
+  end;
+  Result := CancelSeen;
 end;
 
 function InitializeSetup: Boolean;

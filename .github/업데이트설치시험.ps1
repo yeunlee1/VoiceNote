@@ -180,8 +180,9 @@ try {
   $b2 = Read-Harness $process $output
   if ($b2.outcome -ne 'UPDATE_LAUNCH_FAILED') { throw "시작 확인 실패를 알리지 않았습니다: $($b2.outcome)" }
   if (-not $sawSetup) { throw '실제 설치 프로세스가 뜨기 전에 끝나 취소 표시 시험이 되지 않았습니다.' }
-  if (-not (Test-Path -LiteralPath "$($b2.statusFile).cancel" -PathType Leaf)) { throw '앱이 취소 표시를 남기지 않았습니다.' }
   Wait-For { (Get-SetupProcesses).Count -eq 0 } 30 '취소 표시를 본 설치 프로세스 종료' | Out-Null
+  # 남은 설치파일은 취소 표시를 보면 그 표시를 지우고 끝난다. 표시가 남아 있으면 설치파일이 보지 못한 것이다.
+  if (Test-Path -LiteralPath "$($b2.statusFile).cancel") { throw '남은 설치파일이 취소 표시를 보지 못했습니다.' }
   Close-App $app
   $app = $null
   Start-Sleep -Seconds 10

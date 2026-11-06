@@ -67,7 +67,7 @@ function launcher(outcome = 'spawn') {
   return { spawn, calls };
 }
 
-function fixture(t, { current = '1.5.0', installed = true, enabled = true, uninstaller = true, site = github(), start = launcher(), clock, before } = {}) {
+function fixture(t, { current = '1.5.0', installed = true, enabled = true, uninstaller = true, site = github(), start = launcher(), clock, before, treeEnds = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vn-updater-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const appDir = path.join(root, '앱');
@@ -79,8 +79,9 @@ function fixture(t, { current = '1.5.0', installed = true, enabled = true, unins
   before?.(path.join(tempRoot, 'VoiceNote-업데이트'));
   let now = 1_000_000;
   // 프로세스 묶음을 끝내라고 한 번호를 모은다. 실제로는 taskkill /t로 설치파일 로더와 그 자식(실제 설치)을 함께 끝낸다.
+  // treeEnds가 false면 taskkill이 실패한 경우다.
   const trees = [];
-  const updater = createUpdater({ enabled, currentVersion: current, appDir, hostPid: 4321, serverPid: 8765, startTimeout: 400, tempRoot, fetch: site.fetch, spawn: start.spawn, publicKey: keys.publicKey, now: clock || (() => now), killTree: (pid) => trees.push(pid) });
+  const updater = createUpdater({ enabled, currentVersion: current, appDir, hostPid: 4321, serverPid: 8765, startTimeout: 400, tempRoot, fetch: site.fetch, spawn: start.spawn, publicKey: keys.publicKey, now: clock || (() => now), killTree: (pid) => { trees.push(pid); return treeEnds; } });
   return { updater, site, start, root, appDir, tempRoot, trees, advance: (ms) => { now += ms; } };
 }
 
@@ -239,11 +240,52 @@ test('설치파일이 정한 시간 안에 대기 상태를 알리지 않으면 
   // 로더만 끝내면 실제 설치 프로세스가 남아, 나중에 앱을 닫을 때 설치가 이어질 수 있다. 묶음 전체를 끝낸다.
   assert.deepEqual(trees, [start.calls[0].child.pid]);
   assert.equal(start.calls[0].child.killed, true);
-  // 묶음을 끝내지 못했어도 설치파일이 기다리는 동안 보고 멈추도록 취소 표시를 남긴다.
+  // 묶음을 끝냈으면 남은 설치가 없으므로 취소 표시도 남기지 않는다.
   const status = start.calls[0].args.find((arg) => arg.startsWith('/status=')).slice('/status='.length);
-  assert.equal(fs.existsSync(`${status}.cancel`), true);
+  assert.equal(fs.existsSync(`${status}.cancel`), false);
   assert.equal(updater.status().status, 'ready');
   assert.equal(updater.installing(), false);
+});
+
+test('설치 묶음을 끝내지 못하면 취소 표시를 남기고, 남은 설치가 그 표시를 지울 때까지 새로 띄우지 않는다', async (t) => {
+  const silent = launcher('silent'), working = launcher('spawn');
+  let attempt = 0;
+  const spawned = [];
+  const spawn = (file, args, options) => { spawned.push(args); return (attempt++ === 0 ? silent : working).spawn(file, args, options); };
+  const { updater } = fixture(t, { start: { spawn, calls: [] }, treeEnds: false });
+  updater.ensureChecked();
+  await updater.settled();
+  await updater.download();
+  await updater.settled();
+  await assert.rejects(updater.launch(), (error) => error.code === 'UPDATE_LAUNCH_FAILED');
+  const status = spawned[0].find((arg) => arg.startsWith('/status=')).slice('/status='.length);
+  assert.equal(fs.existsSync(`${status}.cancel`), true);
+  // 바로 다시 눌러도 남은 설치가 표시를 보기 전에는 새 설치파일을 띄우지 않고 표시도 지우지 않는다.
+  await assert.rejects(updater.launch(), (error) => error.code === 'UPDATE_LAUNCH_BUSY' && /정리하는 중/.test(error.message));
+  assert.equal(spawned.length, 1);
+  assert.equal(fs.existsSync(`${status}.cancel`), true);
+  // 남은 설치가 표시를 보고 지우면(확인) 다시 띄울 수 있다.
+  fs.rmSync(`${status}.cancel`);
+  assert.equal((await updater.launch()).status, 'launching');
+  assert.equal(spawned.length, 2);
+});
+
+test('오래 남은 취소 표시는 남은 설치가 없는 것으로 보고 지운 뒤 다시 띄운다', async (t) => {
+  const silent = launcher('silent'), working = launcher('spawn');
+  let attempt = 0;
+  const spawned = [];
+  const spawn = (file, args, options) => { spawned.push(args); return (attempt++ === 0 ? silent : working).spawn(file, args, options); };
+  const { updater } = fixture(t, { start: { spawn, calls: [] }, treeEnds: false });
+  updater.ensureChecked();
+  await updater.settled();
+  await updater.download();
+  await updater.settled();
+  await assert.rejects(updater.launch(), (error) => error.code === 'UPDATE_LAUNCH_FAILED');
+  const cancel = `${spawned[0].find((arg) => arg.startsWith('/status=')).slice('/status='.length)}.cancel`;
+  const old = new Date(Date.now() - 4 * 60 * 1000);
+  fs.utimesSync(cancel, old, old);
+  assert.equal((await updater.launch()).status, 'launching');
+  assert.equal(fs.existsSync(cancel), false);
 });
 
 test('지난 시도의 취소 표시는 새 설치파일을 띄우기 전에 지운다', async (t) => {
