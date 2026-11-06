@@ -28,7 +28,9 @@ DependencyRoot 아래에 WebView2 패키지를 WebView2 폴더로 풀고 Microso
 테스트 예: node --test 앱/*.test.cjs tests/*.test.cjs
 공개 저장소라 push 전 비밀 검사 훅을 씁니다. 저장소를 받은 PC마다 한 번 .githooks\pre-push와 .githooks\push-비밀검사.cjs를 .git\hooks에 복사합니다. 훅은 보낼 원격에 아직 없는 커밋과 태그의 바뀐 파일 전체 내용(바이너리·UTF-16 포함), 파일 이름, 커밋·태그 메시지에서 이 PC에 저장된 실제 API 키 값(%LOCALAPPDATA%\MeetingJournal\.env.회의록키)과 키 모양 문자열을 찾고, 키·서명 파일과 속을 읽을 수 없는 압축·실행 파일을 이름으로 막습니다. 찾으면 push를 멈추고 값은 출력하지 않습니다. 훅 시험은 sh .githooks/push-비밀검사-시험.sh입니다.
 자동 배포는 .github/workflows/자동배포.yml이 맡습니다. vX.Y.Z 태그를 올리면 시험과 빌드를 거쳐 GitHub 릴리즈를 만듭니다. 이름에 자동배포가 든 work 브랜치와 수동 실행은 버리는 서명으로 빌드까지만 시험합니다.
-태그를 올리기 전에 설치설치파일.iss, 프로그램.cs, 안드로이드 AndroidManifest.xml의 버전을 같은 값으로 올립니다. 값이 다르거나 태그 커밋이 main에 없으면 배포를 멈춥니다. 릴리즈 설명에는 태그 메시지를 씁니다.
+태그를 올리기 전에 설치설치파일.iss, 프로그램.cs, 안드로이드 AndroidManifest.xml, 앱앱버전.cjs의 버전을 같은 값으로 올리고 AndroidManifest.xml의 versionCode를 하나 올립니다. 릴리즈노트.js 맨 위에 그 버전을 적고 안드로이드 assets\release-notes.js에 같은 파일을 복사합니다. tests\버전일치.test.cjs가 이 값들을 맞춰 봅니다. 값이 다르거나 태그 커밋이 main에 없으면 배포를 멈춥니다. 릴리즈 설명에는 태그 메시지를 씁니다.
+앱 안 업데이트(1.5.0부터)는 릴리즈의 VoiceNote-<버전>-update.json을 Android 개인 서명 키로 확인한 뒤에만 설치파일을 받습니다. 자동 배포는 두 파일과 함께 이 목록을 .github\업데이트목록.ps1로 서명하고 .github\업데이트목록확인.cjs로 앱과 같은 규칙으로 확인합니다. 리허설은 러너에서 .github\업데이트설치시험.ps1로 실제 설치·업데이트·실패 되돌리기를 시험합니다(사람이 쓰는 PC에서는 돌리지 않습니다).
+서명을 GitHub에 등록하지 않고 이 PC에서 릴리즈할 때는 두 파일을 빌드한 뒤 업데이트목록.ps1에 개인 서명 폴더와 -ExpectedCertificateSha256(앱업데이트검증.cjs의 RELEASE_CERTIFICATE_SHA256)를 넘겨 목록을 만들고, 업데이트목록확인.cjs로 확인한 다음 세 파일을 함께 올립니다.
 Android 서명은 저장소 주인이 .github서명등록.ps1을 한 번 실행해 GitHub 환경 release의 비밀 값으로 등록합니다. API 키는 작업 흐름에 넣지 않습니다. 이 PC의 배포최신 폴더는 자동 배포가 고치지 않으므로 필요하면 배포준비.ps1로 따로 갱신합니다.
 같은 태그의 릴리즈가 이미 있으면 자동 배포는 실패하고 기존 릴리즈를 덮어쓰지 않습니다. 다시 올리려면 기존 릴리즈를 확인해 지운 뒤 실행을 다시 돌립니다.
 .githookspush-비밀검사-시험.sh는 강제 push를 쓰므로 임시 저장소 안이 아니면 스스로 멈춥니다. 데스크톱 시험의 testspush훅시험안전.test.cjs가 이 동작과 훅 전체 시험을 함께 돌립니다.
