@@ -200,6 +200,8 @@ body[data-recording="true"] .timer { color: var(--rec-deep); }
 
 /* 프로그램 정보: 버전, 앱 업데이트, 버전별 바뀐 점 */
 .modal-about { width: min(640px, calc(100vw - 32px)); }
+/* 버전별 바뀐 점을 끝까지 내려도 뒤의 화면이 이어서 움직이지 않게 한다. */
+.modal-about .modal-body { overscroll-behavior: contain; }
 .about-identity { display: grid; gap: 2px; min-width: 0; }
 .about-version { color: var(--teal-deep); font-variant-numeric: tabular-nums; }
 .about-body { gap: 24px; }
