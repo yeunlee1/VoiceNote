@@ -61,7 +61,12 @@ const hasUninstaller = (folder) => {
   try { return fs.readdirSync(folder).some((name) => /^unins\d{3}\.exe$/i.test(name)); } catch { return false; }
 };
 
-function createUpdater({ enabled = false, currentVersion, appDir, hostPid = 0, serverPid = process.pid, tempRoot = os.tmpdir(), fetch = globalThis.fetch, spawn = childProcess.spawn, publicKey, now = Date.now, startTimeout = START_TIMEOUT } = {}) {
+// 설치파일(Inno 로더)은 실제 설치를 자식 프로세스로 띄우고 기다린다. 시작 확인에 실패하면 로더만이 아니라 그 자식까지 함께 끝낸다.
+const endProcessTree = (pid) => {
+  try { childProcess.spawnSync('taskkill', ['/pid', String(pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore', timeout: 10000 }); } catch {}
+};
+
+function createUpdater({ enabled = false, currentVersion, appDir, hostPid = 0, serverPid = process.pid, tempRoot = os.tmpdir(), fetch = globalThis.fetch, spawn = childProcess.spawn, publicKey, now = Date.now, startTimeout = START_TIMEOUT, killTree = endProcessTree } = {}) {
   if (!check.parseVersion(currentVersion)) throw new Error('앱 버전 형식을 확인하세요.');
   // Windows 창이 일반 실행으로 켜 준 경우에만, 그리고 설치 폴더(node.exe 옆)에 실행 파일과 제거 프로그램이 있을 때만 업데이트를 제공한다.
   // 개발용 실행, 시험 서버, 자체 검사(--self-test), 다른 자료 폴더(--data-root)는 제외된다.
@@ -239,6 +244,8 @@ function createUpdater({ enabled = false, currentVersion, appDir, hostPid = 0, s
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
     } catch {
+      // 남은 실제 설치가 나중에 앱이 닫힐 때 이어서 설치하지 않도록 프로세스 묶음 전체를 끝낸다.
+      if (child?.pid) killTree(child.pid);
       try { child?.kill(); } catch {}
       state = { ...state, error: { code: 'UPDATE_LAUNCH_FAILED', message: MESSAGES.UPDATE_LAUNCH_FAILED } };
       throw fail('UPDATE_LAUNCH_FAILED');

@@ -52,6 +52,7 @@ function launcher(outcome = 'spawn') {
   const calls = [];
   const spawn = (file, args, options) => {
     const child = new EventEmitter();
+    child.pid = 5000 + calls.length;
     child.unref = () => { child.unreferenced = true; };
     child.kill = () => { child.killed = true; return true; };
     calls.push({ file, args, options, child });
@@ -77,8 +78,10 @@ function fixture(t, { current = '1.5.0', installed = true, enabled = true, unins
   fs.mkdirSync(tempRoot);
   before?.(path.join(tempRoot, 'VoiceNote-업데이트'));
   let now = 1_000_000;
-  const updater = createUpdater({ enabled, currentVersion: current, appDir, hostPid: 4321, serverPid: 8765, startTimeout: 400, tempRoot, fetch: site.fetch, spawn: start.spawn, publicKey: keys.publicKey, now: clock || (() => now) });
-  return { updater, site, start, root, appDir, tempRoot, advance: (ms) => { now += ms; } };
+  // 프로세스 묶음을 끝내라고 한 번호를 모은다. 실제로는 taskkill /t로 설치파일 로더와 그 자식(실제 설치)을 함께 끝낸다.
+  const trees = [];
+  const updater = createUpdater({ enabled, currentVersion: current, appDir, hostPid: 4321, serverPid: 8765, startTimeout: 400, tempRoot, fetch: site.fetch, spawn: start.spawn, publicKey: keys.publicKey, now: clock || (() => now), killTree: (pid) => trees.push(pid) });
+  return { updater, site, start, root, appDir, tempRoot, trees, advance: (ms) => { now += ms; } };
 }
 
 test('설치본에서 켜 둔 경우가 아니면 업데이트를 제공하지 않고 깃허브에 묻지 않는다', async (t) => {
@@ -227,12 +230,14 @@ test('설치 시작은 실행 직전에 해시를 다시 보고, 정해진 인�
 });
 
 test('설치파일이 정한 시간 안에 대기 상태를 알리지 않으면 끝내고 앱을 닫지 않게 실패로 알린다', async (t) => {
-  const { updater, start } = fixture(t, { start: launcher('silent') });
+  const { updater, start, trees } = fixture(t, { start: launcher('silent') });
   updater.ensureChecked();
   await updater.settled();
   await updater.download();
   await updater.settled();
   await assert.rejects(updater.launch(), (error) => error.code === 'UPDATE_LAUNCH_FAILED');
+  // 로더만 끝내면 실제 설치 프로세스가 남아, 나중에 앱을 닫을 때 설치가 이어질 수 있다. 묶음 전체를 끝낸다.
+  assert.deepEqual(trees, [start.calls[0].child.pid]);
   assert.equal(start.calls[0].child.killed, true);
   assert.equal(updater.status().status, 'ready');
   assert.equal(updater.installing(), false);
