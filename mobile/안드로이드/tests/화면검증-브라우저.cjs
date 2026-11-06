@@ -12,7 +12,7 @@ function serve() {
   const server = http.createServer((req, res) => {
     const name = path.basename(new URL(req.url, 'http://x').pathname);
     const file = path.join(assets, name);
-    if (!['index.html', 'app.js', 'flow.js', 'formats.js', 'app.css'].includes(name)) { res.writeHead(404); res.end(); return; }
+    if (!['index.html', 'app.js', 'flow.js', 'formats.js', 'release-notes.js', 'app.css'].includes(name)) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'Content-Type': types[path.extname(name)] }); if(name==='app.js'){res.end(fs.readFileSync(file,'utf8').replace('  window.receive =','  window.__settingsBridgeForTest = call;\n  window.receive ='));}else fs.createReadStream(file).pipe(res);
   });
   return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));
@@ -43,7 +43,7 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
   const {proc,port,profile}=await chrome();let ws;
   try{
     const client=await connect(port);ws=client.ws;const send=client.send;
-    await send('Page.enable');await send('Runtime.enable');await send('Page.addScriptToEvaluateOnNewDocument',{source:mock+require('./설정평가-모의브리지.cjs')});
+    await send('Page.enable');await send('Runtime.enable');await send('Page.addScriptToEvaluateOnNewDocument',{source:mock+require('./설정평가-모의브리지.cjs')+require('./업데이트-모의브리지.cjs')});
     const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result.value;};
     const until=async expression=>{const deadline=Date.now()+6500;while(Date.now()<deadline){if(await evaluate(expression))return true;await wait(50);}return false;};
     const click=selector=>evaluate('document.querySelector('+JSON.stringify(selector)+').click()');
@@ -52,6 +52,7 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     const shot=async name=>{for(let n=0;n<65&&await evaluate("!document.getElementById('message').hidden");n++)await wait(100);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(path.join(outDir,name),Buffer.from(r.data,'base64'));};
     const key=async()=>{await click('#open-settings');await evaluate("document.getElementById('api-key').value='sk-test-00000000000000000000'");await click('#save-key');await wait(60);await click('#close-settings');};
     await require('./후속검증-화면.cjs')({viewport,load,key,click,evaluate,until,wait,shot,check});
+    await require('./업데이트검증-화면.cjs')({viewport,load,click,evaluate,until,wait,shot,check});
     for(const width of [360,390,412]){
       await viewport(width);await load();await key();await click('#history button');await wait(60);
       check(width+'px T1 의견 예시와 앞선 정리본을 보지 않는 안내',await evaluate("document.getElementById('review-comment').placeholder==='예) 담당자가 틀렸어요. 견적 검토는 이대리가 맡기로 했습니다.'&&document.getElementById('review-help').textContent==='AI는 앞선 결과를 보지 않고 전사를 다시 읽습니다. 위치보다 무엇이 어떻게 틀렸는지 적어 주세요.'"));

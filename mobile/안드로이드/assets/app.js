@@ -1,7 +1,11 @@
 // 네이티브 녹음 상태와 보관함별 지난 회의 및 AI 설정을 연결한다.
 (() => {
   const $ = id => document.getElementById(id), pending = new Map(), Flow = window.VoiceFlow;
-  const state = { settings: {}, connection: { keyConfigured: false, keySource: 'none', models: [], summaryModel: '' }, active: false, recording: false, busy: false, opened: null, lastState: '', lastHistory: '', lastMeetingState: '', removeArmed: false, deleteArmed: false, opener: null };
+  const state = { settings: {}, connection: { keyConfigured: false, keySource: 'none', models: [], summaryModel: '' }, active: false, recording: false, busy: false, opened: null, lastState: '', lastHistory: '', lastMeetingState: '', removeArmed: false, deleteArmed: false, opener: null,
+    // 앱 업데이트 상태(네이티브가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 실행 중 여부와 마지막 오류다.
+    update: null, updateIntent: false, updateRunning: false, updateError: '',
+    // 업데이트로 앱이 닫히면 사라질 입력이다. 평가 의견·별점, 내 형식 편집, 회의 준비 저장 실패를 따로 기억한다.
+    reviewDirty: false, customDirty: false, draftSaving: null, draftFailed: false };
   let serial = 0, draftTimer = 0;
   window.receive = (id, payload) => { const task = pending.get(id); if (!task) return; pending.delete(id); payload.error ? task.reject(new Error(payload.error)) : task.resolve(payload.value); };
   function call(method, data = {}) {
@@ -53,7 +57,8 @@
     const idle = !state.busy && !state.active && !state.refining;
     $('prepare').disabled = !idle;
     $('start').hidden = state.recording; $('finish').hidden = !state.recording;
-    $('start').disabled = !Flow.canStart(snapshot());
+    // 업데이트 설치 확인 화면을 기다리는 동안에는 네이티브도 새 회의를 거절하므로 시작 단추를 잠근다.
+    $('start').disabled = !Flow.canStart(snapshot()) || state.update?.status === 'confirming';
     $('start-label').textContent = state.active && !state.recording ? '분석 중' : '회의 시작';
     $('finish').disabled = state.busy || !state.recording;
     $('retry').disabled = !idle || !state.opened;
@@ -80,7 +85,9 @@
     $('share-result').disabled = $('copy-result').disabled;
     $('share-all').disabled = !idle || !state.opened;
     $('save-copies').disabled = !resultReady;
-    renderBlockers(); renderStage();
+    // 받는 동안 녹음 시작·분석·저장 같은 작업이 끼면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 '설치'를 다시 누른다.
+    if (state.updateIntent && (state.active || state.refining || state.busy)) state.updateIntent = false;
+    renderBlockers(); renderStage(); renderUpdate();
   }
   // 체험 횟수를 다 쓴 뒤 분석을 시도하면 안내 문구를 보이고 AI 설정을 연다.
   async function task(work) { if (state.busy) return; state.busy = true; lock(); let exhausted = false; try { await work(); } catch (error) { message(error.message); exhausted = error.message === Flow.EXHAUSTED_MESSAGE; } finally { state.busy = false; lock(); } if (exhausted && !$('settings').open) openSettings(); }
@@ -90,7 +97,8 @@
   }
   // 모달 위에 미리보기 모달이 겹칠 수 있으므로 돌아갈 포커스는 모달마다 따로 기억한다.
   function openDialog(id, opener) { if ($(id).open) return; $(id).returnFocus = opener || document.activeElement; $(id).showModal(); }
-  for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { const opener = dialog.returnFocus; dialog.returnFocus = null; if (opener && document.contains(opener)) opener.focus(); });
+  // 연 단추가 그 사이 숨었으면(예: 새 버전 안내 줄이 사라짐) 프로그램 정보는 설정 단추로 초점을 돌린다.
+  for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { const opener = dialog.returnFocus; dialog.returnFocus = null; if (opener && document.contains(opener) && !opener.hidden) opener.focus(); else if (dialog.id === 'about') $('open-settings').focus(); });
   for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => $(button.dataset.close).close());
 
   function renderAccess() {
@@ -125,8 +133,29 @@
     const format = $('output-format').value;
     return format === 'custom' && state.customFormat ? { outputFormat: format, customFormat: state.customFormat } : { outputFormat: format === 'custom' ? 'meeting' : format };
   }
-  function queueDraft() { clearTimeout(draftTimer); draftTimer = setTimeout(() => { draftTimer = 0; call('saveDraft', draftData()).catch(error => message(error.message)); }, 500); }
-  async function flushDraft() { if (!draftTimer) return; clearTimeout(draftTimer); draftTimer = 0; await call('saveDraft', draftData()).catch(() => {}); }
+  // 회의 준비 저장을 하나 보내고, 끝날 때까지 진행 중으로 기억한다. 실패하면 업데이트 설치가 막히도록 실패를 남긴다.
+  function saveDraftNow() {
+    // 끝났다는 표시는 결과를 받는 그 자리에서 지운다. 이 저장을 기다린 쪽이 다음 줄에서 볼 때 이미 지워져 있어야 한다.
+    const job = call('saveDraft', draftData()).then(
+      () => { if (state.draftSaving === job) state.draftSaving = null; state.draftFailed = false; },
+      error => { if (state.draftSaving === job) state.draftSaving = null; state.draftFailed = true; throw error; });
+    state.draftSaving = job;
+    return job;
+  }
+  function queueDraft() { clearTimeout(draftTimer); draftTimer = setTimeout(() => { draftTimer = 0; saveDraftNow().catch(error => message(error.message)); }, 500); }
+  async function flushDraft() { if (!draftTimer) return; clearTimeout(draftTimer); draftTimer = 0; await saveDraftNow().catch(() => {}); }
+  // 업데이트 설치 직전에 쓰는 엄격한 저장이다. 기다리던 저장과, 그사이 새로 적어 타이머에 걸린 저장까지 끝나야 하고 실패하면 설치하지 않는다.
+  // 계속 새로 적고 있으면 세 번까지만 기다린다.
+  // 지난 저장이 실패했으면 여기서 한 번 다시 저장해 본다. 그래서 실패해도 설치 단추를 잠그지 않고, 누르면 다시 저장한 뒤에만 설치한다.
+  async function settleDraft() {
+    if (state.draftFailed && !draftTimer && !state.draftSaving) await saveDraftNow();
+    for (let round = 0; round < 3 && (draftTimer || state.draftSaving); round++) {
+      if (draftTimer) { clearTimeout(draftTimer); draftTimer = 0; await saveDraftNow(); }
+      else await state.draftSaving;
+    }
+    if (draftTimer || state.draftSaving) throw new Error('회의 준비 내용을 저장하는 중입니다. 잠시 뒤 다시 눌러 주세요.');
+    if (state.draftFailed) throw new Error('회의 준비 내용을 저장하지 못했습니다. 잠시 뒤 다시 눌러 주세요.');
+  }
   const stateLabels = { complete: '회의록', failed: '분석 실패', interrupted: '녹음 중단', saved: '음성 저장', analyzing: '분석 중', recording: '녹음 중' };
   async function history() {
     const data = await call('history'), entries = data.meetings; $('history').replaceChildren();
@@ -170,7 +199,7 @@
       const option = node('option', [`${index + 1}번째 결과`, savedLabel(version.savedAt), Flow.FORMAT_LABELS[Flow.outputFormat(version.outputFormat)], version.refined && '의견 반영본', version.stars && `별 ${version.stars}개`].filter(Boolean).join(' · ')); option.value = version.id; return option;
     })); $('result-version').value = selected || ''; $('version-wrap').hidden = versions.length < 2;
     $('refined-badge').hidden = !record.feedback && !versions.find(version => version.id === selected)?.refined;
-    $('review-panel').hidden = !minutes || !selected; state.stars = data.review?.stars || null;
+    $('review-panel').hidden = !minutes || !selected; state.stars = data.review?.stars || null; state.reviewDirty = false;
     $('review-comment').value = data.review?.comment || ''; $('review-state').textContent = data.review ? '저장된 평가입니다.' : '별점과 의견은 선택입니다. 평가 저장에는 요금이 들지 않습니다.';
     renderStars(); renderCopies(data.copies);
     $('transcript-meta').textContent = transcript ? `전사 ${number(Array.from(transcript).length)}자 · 녹음에서 인식한 글을 그대로 보여 줍니다.` : '아직 전사문이 없습니다.';
@@ -212,17 +241,17 @@
     const base = state.customFormat || MeetingFormats.defaultCustom(), chosen = new Set(base.sections.map(section => section.key));
     state.customRows = [...base.sections.map(section => ({ ...section, on: true })), ...MeetingFormats.KEYS.filter(key => !chosen.has(key)).map(key => ({ key, title: MeetingFormats.KEY_LABELS[key], on: false }))];
     $('custom-name').value = state.customFormat?.name || ''; $('custom-instruction').value = state.customFormat?.instruction || '';
-    $('custom-delete').hidden = !state.customFormat; state.customDeleteArmed = false; $('custom-delete').textContent = '내 형식 삭제';
+    $('custom-delete').hidden = !state.customFormat; state.customDeleteArmed = false; state.customDirty = false; $('custom-delete').textContent = '내 형식 삭제';
     $('custom-status').textContent = state.customFormat ? '' : '아직 저장한 내 형식이 없습니다. 이름과 항목을 정하고 저장하세요.';
     renderEditorRows();
   }
   function renderEditorRows() {
     $('custom-section-list').replaceChildren(...state.customRows.map((row, index) => {
       const item = node('li', null, 'custom-row'), check = node('input'), title = node('input'), label = MeetingFormats.KEY_LABELS[row.key];
-      check.type = 'checkbox'; check.checked = row.on; check.setAttribute('aria-label', `${label} 넣기`); check.onchange = () => { row.on = check.checked; renderFormatExample(); };
-      title.value = row.title; title.maxLength = MeetingFormats.LIMITS.title; title.setAttribute('aria-label', `${label} 항목 이름`); title.oninput = () => { row.title = title.value; renderFormatExample(); };
+      check.type = 'checkbox'; check.checked = row.on; check.setAttribute('aria-label', `${label} 넣기`); check.onchange = () => { row.on = check.checked; state.customDirty = true; renderFormatExample(); };
+      title.value = row.title; title.maxLength = MeetingFormats.LIMITS.title; title.setAttribute('aria-label', `${label} 항목 이름`); title.oninput = () => { row.title = title.value; state.customDirty = true; renderFormatExample(); };
       const move = (text, delta, disabled) => { const button = node('button', text, 'button move'); button.type = 'button'; button.disabled = disabled; button.dataset.edge = String(disabled); button.setAttribute('aria-label', `${label} ${delta < 0 ? '위로' : '아래로'}`);
-        button.onclick = () => { [state.customRows[index], state.customRows[index + delta]] = [state.customRows[index + delta], state.customRows[index]]; renderEditorRows(); renderFormatExample(); }; return button; };
+        button.onclick = () => { [state.customRows[index], state.customRows[index + delta]] = [state.customRows[index + delta], state.customRows[index]]; state.customDirty = true; renderEditorRows(); renderFormatExample(); }; return button; };
       const head = node('label', null, 'custom-check'); head.append(check, node('span', label));
       item.append(head, title, move('↑', -1, index === 0), move('↓', 1, index === state.customRows.length - 1)); return item;
     }));
@@ -285,13 +314,13 @@
   }
   async function saveReview(target) {
     const review = await call('review', {...target,stars:state.stars || null,comment:$('review-comment').value.trim()});
-    $('review-state').textContent = '평가를 저장했습니다. 요금은 들지 않습니다.'; await history(); return review;
+    state.reviewDirty = false; $('review-state').textContent = '평가를 저장했습니다. 요금은 들지 않습니다.'; await history(); return review;
   }
   $('result-version').onchange = () => { const target = {...state.opened}, resultId = $('result-version').value; task(() => open(target.location,target.id,state.opener,resultId)); };
   for (const button of document.querySelectorAll('[data-stars]')) button.onclick = () => {
-    const stars = Number(button.dataset.stars); state.stars = state.stars === stars ? null : stars; renderStars(); lock();
+    const stars = Number(button.dataset.stars); state.stars = state.stars === stars ? null : stars; state.reviewDirty = true; renderStars(); lock();
   };
-  $('review-comment').oninput = lock;
+  $('review-comment').oninput = () => { state.reviewDirty = true; lock(); };
   $('save-review').onclick = () => { const target = {...state.opened}; task(() => saveReview(target)); };
   $('refine').onclick = () => {
     const target = {...state.opened}, feedback = $('review-comment').value.trim();
@@ -332,7 +361,7 @@
   $('settings-preview').addEventListener('cancel', event => { if (state.busy) event.preventDefault(); });
   $('settings-preview').addEventListener('close', () => { if (state.importToken) { state.importToken = null; call('cancelSettings').catch(() => {}); } });
   function closeResult() {
-    if ($('result').hidden || state.busy) return; const target = state.opened; $('result').hidden = true; document.body.style.overflow = ''; $('main').inert = false; document.querySelector('.topbar').inert = false; document.querySelector('.dock').inert = false; state.opened = null;
+    if ($('result').hidden || state.busy) return; const target = state.opened; state.reviewDirty = false; $('result').hidden = true; document.body.style.overflow = ''; $('main').inert = false; document.querySelector('.topbar').inert = false; document.querySelector('.dock').inert = false; state.opened = null;
     const opener = document.contains(state.opener) ? state.opener : [...$('history').querySelectorAll('button')].find(button => button.dataset.location === target?.location && button.dataset.id === target?.id);
     state.opener = null; if (opener) opener.focus(); lock();
   }
@@ -344,6 +373,8 @@
       const status = await call('status'), meeting = status.meeting;
       if (state.busy && !force) return;
       state.active = status.active; state.recording = status.active && meeting.state === 'recording';
+      // 받는 동안 녹음·분석이 시작되면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 다시 눌러야 설치한다.
+      if (state.active || state.refining) state.updateIntent = false;
       document.body.classList.toggle('recording', state.recording);
       if (state.active) {
         state.lastMeetingState = '';
@@ -374,6 +405,8 @@
       }
       // 체험 남은 횟수가 분석 뒤 바뀌므로 상태 조회 때 연결 정보도 함께 갱신한다.
       if (status.connection) { state.connection = status.connection; renderAccess(); }
+      // 업데이트 확인·받기 진행도 같은 상태 조회로 받는다.
+      if (status.update) applyUpdate(status.update);
       if (state.opened && state.opened.id === meeting.id && state.opened.location === meeting.location && (status.active || meeting.state === 'failed')) $('meeting-status').textContent = meeting.message || '처리 중';
       state.connection.active = state.active;
       state.lastState = state.active ? 'active' : '';
@@ -385,7 +418,7 @@
   for (const id of ['title', 'date', 'participants', 'notes']) $(id).addEventListener('input', () => { queueDraft(); lock(); });
   $('output-format').onchange = () => { state.formatChosen = true; queueDraft(); renderFormatExample(); lock(); };
   $('format-help').onclick = () => { $('format-example').hidden = !$('format-example').hidden; renderFormatExample(); };
-  $('custom-name').oninput = renderFormatExample; $('custom-instruction').oninput = renderFormatExample;
+  $('custom-name').oninput = () => { state.customDirty = true; renderFormatExample(); }; $('custom-instruction').oninput = () => { state.customDirty = true; renderFormatExample(); };
   $('custom-save').onclick = () => task(async () => {
     state.customFormat = await call('saveCustomFormat', { customFormat: editorValue(true) }); updateCustomOption(); loadEditor();
     $('custom-status').textContent = `‘${state.customFormat.name}’ 형식을 저장했습니다. 다음 분석부터 이 형식으로 정리합니다.`; renderFormatExample(); lock();
@@ -461,10 +494,111 @@
     return false;
   };
 
+  // 앱 업데이트와 프로그램 정보. 네이티브가 확인·받기·설치 세션을 맡고, 화면은 상태를 보여 주며 사라질 입력이 있으면 설치만 막는다.
+  const Notes = window.VoiceNoteReleaseNotes || { NOTES: [], find: () => null, dateLabel: () => '' };
+  // 같은 글을 다시 넣지 않아야 상태 알림(role=status)이 같은 문장을 반복해 읽지 않는다. lock()이 먼저 부를 수 있어 함수 선언으로 둔다.
+  function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
+  function updateReasons() {
+    const reasons = [];
+    if (state.active || state.refining) reasons.push('녹음이나 분석이 끝난 뒤 설치하세요.');
+    else if (state.busy) reasons.push('진행 중인 작업이 끝난 뒤 설치하세요.');
+    // 별점과 의견을 모두 비운 것은 저장할 수 없는 상태(저장 단추가 잠김)라 지켜야 할 입력으로 보지 않는다.
+    if (state.reviewDirty && (state.stars || $('review-comment').value.trim())) reasons.push('평가 의견을 저장하거나 지운 뒤 설치하세요.');
+    if (state.customDirty) reasons.push('내 형식 변경을 저장한 뒤 설치하세요.');
+    if (state.importToken) reasons.push('설정 불러오기 확인을 먼저 마치세요.');
+    if ($('api-key').value.trim()) reasons.push('입력한 API 키를 등록하거나 지운 뒤 설치하세요.');
+    // 회의 준비 저장 실패는 여기서 막지 않는다. 설치를 누르면 settleDraft가 다시 저장해 보고, 그래도 실패하면 설치하지 않는다.
+    return reasons;
+  }
+  function applyUpdate(update) {
+    if (!update || typeof update.status !== 'string') return;
+    const before = state.update?.status;
+    state.update = update;
+    if (update.status === 'available' && update.error) state.updateIntent = false;
+    renderUpdate();
+    // 한 번 누른 '지금 업데이트'는 받기가 끝나면 설치 화면까지 이어 간다. 그 사이 회의를 시작했으면 이유를 보이고 멈춘다.
+    if (update.status === 'ready' && before !== 'ready' && state.updateIntent) runUpdate('install');
+  }
+  function renderUpdate() {
+    const v = Flow.updateView(state.update, updateReasons());
+    $('update-note').hidden = !v.note;
+    if (v.note) { setText($('update-note-label'), v.note); $('update-note').setAttribute('aria-label', `${v.note}, 프로그램 정보 열기`); }
+    setText($('update-state'), v.text);
+    $('about-update').dataset.status = v.status;
+    $('update-progress-row').hidden = !v.progress;
+    if (v.progress) { $('update-progress').value = v.progress.percent; setText($('update-progress-text'), v.progress.text); }
+    const detail = state.updateError ? { text: state.updateError, tone: 'error' } : v.detail;
+    $('update-detail').hidden = !detail;
+    if (detail) { setText($('update-detail'), detail.text); $('update-detail').dataset.tone = detail.tone; }
+    $('update-lock').hidden = !v.lock;
+    if (v.lock) setText($('update-lock'), v.lock);
+    const action = $('update-action');
+    action.hidden = !v.action;
+    if (v.action) { setText(action, v.action.label); action.dataset.kind = v.action.kind; action.disabled = v.action.disabled || state.updateRunning; }
+    $('update-check').hidden = v.check.hidden;
+    $('update-check').disabled = v.check.disabled || state.updateRunning;
+    $('update-fine').hidden = !v.fine;
+  }
+  // 설치로 넘기기 직전의 마지막 확인이다. 막는 이유도, 기다리는 회의 준비 저장도 없어야 한다. 넘기지 못하면 그 이유를 알린다.
+  function readyToLeave() {
+    const reason = updateReasons()[0] || (draftTimer || state.draftSaving ? '회의 준비 내용을 저장하는 중입니다. 잠시 뒤 다시 눌러 주세요.' : '');
+    if (reason) throw new Error(reason);
+  }
+  async function runUpdate(kind) {
+    if (state.updateRunning || !kind) return;
+    state.updateRunning = true; state.updateError = ''; renderUpdate();
+    try {
+      if (kind === 'download') {
+        state.updateIntent = updateReasons().length === 0;
+        applyUpdate(await call('updateDownload'));
+      } else if (kind === 'install') {
+        state.updateIntent = false;
+        if (updateReasons().length) return;
+        await settleDraft();
+        // 저장을 기다리는 사이 새로 생긴 입력·작업이 있으면 설치로 넘기지 않는다.
+        readyToLeave();
+        applyUpdate(await call('updateInstall'));
+      } else if (kind === 'permission') await call('updatePermission');
+      else if (kind === 'confirm') {
+        // 설치 화면을 다시 열면 곧 앱이 닫히므로 같은 확인을 한다.
+        if (updateReasons().length) return;
+        await settleDraft();
+        readyToLeave();
+        applyUpdate(await call('updateConfirm'));
+      }
+    } catch (error) {
+      state.updateIntent = false; state.updateError = error.message; message(error.message);
+    } finally { state.updateRunning = false; renderUpdate(); }
+  }
+  function renderAbout() {
+    const version = state.update?.currentVersion || '', note = Notes.find(version), date = note ? Notes.dateLabel(note.date) : '';
+    setText($('about-version'), version);
+    setText($('about-version-meta'), version ? `지금 쓰는 버전${date ? ` · ${date} 배포` : ''}` : '버전 정보를 불러오는 중입니다.');
+    $('release-list').replaceChildren(...Notes.NOTES.map(entry => {
+      const item = node('li', null, 'release'), head = node('div', null, 'release-head'), list = node('ul', null, 'release-items');
+      item.dataset.current = String(entry.version === version);
+      head.append(node('span', entry.version, 'release-version'));
+      const when = Notes.dateLabel(entry.date);
+      if (when) head.append(node('span', when, 'release-date'));
+      if (entry.version === version) head.append(node('span', '지금 버전', 'release-badge'));
+      list.append(...entry.items.map(text => node('li', text)));
+      item.append(head, node('p', entry.title, 'release-title'), list);
+      return item;
+    }));
+  }
+  function openAbout(opener) { renderAbout(); renderUpdate(); openDialog('about', opener); }
+  $('update-note').onclick = event => openAbout(event.currentTarget);
+  $('open-about').onclick = event => openAbout(event.currentTarget);
+  $('update-action').onclick = () => runUpdate($('update-action').dataset.kind);
+  $('update-check').onclick = async () => { state.updateError = ''; try { applyUpdate(await call('updateCheck')); } catch (error) { state.updateError = error.message; renderUpdate(); } };
+  $('update-page').onclick = () => call('updatePage').catch(error => message(error.message));
+
   $('date').value = today(); lock();
   task(async () => {
     const init = await call('init'); state.settings = init.settings || {}; state.connection = init.connection; state.active = !!init.connection.active;
     state.customFormat = init.customFormat || null; updateCustomOption();
-    loadEditor(); renderSettings(); renderConnection(); await applyDraft(); await history(); await poll(true); setInterval(poll, 1500);
+    loadEditor(); renderSettings(); renderConnection(); applyUpdate(init.update); await applyDraft(); await history(); await poll(true); setInterval(poll, 1500);
+    // 새 버전 확인은 첫 화면을 기다리게 하지 않도록 마지막에 따로 시작한다. 이 요청을 모르는 이전 브리지에서는 조용히 넘어간다.
+    call('update').then(applyUpdate).catch(() => {});
   });
 })();

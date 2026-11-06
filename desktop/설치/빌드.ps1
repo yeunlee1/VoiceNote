@@ -35,6 +35,9 @@ Copy-Item -LiteralPath $IconFile -Destination (Join-Path $stage '회의록.ico')
 if ($LASTEXITCODE -ne 0) { throw '실행 프로그램 컴파일 실패' }
 $manifest = @(Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object { $_.Name -ne '구성.json' -and $_.Name -ne '기본키.json' } | Sort-Object FullName | ForEach-Object { [pscustomobject]@{name=$_.FullName.Substring($stage.Length+1);sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
 [IO.File]::WriteAllText((Join-Path $stage '구성.json'), ($manifest | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+# 앱 업데이트(설치파일 /update=1)가 파일을 바꾸기 전에 원래 파일을 보관할 수 있도록 설치 묶음의 파일 목록(설치 폴더 기준 상대 경로)을 넣는다.
+$backupNames = @(Get-ChildItem -LiteralPath $stage -File -Recurse | Sort-Object FullName | ForEach-Object { $_.FullName.Substring($stage.Length + 1) }) + '업데이트백업목록.txt'
+[IO.File]::WriteAllLines((Join-Path $stage '업데이트백업목록.txt'), [string[]]$backupNames, (New-Object Text.UTF8Encoding($true)))
 & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /Qp ('/DStageDir=' + $stage) ('/DDependencyDir=' + $DependencyRoot) ('/DOutputDir=' + (Join-Path $BuildRoot '설치파일')) (Join-Path $PSScriptRoot '설치파일.iss')
 if ($LASTEXITCODE -ne 0) { throw '설치 파일 빌드 실패' }
 Get-ChildItem -LiteralPath (Join-Path $BuildRoot '설치파일') -File | Select-Object FullName,Length

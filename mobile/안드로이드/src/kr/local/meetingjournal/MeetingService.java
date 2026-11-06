@@ -13,6 +13,9 @@ import java.util.concurrent.*;
 public final class MeetingService extends Service {
     static volatile String snapshot="{}";
     static volatile boolean active=false;
+    // 화면이 서비스 시작을 요청한 시각이다. active가 켜지기 전 잠깐 동안 앱 업데이트 설치가 끼어들지 못하게 한다. 서비스가 요청을 받으면 지운다.
+    static volatile long startingAt=0;
+    static boolean starting(){return startingAt!=0&&System.currentTimeMillis()-startingAt<15000;}
     private Store store; private JSONObject record; private MediaRecorder recorder; private PowerManager.WakeLock wake;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private boolean analyzing=false,refining=false; private File audioFile; private String attemptId;
@@ -31,6 +34,7 @@ public final class MeetingService extends Service {
             wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"MeetingJournal:work");wake.acquire(4*60*60*1000L);
             if(refining)refine(intent.getStringExtra("resultId"),intent.getStringExtra("feedback"));else if(analyzing)analyze();else startAudio();
         }catch(Exception ex){fail(ex);}
+        finally{startingAt=0;}
         return START_NOT_STICKY;
     }
     private void show(String message,boolean microphone) {
