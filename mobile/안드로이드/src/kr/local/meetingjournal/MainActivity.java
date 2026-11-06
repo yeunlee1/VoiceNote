@@ -129,7 +129,9 @@ public final class MainActivity extends Activity {
                 if(!transcript.isFile()||JsonText.trim(Store.read(transcript)).isEmpty())throw new IOException("저장된 전사가 없어 의견을 반영할 수 없습니다.");
                 String attemptId=data.getString("attemptId");if(attemptId.isEmpty()||attemptId.length()>128)throw new IOException("의견 반영 시도를 확인할 수 없습니다. 다시 시도하세요.");
                 Intent request=new Intent(this,MeetingService.class).setAction("refine").putExtra("location",location).putExtra("id",meetingId).putExtra("resultId",selected.getString("resultId")).putExtra("feedback",feedback).putExtra("attemptId",attemptId);
-                runOnUiThread(()->{try{startForegroundService(request);answer(id,new JSONObject().put("id",meetingId).put("attemptId",attemptId),null);}catch(Exception ex){answer(id,null,"의견 반영 서비스를 시작하지 못했습니다. 다시 시도하세요.");}});break;
+                // 녹음·분석 시작(launch)처럼, 서비스가 active를 켜기 전에 업데이트 설치가 끼어들지 못하게 시작 중임을 먼저 표시한다.
+                MeetingService.startingAt=System.currentTimeMillis();
+                runOnUiThread(()->{try{startForegroundService(request);answer(id,new JSONObject().put("id",meetingId).put("attemptId",attemptId),null);}catch(Exception ex){MeetingService.startingAt=0;answer(id,null,"의견 반영 서비스를 시작하지 못했습니다. 다시 시도하세요.");}});break;
             }
             case "open":{
                 String meetingId=data.getString("id");JSONObject record=store.result(location,meetingId,nullableString(data,"resultId"));
