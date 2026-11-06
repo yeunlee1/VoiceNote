@@ -60,6 +60,8 @@ function Watch-Setup($process) {
 function Wait-App($process) {
   $server = Wait-For { Get-AppProcesses | Where-Object { $_.ParentProcessId -eq $process.Id -and $_.Name -eq 'node.exe' } | Select-Object -First 1 } 120 '앱 서버 시작'
   Wait-For { $process.Refresh(); $process.MainWindowHandle -ne [IntPtr]::Zero } 120 '앱 창' | Out-Null
+  # 창이 뜬 뒤 화면(WebView)까지 열려야 닫기 요청 때 앱이 화면 상태를 물어 바로 닫힌다. 그 전에 닫으면 종료 확인 창이 막으므로 잠시 기다린다.
+  Start-Sleep -Seconds 12
   [pscustomobject]@{ Window = $process; ServerPid = [int]$server.ProcessId }
 }
 # 일반 실행으로 켠다. 실제 업데이트처럼 앱이 뮤텍스를 잡고 서버를 띄운다.
