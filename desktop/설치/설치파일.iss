@@ -37,8 +37,10 @@ Name: korean; MessagesFile: compiler:Languages\Korean.isl
 Name: desktopicon; Description: 바탕화면에 실행 아이콘 만들기; GroupDescription: 바로가기
 
 [Files]
-Source: {#StageDir}\*; DestDir: {app}; Flags: ignoreversion recursesubdirs createallsubdirs; BeforeInstall: BackupBeforeReplace
+Source: {#StageDir}\*; DestDir: {app}; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: {#DependencyDir}\MicrosoftEdgeWebview2Setup.exe; Flags: dontcopy
+; 업데이트 설치가 바꿀 파일 목록(빌드.ps1이 만든다). 설치 전에 이 목록대로 원래 파일을 보관한다.
+Source: {#StageDir}\업데이트백업목록.txt; Flags: dontcopy
 
 [InstallDelete]
 ; 이전 버전이 만든 제품 바로가기만 이름으로 지우고, 사용자가 따로 만든 바로가기와 회의 자료는 건드리지 않는다.
@@ -163,20 +165,44 @@ begin
   AppClosed := True;
 end;
 
-{ 업데이트 모드에서 바꿀 파일마다 원래 파일을 <설치 폴더>.업데이트전 으로 복사한다. 설치가 중간에 실패하면 이 복사본으로 되돌린다. }
-procedure BackupBeforeReplace;
+{ 업데이트 모드에서 이번 설치가 바꿀 파일 가운데 이미 있는 파일을 <설치 폴더>.업데이트전 으로 모두 복사한다.
+  파일을 하나라도 바꾸기 전(PrepareToInstall)에 하므로, 보관에 실패하면 아무것도 바꾸지 않고 멈춘다.
+  BeforeInstall에서는 예외를 던져도 Setup이 잡고 설치를 이어 가므로(Setup.MainFunc.pas NotifyInstallEntry) 그곳에서 하지 않는다. }
+function BackupForUpdate: String;
 var
-  Target, Relative, Copied: String;
+  Names: TArrayOfString;
+  Index: Integer;
+  Target, Copied: String;
 begin
-  if not BackupStarted then Exit;
-  Target := ExpandConstant(CurrentFilename);
-  if not FileExists(Target) then Exit;
-  if CompareText(Copy(Target, 1, Length(AppFolder) + 1), AddBackslash(AppFolder)) <> 0 then Exit;
-  Relative := Copy(Target, Length(AppFolder) + 2, Length(Target));
-  Copied := AddBackslash(BackupFolder) + Relative;
-  ForceDirectories(ExtractFileDir(Copied));
-  if not FileCopy(Target, Copied, False) then
-    RaiseException('업데이트 전 파일을 보관하지 못해 설치를 멈춥니다: ' + Target);
+  Result := '';
+  AppFolder := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
+  BackupFolder := AppFolder + '.업데이트전';
+  if DirExists(BackupFolder) and not DelTree(BackupFolder, True, True, True) then
+  begin
+    Result := '지난 업데이트의 보관 폴더를 지우지 못해 설치를 멈췄습니다: ' + BackupFolder;
+    Exit;
+  end;
+  ExtractTemporaryFile('업데이트백업목록.txt');
+  if not LoadStringsFromFile(ExpandConstant('{tmp}\업데이트백업목록.txt'), Names) then
+  begin
+    Result := '업데이트할 파일 목록을 읽지 못해 설치를 멈췄습니다.';
+    Exit;
+  end;
+  for Index := 0 to GetArrayLength(Names) - 1 do
+  begin
+    { 목록은 이 설치파일에 든 상대 경로만 담는다. 비었거나 폴더 밖을 가리키는 줄은 건너뛴다. }
+    if (Trim(Names[Index]) = '') or (Pos('..', Names[Index]) > 0) or (Pos(':', Names[Index]) > 0) then Continue;
+    Target := AddBackslash(AppFolder) + Names[Index];
+    if not FileExists(Target) then Continue;
+    Copied := AddBackslash(BackupFolder) + Names[Index];
+    if not ForceDirectories(ExtractFileDir(Copied)) or not FileCopy(Target, Copied, False) then
+    begin
+      DelTree(BackupFolder, True, True, True);
+      Result := '업데이트 전 파일을 보관하지 못해 설치를 멈췄습니다: ' + Names[Index];
+      Exit;
+    end;
+  end;
+  BackupStarted := True;
 end;
 
 { 보관한 파일을 설치 폴더로 되돌린다. 보관하지 않은 다른 파일은 건드리지 않는다. }
@@ -210,15 +236,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if not UpdateMode then Exit;
   if CurStep = ssInstall then
-  begin
-    AppFolder := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
-    BackupFolder := AppFolder + '.업데이트전';
-    if DirExists(BackupFolder) then DelTree(BackupFolder, True, True, True);
-    if not ForceDirectories(BackupFolder) then
-      RaiseException('업데이트 전 파일을 보관할 폴더를 만들지 못했습니다: ' + BackupFolder);
-    BackupStarted := True;
-    WriteStatus('installing');
-  end
+    WriteStatus('installing')
   else if CurStep = ssPostInstall then
   begin
     Installed := True;
@@ -282,4 +300,7 @@ begin
     if not Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'), '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or not HasWebView2 then
       Result := 'WebView2 화면 엔진을 설치하지 못했습니다. 인터넷 연결 또는 회사 PC의 설치 제한을 확인한 뒤 다시 설치해 주세요.';
   end;
+  { 업데이트 모드에서는 파일을 바꾸기 직전에 원래 파일을 보관한다. 실패하면 조용한 설치에서도 메시지 없이 멈춘다(종료 코드 7). }
+  if (Result = '') and UpdateMode then
+    Result := BackupForUpdate;
 end;
