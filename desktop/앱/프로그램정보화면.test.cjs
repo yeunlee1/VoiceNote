@@ -57,7 +57,7 @@ function fixture({ updates = [snapshot('latest')], webview = true, confirmAnswer
     } };
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
   const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/,
-    '  globalThis.review = { state, ui, bind, refresh, resetMeetingForm, loadUpdate, renderUpdate, startUpdate, launchUpdate, checkUpdate, openAbout, renderAbout, updateBlockers, startRecording, announce };\n})();');
+    '  globalThis.review = { state, ui, bind, refresh, resetMeetingForm, loadUpdate, renderUpdate, startUpdate, launchUpdate, checkUpdate, openAbout, renderAbout, updateBlockers, startRecording, announce, loadEditor };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const review = sandbox.review;
@@ -145,6 +145,70 @@ test('받는 동안 녹음을 시작하면 설치는 미루고 회의를 마친 
   assert.match(review.ui['update-lock'].textContent, /녹음/);
   await review.launchUpdate();
   assert.equal(review.count('/api/update/launch'), 0);
+});
+
+test('설정·키·평가를 저장하는 중에는 설치하지 않고 이유를 보인다', async () => {
+  for (const flag of ['settingsBusy', 'keyBusy', 'reviewBusy', 'copyBusy']) {
+    const review = fixture({ updates: [snapshot('ready', { received: 26_214_400 })] });
+    await review.loadUpdate();
+    review.state[flag] = true;
+    assert.match(review.updateBlockers()[0] || '', /저장하는 중/, flag);
+    await review.launchUpdate();
+    assert.equal(review.count('/api/update/launch'), 0, flag);
+  }
+});
+
+test('설정 불러오기 확인 창이 열려 있으면 설치하지 않는다', async () => {
+  const review = fixture({ updates: [snapshot('ready', { received: 26_214_400 })] });
+  await review.loadUpdate();
+  review.ui['settings-import'].open = true;
+  assert.match(review.updateBlockers()[0] || '', /설정 불러오기/);
+});
+
+test('저장하지 않은 평가 별점이나 의견이 있으면 설치하지 않는다', async () => {
+  const review = fixture({ updates: [snapshot('ready', { received: 26_214_400 })] });
+  await review.loadUpdate();
+  review.ui.review.hidden = false;
+  review.state.review = { stars: 4, comment: '정리 잘 됨' };
+  review.state.reviewStars = 4;
+  review.ui['review-comment'].value = '정리 잘 됨 ';
+  assert.equal(review.updateBlockers().length, 0);
+  review.ui['review-comment'].value = '담당자가 틀렸어요';
+  assert.match(review.updateBlockers()[0] || '', /평가 의견/);
+  review.ui['review-comment'].value = '정리 잘 됨';
+  review.state.reviewStars = 5;
+  assert.match(review.updateBlockers()[0] || '', /평가 의견/);
+  // 평가 칸이 보이지 않으면(저장된 결과가 아님) 막지 않는다.
+  review.ui.review.hidden = true;
+  assert.equal(review.updateBlockers().length, 0);
+});
+
+test('내 형식을 고치고 저장하지 않았으면 설치하지 않는다', async () => {
+  const review = fixture({ updates: [snapshot('ready', { received: 26_214_400 })] });
+  await review.loadUpdate();
+  assert.equal(review.updateBlockers().length, 0);
+  review.ui.settings.open = true;
+  review.loadEditor();
+  assert.equal(review.updateBlockers().length, 0);
+  review.ui['custom-name'].value = '주간 보고';
+  assert.match(review.updateBlockers()[0] || '', /내 형식/);
+  // 설정 창을 닫으면 다음에 열 때 저장된 값으로 다시 불러오므로 막지 않는다.
+  review.ui.settings.open = false;
+  assert.equal(review.updateBlockers().length, 0);
+  review.ui.settings.open = true;
+  review.loadEditor();
+  assert.equal(review.updateBlockers().length, 0);
+  review.state.customRows[0].on = !review.state.customRows[0].on;
+  assert.match(review.updateBlockers()[0] || '', /내 형식/);
+});
+
+test('입력한 API 키를 등록하지 않았으면 설치하지 않는다', async () => {
+  const review = fixture({ updates: [snapshot('ready', { received: 26_214_400 })] });
+  await review.loadUpdate();
+  review.ui['api-key'].value = '   ';
+  assert.equal(review.updateBlockers().length, 0);
+  review.ui['api-key'].value = 'sk-typed-but-not-saved';
+  assert.match(review.updateBlockers()[0] || '', /API 키/);
 });
 
 test('받는 중 상태 조회가 한 번 실패해도 다시 물어 받기 완료를 보여 준다', async () => {

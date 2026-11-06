@@ -113,7 +113,7 @@
     // 같은 녹음(회의)의 결과 목록과 지금 결과의 평가·반영한 의견·사본 저장 결과다. 평가는 결과마다 따로 저장한다.
     versions: [], feedback: "", review: null, reviewStars: null, reviewBusy: false, copies: null, copyBusy: false,
     // 앱 업데이트 상태(서버가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 설치 시작 잠금, 상태 조회 간격이다.
-    update: null, updateIntent: false, updateLaunching: false, updateError: "", updatePoll: null, updatePollMs: 1000, updateNotified: false, updatePollFailures: 0,
+    update: null, updateIntent: false, updateLaunching: false, updateError: "", updatePoll: null, updatePollMs: 1000, updateNotified: false, updatePollFailures: 0, editorBaseline: null,
   };
 
   function applyAccess(data) {
@@ -366,6 +366,8 @@
     ui["custom-status"].textContent = state.customFormat ? "" : "아직 저장한 내 형식이 없습니다. 이름과 항목을 정하고 저장하세요.";
     renderEditorRows();
     renderCustomPreview();
+    // 업데이트 전에 저장하지 않은 편집이 있는지 견줄 기준이다.
+    state.editorBaseline = editorSnapshot();
   }
 
   function renderEditorRows() {
@@ -2232,7 +2234,27 @@
     if (state.historyBusy) return ["지난 회의를 불러오는 중입니다. 잠시 뒤 다시 누르세요."];
     if (state.parts.some((part) => part.blob && !part.saved) || Boolean((ui.transcript.value || state.minutes) && !state.notesSaved))
       return ["저장하지 않은 회의 내용이 있습니다. 회의록을 저장하거나 내려받은 뒤 설치하세요."];
+    // 업데이트하면 창이 닫히므로 저장 중인 요청과 아직 저장하지 않은 입력도 지켜 준다.
+    if (state.settingsBusy || state.keyBusy || state.reviewBusy || state.copyBusy) return ["설정이나 평가를 저장하는 중입니다. 저장이 끝난 뒤 설치하세요."];
+    if (ui["settings-import"].open) return ["설정 불러오기 확인을 먼저 마치세요."];
+    if (reviewChanged()) return ["평가 의견을 저장하거나 지운 뒤 설치하세요."];
+    if (customChanged()) return ["내 형식 변경을 저장한 뒤 설치하세요."];
+    if (ui["api-key"].value.trim()) return ["입력한 API 키를 등록하거나 지운 뒤 설치하세요."];
     return [];
+  }
+
+  // 평가 칸에 저장한 것과 다른 별점이나 의견이 있는지 본다. 평가 칸이 보일 때(저장된 결과)만 따진다.
+  function reviewChanged() {
+    if (ui.review.hidden) return false;
+    return state.reviewStars !== (state.review?.stars ?? null) || ui["review-comment"].value.trim() !== (state.review?.comment || "").trim();
+  }
+
+  // 내 형식 편집 칸을 마지막으로 불러온 뒤 고쳤는지 본다. 설정 창을 열 때마다 저장된 값으로 다시 불러오므로 창이 열려 있을 때만 따진다.
+  function editorSnapshot() {
+    return JSON.stringify([ui["custom-name"].value, ui["custom-instruction"].value, state.customRows || []]);
+  }
+  function customChanged() {
+    return ui.settings.open && state.editorBaseline !== null && editorSnapshot() !== state.editorBaseline;
   }
 
   // 회의를 시작하기 전 회의 준비에 적은 내용이다. 이 화면은 준비 내용을 따로 저장하지 않아 창이 닫히면 사라진다.
