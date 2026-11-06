@@ -289,6 +289,32 @@ test('오래된 취소 표시를 지우지 못하면 설치파일을 띄우지 �
   assert.equal(spawned.length, 0);
 });
 
+test('지난 상태 파일을 지우지 못하면 설치파일을 띄우지 않고 직접 설치를 안내한다', async (t) => {
+  // 남은 파일의 'waiting'을 새 설치파일의 대기로 잘못 읽으면 설치가 시작되지 않았는데도 앱을 닫게 된다.
+  for (const stale of ['waiting', 'installing']) {
+    const spawned = [];
+    const working = launcher('spawn');
+    const spawn = (file, args, options) => { spawned.push(args); return working.spawn(file, args, options); };
+    const { updater, tempRoot } = fixture(t, { start: { spawn, calls: [] } });
+    updater.ensureChecked();
+    await updater.settled();
+    await updater.download();
+    await updater.settled();
+    // 다른 프로그램이 잡고 있어 지울 수 없는 파일을 흉내 내려고, 이 경로의 삭제만 EBUSY로 실패하게 한다.
+    const status = path.join(tempRoot, 'VoiceNote-업데이트', '1.5.1', '업데이트상태.txt');
+    fs.writeFileSync(status, stale);
+    const original = fs.promises.rm.bind(fs.promises);
+    const busy = t.mock.method(fs.promises, 'rm', async (target, options) => {
+      if (path.resolve(String(target)) === status) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+      return original(target, options);
+    });
+    try {
+      await assert.rejects(updater.launch(), (error) => error.code === 'UPDATE_LAUNCH_FAILED' && /직접 받아/.test(error.message), stale);
+      assert.equal(spawned.length, 0, stale);
+    } finally { busy.mock.restore(); }
+  }
+});
+
 test('오래 남은 취소 표시는 남은 설치가 없는 것으로 보고 지운 뒤 다시 띄운다', async (t) => {
   const silent = launcher('silent'), working = launcher('spawn');
   let attempt = 0;
