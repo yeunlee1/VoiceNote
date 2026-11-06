@@ -56,7 +56,7 @@
       "copy-block", "copy-status", "copy-again", ...[1, 2, 3, 4, 5].map((stars) => `review-star-${stars}`),
       "tab-minutes", "tab-transcript", "panel-minutes", "panel-transcript", "transcript-view", "transcript-meta", "copy-result", "share-result", "save-result", "result-status",
       "update-chip", "update-chip-label", "open-about", "about", "about-version", "about-version-meta", "about-update", "update-state", "update-progress-row", "update-progress",
-      "update-progress-text", "update-detail", "update-lock", "update-install", "update-check", "update-page", "release-list",
+      "update-progress-text", "update-detail", "update-lock", "update-install", "update-check", "update-page", "update-note", "release-list",
     ].map((id) => [id, $(id)]),
   );
   const Formats = window.MeetingFormats;
@@ -2359,8 +2359,10 @@
     ui["update-install"].hidden = !["available", "ready", "starting"].includes(status);
     setText(ui["update-install"], status === "available" ? (blockers.length ? "받아 두기" : "지금 업데이트") : "설치 시작");
     ui["update-install"].disabled = status === "starting" || (status === "ready" && blockers.length > 0);
-    ui["update-check"].hidden = status === "unsupported";
-    ui["update-check"].disabled = ["idle", "checking", "downloading", "ready", "starting", "launching"].includes(status);
+    // 다시 확인은 받기·설치가 진행 중일 때는 쓸 수 없으므로 숨기고, 확인 중에만 잠가 둔다.
+    ui["update-check"].hidden = ["unsupported", "downloading", "ready", "starting", "launching"].includes(status);
+    ui["update-check"].disabled = ["idle", "checking"].includes(status);
+    ui["update-note"].hidden = !["available", "downloading", "ready", "starting"].includes(status);
   }
 
   function renderAbout() {

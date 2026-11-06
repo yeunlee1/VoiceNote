@@ -75,6 +75,19 @@ test('새 버전이 있으면 상단에 표시하고 프로그램 정보에 새 
   assert.equal(review.ui['update-install'].disabled, false);
   assert.equal(review.ui['update-install'].textContent, '지금 업데이트');
   assert.equal(review.ui['about-update'].dataset.status, 'available');
+  assert.equal(review.ui['update-note'].hidden, false);
+});
+
+test('받는 중·설치 준비됨에는 다시 확인을 숨기고, 최신일 때는 닫혔다 열린다는 안내를 숨긴다', async () => {
+  const review = fixture({ updates: [snapshot('downloading'), snapshot('ready', { received: 26_214_400 })] });
+  await review.loadUpdate();
+  assert.equal(review.ui['update-check'].hidden, true);
+  await review.wait(40);
+  assert.equal(review.ui['about-update'].dataset.status, 'ready');
+  assert.equal(review.ui['update-check'].hidden, true);
+  const latest = fixture({ updates: [snapshot('latest')] });
+  await latest.loadUpdate();
+  assert.equal(latest.ui['update-note'].hidden, true);
 });
 
 test('최신이거나 제공하지 않는 실행이면 상단 표시와 설치 단추를 숨긴다', async () => {
