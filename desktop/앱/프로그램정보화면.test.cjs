@@ -15,7 +15,7 @@ function snapshot(status, change = {}) {
 
 const FAIL = Symbol('상태 조회 실패');
 
-function fixture({ updates = [snapshot('latest')], webview = true, confirmAnswer = true, launch = () => snapshot('launching') } = {}) {
+function fixture({ updates = [snapshot('latest')], webview = true, confirmAnswer = true, launch = () => snapshot('launching'), hold = null } = {}) {
   const element = (tag = 'div') => {
     const listeners = {};
     const classes = new Set();
@@ -40,6 +40,8 @@ function fixture({ updates = [snapshot('latest')], webview = true, confirmAnswer
     document: { body: element('body'), getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: (tag) => element(tag) },
     async fetch(url, options = {}) {
       calls.push({ url, method: options.method || 'GET' });
+      // hold에 넣은 주소는 시험이 풀어 줄 때까지 응답을 미룬다.
+      if (hold && url === hold.url) { await hold.until; return json(hold.body); }
       if (url === '/api/update') {
         // 목록의 FAIL은 그 차례의 상태 조회가 연결 오류로 실패하는 경우다.
         const next = queue.length > 1 ? queue.shift() : queue[0];
@@ -57,7 +59,7 @@ function fixture({ updates = [snapshot('latest')], webview = true, confirmAnswer
     } };
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
   const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/,
-    '  globalThis.review = { state, ui, bind, refresh, resetMeetingForm, loadUpdate, renderUpdate, startUpdate, launchUpdate, checkUpdate, openAbout, renderAbout, updateBlockers, startRecording, announce, loadEditor };\n})();');
+    '  globalThis.review = { state, ui, bind, refresh, resetMeetingForm, loadUpdate, renderUpdate, startUpdate, launchUpdate, checkUpdate, openAbout, renderAbout, updateBlockers, startRecording, announce, loadEditor, saveCustom };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const review = sandbox.review;
@@ -181,6 +183,40 @@ test('저장하지 않은 평가 별점이나 의견이 있으면 설치하지 �
   // 평가 칸이 보이지 않으면(저장된 결과가 아님) 막지 않는다.
   review.ui.review.hidden = true;
   assert.equal(review.updateBlockers().length, 0);
+});
+
+test('내 형식을 저장하는 중에는 설정 창을 닫아도 설치하지 않는다', async () => {
+  let release;
+  const until = new Promise((resolve) => { release = resolve; });
+  const saved = { name: '주간 보고', sections: [{ key: 'overview', title: '요약' }], instruction: '' };
+  const review = fixture({ updates: [snapshot('ready', { received: 26_214_400 })], hold: { url: '/api/custom-format', until, body: { customFormat: saved } } });
+  await review.loadUpdate();
+  review.ui.settings.open = true;
+  review.loadEditor();
+  review.ui['custom-name'].value = '주간 보고';
+  const saving = review.saveCustom();
+  review.ui.settings.open = false;
+  assert.match(review.updateBlockers()[0] || '', /저장하는 중/);
+  await review.launchUpdate();
+  assert.equal(review.count('/api/update/launch'), 0);
+  release();
+  // 저장 뒤 화면 갱신은 이 시험 틀의 가짜 요소로는 끝까지 돌지 않으므로, 저장 중 표시가 풀리는지만 본다.
+  await saving.catch(() => {});
+  assert.equal(review.state.customBusy, false);
+  assert.equal(review.updateBlockers().length, 0);
+});
+
+test('저장한 평가의 별점과 의견을 모두 지운 상태는 저장할 수 없으므로 설치를 막지 않는다', async () => {
+  const review = fixture({ updates: [snapshot('ready', { received: 26_214_400 })] });
+  await review.loadUpdate();
+  review.ui.review.hidden = false;
+  review.state.review = { stars: 4, comment: '정리 잘 됨' };
+  review.state.reviewStars = null;
+  review.ui['review-comment'].value = '  ';
+  assert.equal(review.updateBlockers().length, 0);
+  // 하나라도 남아 있으면 저장할 수 있는 바뀐 평가이므로 막는다.
+  review.state.reviewStars = 2;
+  assert.match(review.updateBlockers()[0] || '', /평가 의견/);
 });
 
 test('내 형식을 고치고 저장하지 않았으면 설치하지 않는다', async () => {

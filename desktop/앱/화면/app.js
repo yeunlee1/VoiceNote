@@ -113,7 +113,7 @@
     // 같은 녹음(회의)의 결과 목록과 지금 결과의 평가·반영한 의견·사본 저장 결과다. 평가는 결과마다 따로 저장한다.
     versions: [], feedback: "", review: null, reviewStars: null, reviewBusy: false, copies: null, copyBusy: false,
     // 앱 업데이트 상태(서버가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 설치 시작 잠금, 상태 조회 간격이다.
-    update: null, updateIntent: false, updateLaunching: false, updateError: "", updatePoll: null, updatePollMs: 1000, updateNotified: false, updatePollFailures: 0, editorBaseline: null,
+    update: null, updateIntent: false, updateLaunching: false, updateError: "", updatePoll: null, updatePollMs: 1000, updateNotified: false, updatePollFailures: 0, editorBaseline: null, customBusy: false,
   };
 
   function applyAccess(data) {
@@ -415,7 +415,11 @@
 
   async function saveCustom() {
     const value = editorValue(true);
-    const result = await api("/api/custom-format", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+    // 저장이 끝나기 전에 업데이트로 창이 닫히지 않도록 저장 중임을 표시한다.
+    state.customBusy = true;
+    let result;
+    try { result = await api("/api/custom-format", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) }); }
+    finally { state.customBusy = false; }
     state.customFormat = result.customFormat;
     updateCustomOption();
     loadEditor();
@@ -426,7 +430,9 @@
 
   async function deleteCustom() {
     if (!state.customFormat || !confirm(`‘${state.customFormat.name}’ 형식을 삭제할까요? 이미 저장된 회의는 그대로입니다.`)) return;
-    await api("/api/custom-format", { method: "DELETE" });
+    state.customBusy = true;
+    try { await api("/api/custom-format", { method: "DELETE" }); }
+    finally { state.customBusy = false; }
     state.customFormat = null;
     updateCustomOption();
     if (ui["output-format"].value === "custom" && !state.meetingCustom) { ui["output-format"].value = defaultFormat(); }
@@ -2235,7 +2241,7 @@
     if (state.parts.some((part) => part.blob && !part.saved) || Boolean((ui.transcript.value || state.minutes) && !state.notesSaved))
       return ["저장하지 않은 회의 내용이 있습니다. 회의록을 저장하거나 내려받은 뒤 설치하세요."];
     // 업데이트하면 창이 닫히므로 저장 중인 요청과 아직 저장하지 않은 입력도 지켜 준다.
-    if (state.settingsBusy || state.keyBusy || state.reviewBusy || state.copyBusy) return ["설정이나 평가를 저장하는 중입니다. 저장이 끝난 뒤 설치하세요."];
+    if (state.settingsBusy || state.keyBusy || state.reviewBusy || state.copyBusy || state.customBusy) return ["설정이나 평가를 저장하는 중입니다. 저장이 끝난 뒤 설치하세요."];
     if (ui["settings-import"].open) return ["설정 불러오기 확인을 먼저 마치세요."];
     if (reviewChanged()) return ["평가 의견을 저장하거나 지운 뒤 설치하세요."];
     if (customChanged()) return ["내 형식 변경을 저장한 뒤 설치하세요."];
@@ -2246,7 +2252,10 @@
   // 평가 칸에 저장한 것과 다른 별점이나 의견이 있는지 본다. 평가 칸이 보일 때(저장된 결과)만 따진다.
   function reviewChanged() {
     if (ui.review.hidden) return false;
-    return state.reviewStars !== (state.review?.stars ?? null) || ui["review-comment"].value.trim() !== (state.review?.comment || "").trim();
+    const comment = ui["review-comment"].value.trim();
+    // 별점과 의견을 모두 비운 것은 저장할 수 없는 상태(저장 단추가 잠김)라 지켜야 할 입력으로 보지 않는다.
+    if (state.reviewStars === null && !comment) return false;
+    return state.reviewStars !== (state.review?.stars ?? null) || comment !== (state.review?.comment || "").trim();
   }
 
   // 내 형식 편집 칸을 마지막으로 불러온 뒤 고쳤는지 본다. 설정 창을 열 때마다 저장된 값으로 다시 불러오므로 창이 열려 있을 때만 따진다.

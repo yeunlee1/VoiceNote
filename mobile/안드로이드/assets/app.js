@@ -502,7 +502,8 @@
     const reasons = [];
     if (state.active || state.refining) reasons.push('녹음이나 분석이 끝난 뒤 설치하세요.');
     else if (state.busy) reasons.push('진행 중인 작업이 끝난 뒤 설치하세요.');
-    if (state.reviewDirty) reasons.push('평가 의견을 저장하거나 지운 뒤 설치하세요.');
+    // 별점과 의견을 모두 비운 것은 저장할 수 없는 상태(저장 단추가 잠김)라 지켜야 할 입력으로 보지 않는다.
+    if (state.reviewDirty && (state.stars || $('review-comment').value.trim())) reasons.push('평가 의견을 저장하거나 지운 뒤 설치하세요.');
     if (state.customDirty) reasons.push('내 형식 변경을 저장한 뒤 설치하세요.');
     if (state.importToken) reasons.push('설정 불러오기 확인을 먼저 마치세요.');
     if ($('api-key').value.trim()) reasons.push('입력한 API 키를 등록하거나 지운 뒤 설치하세요.');
