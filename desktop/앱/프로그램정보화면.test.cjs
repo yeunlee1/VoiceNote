@@ -13,6 +13,8 @@ function snapshot(status, change = {}) {
     publishedAt: '2026-11-20T01:00:00Z', size: 26_214_400, received: 0, error: null, lastResult: null, pageUrl: 'https://github.com/yeunlee1/VoiceNote/releases/latest', ...change };
 }
 
+const FAIL = Symbol('상태 조회 실패');
+
 function fixture({ updates = [snapshot('latest')], webview = true, confirmAnswer = true, launch = () => snapshot('launching') } = {}) {
   const element = (tag = 'div') => {
     const listeners = {};
@@ -38,7 +40,12 @@ function fixture({ updates = [snapshot('latest')], webview = true, confirmAnswer
     document: { body: element('body'), getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: (tag) => element(tag) },
     async fetch(url, options = {}) {
       calls.push({ url, method: options.method || 'GET' });
-      if (url === '/api/update') return json({ update: queue.length > 1 ? queue.shift() : queue[0] });
+      if (url === '/api/update') {
+        // 목록의 FAIL은 그 차례의 상태 조회가 연결 오류로 실패하는 경우다.
+        const next = queue.length > 1 ? queue.shift() : queue[0];
+        if (next === FAIL) throw new TypeError('Failed to fetch');
+        return json({ update: next });
+      }
       if (url === '/api/update/check') return json({ update: snapshot('checking') });
       if (url === '/api/update/download') return json({ update: snapshot('downloading') });
       if (url === '/api/update/launch') {
@@ -138,6 +145,45 @@ test('받는 동안 녹음을 시작하면 설치는 미루고 회의를 마친 
   assert.match(review.ui['update-lock'].textContent, /녹음/);
   await review.launchUpdate();
   assert.equal(review.count('/api/update/launch'), 0);
+});
+
+test('받는 중 상태 조회가 한 번 실패해도 다시 물어 받기 완료를 보여 준다', async () => {
+  const review = fixture({ updates: [snapshot('downloading', { received: 1_048_576 }), FAIL, snapshot('ready', { received: 26_214_400 })] });
+  await review.loadUpdate();
+  await review.wait(120);
+  assert.equal(review.ui['about-update'].dataset.status, 'ready');
+  assert.equal(review.count('/api/update', 'GET'), 3);
+  assert.equal(review.ui['update-detail'].hidden, true);
+});
+
+test('상태 조회가 계속 실패하면 몇 번만 더 묻고 다시 확인 단추로 사람이 다시 묻게 한다', async () => {
+  const review = fixture({ updates: [snapshot('downloading', { received: 1_048_576 }), FAIL] });
+  await review.loadUpdate();
+  await review.wait(600);
+  const asked = review.count('/api/update', 'GET');
+  assert.ok(asked >= 3 && asked <= 8, `상태 조회 ${asked}번`);
+  assert.equal(review.ui['update-check'].hidden, false);
+  assert.equal(review.ui['update-check'].disabled, false);
+  assert.equal(review.ui['update-detail'].hidden, false);
+  assert.match(review.ui['update-detail'].textContent, /다시 확인/);
+  // 더 기다려도 조회를 더 하지 않는다.
+  await review.wait(200);
+  assert.equal(review.count('/api/update', 'GET'), asked);
+  // 다시 확인을 누르면 오류를 지우고 다시 따라간다.
+  await review.checkUpdate();
+  assert.equal(review.count('/api/update/check'), 1);
+  assert.equal(review.ui['update-detail'].hidden, true);
+  await review.wait(40);
+  assert.ok(review.count('/api/update', 'GET') > asked);
+});
+
+test('처음 상태 조회가 계속 실패해도 확인 중에 멈추지 않고 다시 확인을 쓸 수 있다', async () => {
+  const review = fixture({ updates: [FAIL] });
+  await review.loadUpdate();
+  await review.wait(600);
+  assert.equal(review.ui['update-check'].hidden, false);
+  assert.equal(review.ui['update-check'].disabled, false);
+  assert.match(review.ui['update-detail'].textContent, /다시 확인/);
 });
 
 test('받는 동안 녹음을 시작했다가 받기 전에 마쳐도 자동으로 설치하지 않고 다시 누르게 한다', async () => {

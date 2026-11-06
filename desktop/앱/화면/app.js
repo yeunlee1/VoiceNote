@@ -113,7 +113,7 @@
     // 같은 녹음(회의)의 결과 목록과 지금 결과의 평가·반영한 의견·사본 저장 결과다. 평가는 결과마다 따로 저장한다.
     versions: [], feedback: "", review: null, reviewStars: null, reviewBusy: false, copies: null, copyBusy: false,
     // 앱 업데이트 상태(서버가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 설치 시작 잠금, 상태 조회 간격이다.
-    update: null, updateIntent: false, updateLaunching: false, updateError: "", updatePoll: null, updatePollMs: 1000, updateNotified: false,
+    update: null, updateIntent: false, updateLaunching: false, updateError: "", updatePoll: null, updatePollMs: 1000, updateNotified: false, updatePollFailures: 0,
   };
 
   function applyAccess(data) {
@@ -2244,6 +2244,11 @@
     if (!update || typeof update.status !== "string") return;
     const before = state.update?.status;
     state.update = update;
+    // 상태를 다시 받았으면 조회 실패로 멈춘 상태를 푼다.
+    if (state.updatePollFailures) {
+      if (updateStalled()) state.updateError = "";
+      state.updatePollFailures = 0;
+    }
     // 지난 업데이트 결과(설치 완료·되돌림)는 이번 실행에서 한 번만 알린다.
     if (update.lastResult?.message && !state.updateNotified) {
       state.updateNotified = true;
@@ -2256,9 +2261,28 @@
     else if (update.status === "ready" && before !== "ready" && state.updateIntent) launchUpdate();
   }
 
+  // 확인·받기를 따라가다 상태 조회가 실패하면 간격을 두 배씩 늘려 다섯 번까지만 다시 묻는다. 그 뒤로는 멈춘 상태다.
+  // 화면 갱신이 먼저 부를 수 있어 함수 선언으로 둔다.
+  function updateStalled() { return state.updatePollFailures > 5; }
+
   async function loadUpdate() {
     // 업데이트 확인이 실패해도 회의 준비와 녹음은 막지 않는다. 이유는 프로그램 정보에서 본다.
-    try { applyUpdate((await api("/api/update")).update); } catch {}
+    let update;
+    try { update = (await api("/api/update")).update; }
+    catch {
+      const following = ["checking", "downloading"].includes(state.update?.status ?? "checking");
+      if (!following || updateStalled()) return;
+      state.updatePollFailures += 1;
+      clearTimeout(state.updatePoll);
+      if (!updateStalled()) state.updatePoll = setTimeout(loadUpdate, state.updatePollMs * 2 ** state.updatePollFailures);
+      else {
+        // 더 묻지 않고, 사람이 다시 확인을 눌러 상태를 다시 받게 한다. 받는 중이면 서버는 받기를 이어 가며 지금 상태만 돌려준다.
+        state.updateError = "업데이트 진행 상태를 불러오지 못했습니다. 다시 확인을 눌러 주세요.";
+        renderUpdate();
+      }
+      return;
+    }
+    applyUpdate(update);
   }
 
   function showUpdateError(message) {
@@ -2362,8 +2386,10 @@
     setText(ui["update-install"], status === "available" ? (blockers.length ? "받아 두기" : "지금 업데이트") : "설치 시작");
     ui["update-install"].disabled = status === "starting" || (status === "ready" && blockers.length > 0);
     // 다시 확인은 받기·설치가 진행 중일 때는 쓸 수 없으므로 숨기고, 확인 중에만 잠가 둔다.
-    ui["update-check"].hidden = ["unsupported", "downloading", "ready", "starting", "launching"].includes(status);
-    ui["update-check"].disabled = ["idle", "checking"].includes(status);
+    // 상태 조회가 계속 실패해 따라가기를 멈췄으면 다시 묻는 단추로 보인다.
+    const stalled = updateStalled();
+    ui["update-check"].hidden = !stalled && ["unsupported", "downloading", "ready", "starting", "launching"].includes(status);
+    ui["update-check"].disabled = !stalled && ["idle", "checking"].includes(status);
     ui["update-note"].hidden = !["available", "downloading", "ready", "starting"].includes(status);
   }
 
