@@ -1,4 +1,4 @@
-버전 1.4.0
+버전 1.5.0
 VoiceNote Windows 설치형 소스 (이전 이름: 프로젝트 회의록, 1.0.3 소스 ZIP에서 이어짐)
 
 프로그램.cs: 독립 Windows 창, WebView2, 서버 시작·종료 처리, 로컬 화면의 마이크 허용, 저장 위치 폴더 선택 창 (실행 파일 이름·AppId·자료 위치 %LOCALAPPDATA%\MeetingJournal는 기존과 같음. 검증용 --data-root <폴더>는 자료 폴더만 바꿔 실행)

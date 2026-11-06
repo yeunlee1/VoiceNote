@@ -25,11 +25,12 @@ $signing = Join-Path $work 'signing'
 New-Item -ItemType Directory -Path $work, $signing, $OutputDir -Force | Out-Null
 
 function Get-AppVersion {
-  # 세 곳에 적힌 버전이 같은지 확인해 잘못 올린 설치파일을 막는다.
+  # 네 곳에 적힌 버전이 같은지 확인해 잘못 올린 설치파일을 막는다. 앱버전.cjs는 앱이 새 버전과 견줄 때 쓰는 값이다.
   $sources = @(
     @('desktop/설치/설치파일.iss', '(?m)^AppVersion=(\d+\.\d+\.\d+)\s*$'),
     @('desktop/프로그램.cs', 'AssemblyVersion\("(\d+\.\d+\.\d+)\.0"\)'),
-    @('mobile/안드로이드/AndroidManifest.xml', 'android:versionName="(\d+\.\d+\.\d+)"')
+    @('mobile/안드로이드/AndroidManifest.xml', 'android:versionName="(\d+\.\d+\.\d+)"'),
+    @('desktop/앱/앱버전.cjs', "APP_VERSION:\s*'(\d+\.\d+\.\d+)'")
   )
   $values = foreach ($source in $sources) {
     $found = [regex]::Match([IO.File]::ReadAllText((Join-Path $root $source[0])), $source[1])
