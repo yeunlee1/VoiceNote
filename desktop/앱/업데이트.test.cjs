@@ -239,8 +239,31 @@ test('설치파일이 정한 시간 안에 대기 상태를 알리지 않으면 
   // 로더만 끝내면 실제 설치 프로세스가 남아, 나중에 앱을 닫을 때 설치가 이어질 수 있다. 묶음 전체를 끝낸다.
   assert.deepEqual(trees, [start.calls[0].child.pid]);
   assert.equal(start.calls[0].child.killed, true);
+  // 묶음을 끝내지 못했어도 설치파일이 기다리는 동안 보고 멈추도록 취소 표시를 남긴다.
+  const status = start.calls[0].args.find((arg) => arg.startsWith('/status=')).slice('/status='.length);
+  assert.equal(fs.existsSync(`${status}.cancel`), true);
   assert.equal(updater.status().status, 'ready');
   assert.equal(updater.installing(), false);
+});
+
+test('지난 시도의 취소 표시는 새 설치파일을 띄우기 전에 지운다', async (t) => {
+  // 첫 시도는 대기 상태를 알리지 않아 실패하고, 다시 누른 시도는 정상으로 대기 상태를 알린다.
+  const silent = launcher('silent'), working = launcher('spawn');
+  let attempt = 0;
+  const seen = [];
+  const spawn = (file, args, options) => {
+    const status = args.find((arg) => arg.startsWith('/status=')).slice('/status='.length);
+    seen.push(fs.existsSync(`${status}.cancel`));
+    return (attempt++ === 0 ? silent : working).spawn(file, args, options);
+  };
+  const { updater } = fixture(t, { start: { spawn, calls: [] } });
+  updater.ensureChecked();
+  await updater.settled();
+  await updater.download();
+  await updater.settled();
+  await assert.rejects(updater.launch(), (error) => error.code === 'UPDATE_LAUNCH_FAILED');
+  assert.equal((await updater.launch()).status, 'launching');
+  assert.deepEqual(seen, [false, false]);
 });
 
 test('다음 실행 때 지난 업데이트 결과를 한 번 읽어 알린다', async (t) => {

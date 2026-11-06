@@ -225,7 +225,10 @@ function createUpdater({ enabled = false, currentVersion, appDir, hostPid = 0, s
       state = { ...state, status: 'available', received: 0, error: reason(error, 'UPDATE_DOWNLOAD_FAILED') };
       throw fail(state.error.code, state.error.message);
     }
+    // 설치파일은 '<상태 파일>.cancel'이 있으면 아무것도 바꾸지 않고 끝난다. 지난 시도의 표시가 남아 있으면 새 설치가 바로 멈추므로 먼저 지운다.
+    const cancelFile = `${statusFile}.cancel`;
     await fs.promises.rm(statusFile, { force: true }).catch(() => {});
+    await fs.promises.rm(cancelFile, { force: true }).catch(() => {});
     let child = null;
     try {
       await new Promise((resolve, reject) => {
@@ -244,7 +247,9 @@ function createUpdater({ enabled = false, currentVersion, appDir, hostPid = 0, s
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
     } catch {
-      // 남은 실제 설치가 나중에 앱이 닫힐 때 이어서 설치하지 않도록 프로세스 묶음 전체를 끝낸다.
+      // 남은 실제 설치가 나중에 앱이 닫힐 때 이어서 설치하지 않도록, 먼저 취소 표시를 남기고 프로세스 묶음 전체를 끝낸다.
+      // 묶음을 끝내지 못해도 설치파일은 앱이 닫히기를 기다리는 동안 이 표시를 보고 멈춘다.
+      try { fs.writeFileSync(cancelFile, 'cancel'); } catch {}
       if (child?.pid) killTree(child.pid);
       try { child?.kill(); } catch {}
       state = { ...state, error: { code: 'UPDATE_LAUNCH_FAILED', message: MESSAGES.UPDATE_LAUNCH_FAILED } };

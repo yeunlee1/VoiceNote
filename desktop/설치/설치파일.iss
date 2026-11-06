@@ -141,6 +141,16 @@ begin
   end;
 end;
 
+{ 앱이 설치 시작 확인에 실패해 이번 설치를 취소했으면 <상태 파일>.cancel 이 생긴다. 앱이 이 설치 프로세스를 끝내지 못했어도 이것을 보고 멈춘다. }
+function UpdateCancelled: Boolean;
+var
+  Target: String;
+begin
+  Target := ExpandConstant('{param:status|}');
+  Result := (Target <> '') and FileExists(Target + '.cancel');
+  if Result then Log('앱이 이번 업데이트를 취소했습니다.');
+end;
+
 function InitializeSetup: Boolean;
 var
   Count: Integer;
@@ -148,11 +158,21 @@ begin
   Result := True;
   UpdateMode := ExpandConstant('{param:update|0}') = '1';
   if not UpdateMode then Exit;
+  if UpdateCancelled then
+  begin
+    Result := False;
+    Exit;
+  end;
   { 이 함수는 Setup의 AppMutex 검사보다 먼저 돈다. 여기서 앱이 닫히기를 기다려야 조용한 설치가 "앱 실행 중"으로 멈추지 않는다. }
   WriteStatus('waiting');
   Count := 0;
   while CheckForMutexes('{#AppMutexName}') and (Count < 480) do
   begin
+    if UpdateCancelled then
+    begin
+      Result := False;
+      Exit;
+    end;
     Sleep(250);
     Count := Count + 1;
   end;
@@ -160,6 +180,12 @@ begin
   begin
     { 앱이 닫히지 않았으면 아무것도 바꾸지 않고 멈춘다. 앱이 살아 있으므로 다시 켜지 않는다. }
     WriteStatus('timeout');
+    Result := False;
+    Exit;
+  end;
+  { 취소된 설치는 앱이 닫힌 뒤에도 이어 가지 않는다. 앱을 닫은 것은 사람이므로 다시 켜지 않는다. }
+  if UpdateCancelled then
+  begin
     Result := False;
     Exit;
   end;
@@ -310,6 +336,8 @@ begin
       Result := 'WebView2 화면 엔진을 설치하지 못했습니다. 인터넷 연결 또는 회사 PC의 설치 제한을 확인한 뒤 다시 설치해 주세요.';
   end;
   { 업데이트 모드에서는 파일을 바꾸기 직전에 원래 파일을 보관한다. 실패하면 조용한 설치에서도 메시지 없이 멈춘다(종료 코드 7). }
+  if (Result = '') and UpdateMode and UpdateCancelled then
+    Result := '앱이 이번 업데이트를 취소해 설치를 멈췄습니다.';
   if (Result = '') and UpdateMode then
     Result := BackupForUpdate;
 end;
