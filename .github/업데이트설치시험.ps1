@@ -33,9 +33,28 @@ function Wait-For([scriptblock]$Condition, [int]$Seconds, [string]$What) {
 function Get-AppProcesses {
   @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($appDir + '\', [StringComparison]::OrdinalIgnoreCase) })
 }
-# 이번 설치파일의 로더(.exe)와 그것이 띄운 실제 설치 프로세스(.tmp)다.
+# 이 시험이 띄운 설치파일 로더(.exe)와 그것이 띄운 실제 설치 프로세스(.tmp)다. 로더는 실행 경로가 시험의 설치파일이거나
+# 시험 폴더 아래(앱의 업데이트 코드가 받은 사본)인 것만, 실제 설치는 그 로더의 자식만 이 시험의 것으로 본다. 한 번 본 번호는 기억한다.
+$script:ownedSetup = New-Object 'System.Collections.Generic.HashSet[int]'
 function Get-SetupProcesses {
-  @(Get-CimInstance Win32_Process | Where-Object { $_.Name -like "VoiceNote-$Version-Windows-Setup*" })
+  $all = @(Get-CimInstance Win32_Process)
+  foreach ($process in $all) {
+    $path = $process.ExecutablePath
+    if ($path -and $process.Name -like "VoiceNote-$Version-Windows-Setup.exe" -and ($path -eq $installer -or $path.StartsWith($Work + '\', [StringComparison]::OrdinalIgnoreCase))) { $null = $script:ownedSetup.Add([int]$process.ProcessId) }
+  }
+  foreach ($process in $all) {
+    if ($process.Name -like "VoiceNote-$Version-Windows-Setup.tmp" -and $script:ownedSetup.Contains([int]$process.ParentProcessId)) { $null = $script:ownedSetup.Add([int]$process.ProcessId) }
+  }
+  @($all | Where-Object { $script:ownedSetup.Contains([int]$_.ProcessId) -and $_.Name -like "VoiceNote-$Version-Windows-Setup*" })
+}
+# 실제 설치 프로세스가 떠 있는 동안 지켜보며 이 시험의 것으로 기억한다. 로더가 먼저 끝나도 자식을 놓치지 않게 한다.
+function Watch-Setup($process) {
+  $saw = $false
+  while (-not $process.HasExited) {
+    if (Get-SetupProcesses | Where-Object { $_.Name -like '*.tmp' }) { $saw = $true }
+    Start-Sleep -Milliseconds 200
+  }
+  $saw
 }
 # 앱 창이 뜨고 그 서버가 자식 node.exe로 떴는지 기다린다.
 function Wait-App($process) {
@@ -77,13 +96,15 @@ function Start-UpdateSetup($app, [string]$StatusFile, [string]$Log) {
   $arguments = @('/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/update=1', "/DIR=`"$appDir`"", "/LOG=`"$Log`"", "/status=`"$StatusFile`"", "/pids=$($app.Window.Id),$($app.ServerPid)")
   $setup = Start-Process -FilePath $installer -ArgumentList $arguments -PassThru
   $null = $setup.Handle
+  $null = $script:ownedSetup.Add($setup.Id)
   $setup
 }
 # 앱의 실제 업데이트 코드를 도우미로 돌린다. 결과(마지막 줄 JSON)는 파일로 받는다.
-function Start-Harness($app, [string]$TempRoot, [string]$Output, [int]$StartTimeout = 15000, [switch]$BlockStatus) {
+function Start-Harness($app, [string]$TempRoot, [string]$Output, [int]$StartTimeout = 15000, [switch]$BlockStatus, [switch]$NoKillTree) {
   $arguments = @("`"$harness`"", '--app-dir', "`"$appDir`"", '--files', "`"$Files`"", '--version', $Version, '--certificate', "`"$Certificate`"",
     '--host-pid', $app.Window.Id, '--server-pid', $app.ServerPid, '--temp-root', "`"$TempRoot`"", '--start-timeout', $StartTimeout)
   if ($BlockStatus) { $arguments += '--block-status' }
+  if ($NoKillTree) { $arguments += '--no-kill-tree' }
   $process = Start-Process -FilePath $node -ArgumentList $arguments -RedirectStandardOutput $Output -NoNewWindow -PassThru
   $null = $process.Handle
   $process
@@ -137,11 +158,7 @@ try {
   $output = Join-Path $Work 'B-harness.txt'
   # 설치파일이 상태를 적지 못하게 해 시작 확인이 시간 안에 오지 않게 만든다. 그사이 실제 설치 프로세스가 떴는지도 본다.
   $process = Start-Harness $app (Join-Path $Work 'B') $output -StartTimeout 8000 -BlockStatus
-  $sawSetup = $false
-  while (-not $process.HasExited) {
-    if (Get-SetupProcesses | Where-Object { $_.Name -like '*.tmp' }) { $sawSetup = $true }
-    Start-Sleep -Milliseconds 200
-  }
+  $sawSetup = Watch-Setup $process
   $b = Read-Harness $process $output
   if ($b.outcome -ne 'UPDATE_LAUNCH_FAILED') { throw "시작 확인 실패를 알리지 않았습니다: $($b.outcome)" }
   if (-not $sawSetup) { throw '실제 설치 프로세스가 뜨기 전에 끝나 시작 확인 실패 시험이 되지 않았습니다.' }
@@ -153,6 +170,25 @@ try {
   if ((Get-MarkerCount $markers) -ne $markers.Count) { throw '시작 확인에 실패했는데 파일이 바뀌었습니다.' }
   if ((Get-AppProcesses).Count) { throw '시작 확인에 실패했는데 앱이 다시 켜졌습니다.' }
   Write-Host '   통과: 설치 프로세스 묶음이 남지 않고 파일도 그대로입니다.'
+
+  Write-Host '-- 설치 프로세스 묶음을 끝내지 못한 경우'
+  # 로더만 끝나고 실제 설치 프로세스가 남아도, 앱이 남긴 취소 표시를 보고 아무것도 바꾸지 않고 스스로 끝나야 한다.
+  $app = Open-App
+  $output = Join-Path $Work 'B2-harness.txt'
+  $process = Start-Harness $app (Join-Path $Work 'B2') $output -StartTimeout 8000 -BlockStatus -NoKillTree
+  $sawSetup = Watch-Setup $process
+  $b2 = Read-Harness $process $output
+  if ($b2.outcome -ne 'UPDATE_LAUNCH_FAILED') { throw "시작 확인 실패를 알리지 않았습니다: $($b2.outcome)" }
+  if (-not $sawSetup) { throw '실제 설치 프로세스가 뜨기 전에 끝나 취소 표시 시험이 되지 않았습니다.' }
+  if (-not (Test-Path -LiteralPath "$($b2.statusFile).cancel" -PathType Leaf)) { throw '앱이 취소 표시를 남기지 않았습니다.' }
+  Wait-For { (Get-SetupProcesses).Count -eq 0 } 30 '취소 표시를 본 설치 프로세스 종료' | Out-Null
+  Close-App $app
+  $app = $null
+  Start-Sleep -Seconds 10
+  if ((Get-SetupProcesses).Count) { throw '취소된 설치 프로세스가 남아 있습니다.' }
+  if ((Get-MarkerCount $markers) -ne $markers.Count) { throw '취소된 설치가 파일을 바꿨습니다.' }
+  if ((Get-AppProcesses).Count) { throw '취소된 설치가 앱을 다시 켰습니다.' }
+  Write-Host '   통과: 남은 실제 설치 프로세스가 취소 표시를 보고 아무것도 바꾸지 않고 끝났습니다.'
 
   Write-Host '-- 지난 보관 폴더가 남은 경우'
   $app = Open-App
@@ -173,8 +209,11 @@ try {
   Write-Host '   통과: 아무것도 바꾸지 않고 멈춘 뒤 앱을 다시 켰습니다.'
 
   Write-Host '-- 바꾸던 중 실패'
-  Remove-Item -LiteralPath $blocker -Force
   # 같은 이름의 폴더를 두면 설치파일이 이 파일을 쓰지 못하고 멈춘다. 그 앞의 파일은 이미 바뀐 뒤다.
+  # 걸림돌은 화면 파일이라 되돌린 뒤 다시 켠 앱이 화면을 못 읽으므로, 원본을 따로 두었다가 시험 끝에 되돌린다.
+  $blockerCopy = Join-Path $Work 'blocker-original'
+  Copy-Item -LiteralPath $blocker -Destination $blockerCopy
+  Remove-Item -LiteralPath $blocker -Force
   New-Item -ItemType Directory -Path $blocker | Out-Null
   $status = Join-Path $Work 'D-status.txt'
   $setup = Start-UpdateSetup $app $status (Join-Path $Work 'D-install.log')
@@ -187,8 +226,12 @@ try {
   if ((Get-MarkerCount $markers) -ne $markers.Count) { throw '실패한 업데이트가 바꾼 파일을 되돌리지 않았습니다.' }
   if (Test-Path -LiteralPath $backup) { throw '되돌린 뒤에도 보관 폴더가 남았습니다.' }
   $app = Find-Relaunched $old
-  Close-App $app
+  # 다시 켠 앱은 걸림돌 때문에 화면 파일이 없어 닫기 확인에 답하지 못할 수 있다. 시험이 만든 상태이므로 강제로 끝내고 걸림돌을 되돌린다.
+  foreach ($id in $app.ServerPid, $app.Window.Id) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
+  Wait-For { -not (Get-AppProcesses).Count } 60 '다시 켠 앱 종료' | Out-Null
   $app = $null
+  Remove-Item -LiteralPath $blocker -Recurse -Force
+  Copy-Item -LiteralPath $blockerCopy -Destination $blocker
   Write-Host "   통과: 종료 코드 $($setup.ExitCode), 바꾼 파일을 되돌리고 앱을 다시 켰습니다."
 }
 finally {

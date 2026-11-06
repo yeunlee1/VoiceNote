@@ -3,6 +3,7 @@
 // 쓰는 법: node 업데이트설치시험.cjs --app-dir <설치 폴더> --files <릴리즈 파일 폴더> --version <버전> --certificate <인증서 PEM>
 //          --host-pid <앱 창> --server-pid <앱 서버> --temp-root <임시 폴더> [--start-timeout <ms>] [--block-status]
 // --block-status는 설치파일이 진행 상태를 적지 못하게 상태 파일 자리에 폴더를 둔다. 시작 확인 실패 경로를 만들 때만 쓴다.
+// --no-kill-tree는 시작 확인 실패 때 설치 프로세스 묶음을 끝내지 않는다. 묶음을 끝내지 못해도 취소 표시로 멈추는지 볼 때만 쓴다.
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -10,10 +11,10 @@ const check = require(path.join(__dirname, '..', 'desktop', '앱', '업데이트
 const { createUpdater, FOLDER, STATUS_FILE } = require(path.join(__dirname, '..', 'desktop', '앱', '업데이트.cjs'));
 
 function readOptions(argv) {
-  const options = { 'start-timeout': '15000', 'block-status': false };
+  const options = { 'start-timeout': '15000', 'block-status': false, 'no-kill-tree': false };
   for (let index = 0; index < argv.length; index++) {
     const name = argv[index].replace(/^--/, '');
-    if (name === 'block-status') { options[name] = true; continue; }
+    if (name === 'block-status' || name === 'no-kill-tree') { options[name] = true; continue; }
     options[name] = argv[++index];
   }
   for (const name of ['app-dir', 'files', 'version', 'certificate', 'host-pid', 'server-pid', 'temp-root'])
@@ -46,6 +47,7 @@ async function main() {
     enabled: true, currentVersion: '1.0.0', appDir: path.resolve(options['app-dir']),
     hostPid: Number(options['host-pid']), serverPid: Number(options['server-pid']), tempRoot, fetch,
     publicKey: new crypto.X509Certificate(fs.readFileSync(options.certificate)).publicKey, startTimeout: Number(options['start-timeout']),
+    ...(options['no-kill-tree'] ? { killTree: () => {} } : {}),
   });
   const statusFile = path.join(tempRoot, FOLDER, version, STATUS_FILE);
   const report = (outcome, extra = {}) => console.log(JSON.stringify({ outcome, statusFile, ...extra }));
