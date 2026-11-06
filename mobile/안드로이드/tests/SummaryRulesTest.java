@@ -13,6 +13,12 @@ public final class SummaryRulesTest {
             if(line.isEmpty())continue;
             String[] parts=line.split(" ",-1);
             if(parts[0].equals("T"))out.append(SummaryRules.compactTarget(parts[1],Integer.parseInt(parts[2]),Integer.parseInt(parts[3]))).append('\n');
+            else if(parts[0].equals("S")){
+                // 모든 유니코드 글자를 하나씩 넣어 지워지는 글자의 번호를 쉼표로 이어 쓴다.
+                StringBuilder hits=new StringBuilder();
+                for(int cp=0;cp<=0x10FFFF;cp++){if(cp>=0xD800&&cp<=0xDFFF)continue;String probe="가"+new String(Character.toChars(cp))+"가";if(!SummaryRules.withoutForeignText(probe).equals(probe))hits.append(Integer.toHexString(cp)).append(',');}
+                out.append(hits).append('\n');
+            }
             else if(parts[0].equals("F"))out.append(JsonText.quote(SummaryRules.withoutForeignText(new String(Base64.getDecoder().decode(parts[1]),StandardCharsets.UTF_8)))).append('\n');
             else{
                 List<String> quoted=new ArrayList<>();

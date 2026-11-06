@@ -7,10 +7,15 @@ import java.util.regex.Pattern;
 
 final class SummaryRules {
     private SummaryRules(){}
-    private static final Pattern FOREIGN_SCRIPT=Pattern.compile("[\\p{IsHiragana}\\p{IsKatakana}\\p{IsHan}\\u30FC]+");
+    // Android 9 이하는 정규식의 문자 체계 이름(Is 접두사)을 읽지 못하므로 데스크톱 출력형식.js와 같은 번호 범위를 쓴다.
+    private static final Pattern FOREIGN_SCRIPT=foreignScript();
+    private static Pattern foreignScript(){
+        // 이 정규식을 읽지 못하는 기기가 있어도 앱이 멈추지 않게 지우기만 건너뛴다.
+        try{return Pattern.compile("[\\u2E80-\\u2FDF\\u3005-\\u3007\\u3021-\\u3029\\u3038-\\u303B\\u3040-\\u309F\\u30A0-\\u30FA\\u30FC-\\u30FF\\u31F0-\\u31FF\\u3400-\\u4DBF\\u4E00-\\u9FFF\\uF900-\\uFAFF\\uFF66-\\uFF9F\\x{1B000}-\\x{1B16F}\\x{20000}-\\x{323AF}]+");}catch(RuntimeException ex){return null;}
+    }
     static String withoutForeignText(String value){
         // AI가 결과에 섞어 쓴 일본어·중국어 글자를 지운다. 데스크톱 출력형식.js withoutForeignText와 같은 규칙이다.
-        if(value==null||!FOREIGN_SCRIPT.matcher(value).find())return value;
+        if(value==null||FOREIGN_SCRIPT==null||!FOREIGN_SCRIPT.matcher(value).find())return value;
         return FOREIGN_SCRIPT.matcher(value).replaceAll("").replaceAll("·{2,}","·").replaceAll(" {2,}"," ").replaceAll("^ +| +$","");
     }
     static int goal(String format){

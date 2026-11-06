@@ -24,13 +24,22 @@ test('Java 길이 판정과 이름 힌트가 데스크톱과 같다', () => {
     const sources = ['JsonText', 'SummaryRules'].map(name => path.join(android, 'src/kr/local/meetingjournal', `${name}.java`));
     javac(['-encoding', 'UTF-8', '-d', work, ...sources, path.join(android, 'tests', 'SummaryRulesTest.java')]);
     const input = path.join(work, 'in.txt'), output = path.join(work, 'out.txt');
-    fs.writeFileSync(input, [...targets.map(item => `T ${item.format} ${item.body} ${item.kept}`), ...keywordCases.map(value => `K ${Buffer.from(value, 'utf8').toString('base64')}`), ...foreignCases.map(value => `F ${Buffer.from(value, 'utf8').toString('base64')}`)].join('\n') + '\n');
+    fs.writeFileSync(input, [...targets.map(item => `T ${item.format} ${item.body} ${item.kept}`), ...keywordCases.map(value => `K ${Buffer.from(value, 'utf8').toString('base64')}`), ...foreignCases.map(value => `F ${Buffer.from(value, 'utf8').toString('base64')}`), 'S'].join('\n') + '\n');
     java(['-Dfile.encoding=UTF-8', '-cp', work, 'kr.local.meetingjournal.SummaryRulesTest', input, output]);
     const results = fs.readFileSync(output, 'utf8').trim().split('\n');
-    assert.equal(results.length, targets.length + keywordCases.length + foreignCases.length);
+    assert.equal(results.length, targets.length + keywordCases.length + foreignCases.length + 1);
     targets.forEach((item, index) => assert.equal(Number(results[index]), formats.compactTarget(shaped(item.body, item.kept), item.format), JSON.stringify(item)));
     keywordCases.forEach((value, index) => assert.deepEqual(JSON.parse(results[targets.length + index]), formats.participantKeywords(value), value.slice(0, 40)));
     foreignCases.forEach((value, index) => assert.equal(JSON.parse(results[targets.length + keywordCases.length + index]), formats.withoutForeignText(value), value));
+    // 유니코드 표준 버전이 달라도 두 앱이 정확히 같은 글자를 지워야 한다.
+    const deleted = [];
+    for (let cp = 0; cp <= 0x10FFFF; cp++) {
+      if (cp >= 0xD800 && cp <= 0xDFFF) continue;
+      const probe = '가' + String.fromCodePoint(cp) + '가';
+      if (formats.withoutForeignText(probe) !== probe) deleted.push(cp.toString(16));
+    }
+    assert.ok(deleted.length > 20000, `지우는 글자가 너무 적습니다: ${deleted.length}`);
+    assert.equal(results.at(-1).replace(/,$/, ''), deleted.join(','), 'Windows와 휴대폰이 지우는 글자가 다릅니다');
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
@@ -64,6 +73,9 @@ test('Android 원본은 줄이기 단계와 이름 힌트를 분석과 의견 �
   assert.match(source, /previous=shorten\(record,previous,dir,null\);/);
   assert.match(source, /previous=shorten\(work,previous,dir,feedback\);/);
   assert.match(source, /mergeCompact\(minutes,withoutForeignScript\(new JSONObject\(minutesText\(record,body\)\)\)\)/);
+  // Android 9 이하는 정규식의 Is 접두사 문자 체계를 읽지 못하므로 쓰지 않는다.
+  const rules = fs.readFileSync(path.join(root, 'src/kr/local/meetingjournal/SummaryRules.java'), 'utf8');
+  assert.doesNotMatch(rules, /\\p\{Is|\\p\{(sc|script)=/i);
   assert.match(source, /JSONObject minutes=withoutForeignScript\(new JSONObject\(minutesText\(record,body\)\)\);/);
   assert.match(source, /SummaryRules\.participantKeywords\(record\.optString\("participants"\)\)/);
   const build = fs.readFileSync(path.join(root, '빌드.ps1'), 'utf8');

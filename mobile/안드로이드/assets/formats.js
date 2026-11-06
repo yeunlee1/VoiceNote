@@ -131,8 +131,9 @@
     return words;
   }
 
-  // AI가 결과에 섞어 쓴 일본어·중국어 글자(히라가나·가타카나·한자와 장음 부호)를 지운다(2026-11-06 사용자 결정). 휴대폰 SummaryRules.java가 같은 규칙으로 지운다.
-  const FOREIGN_SCRIPT = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}\u30FC]+/gu;
+  // AI가 결과에 섞어 쓴 일본어·중국어 글자(히라가나·가타카나·한자와 장음 부호)를 지운다(2026-11-06 사용자 결정). 휴대폰 SummaryRules.java가 같은 범위로 지운다.
+  // 유니코드 표준 버전이 달라도 두 앱이 같은 글자를 지우도록 문자 체계 이름 대신 번호 범위를 쓴다. 한국어에서 쓰는 ㈜·㎏ 같은 기호와 가운뎃점 ・은 넣지 않는다.
+  const FOREIGN_SCRIPT = /[\u2E80-\u2FDF\u3005-\u3007\u3021-\u3029\u3038-\u303B\u3040-\u309F\u30A0-\u30FA\u30FC-\u30FF\u31F0-\u31FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF66-\uFF9F\u{1B000}-\u{1B16F}\u{20000}-\u{323AF}]+/gu;
   function withoutForeignText(value) {
     if (typeof value !== 'string' || value.search(FOREIGN_SCRIPT) < 0) return value;
     // 지운 자리에 남는 겹친 공백과 가운뎃점은 하나로 줄이고 앞뒤 공백을 뺀다.
