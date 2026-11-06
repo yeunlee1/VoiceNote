@@ -266,12 +266,16 @@ final class Updates {
                 if (file.length() != verified.apkSize || !hex(digest.digest()).equals(verified.apkSha256)) throw mismatch();
                 Intent callback = new Intent(context, UpdateReceiver.class).setAction(UpdateReceiver.ACTION);
                 int flags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
+                // 시스템은 commit이 돌아오기 전에도 메인 스레드로 확인 화면이나 결과를 보낼 수 있다. 이 세션의 콜백을 받을 준비를 commit 전에 끝낸다.
+                session = id;
+                confirm = null;
                 target.commit(PendingIntent.getBroadcast(context, id, callback, flags).getIntentSender());
             }
-            session = id;
-            confirm = null;
             return snapshot(context);
         } catch (Exception ex) {
+            // 커밋하지 못한 세션의 늦은 콜백은 받지 않는다.
+            session = -1;
+            confirm = null;
             if (id != -1) try { installer.abandonSession(id); } catch (Exception ignored) {}
             boolean changed = ex instanceof UpdateRules.Failure;
             synchronized (Updates.class) {

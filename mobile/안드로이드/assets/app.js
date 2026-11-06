@@ -135,17 +135,25 @@
   }
   // 회의 준비 저장을 하나 보내고, 끝날 때까지 진행 중으로 기억한다. 실패하면 업데이트 설치가 막히도록 실패를 남긴다.
   function saveDraftNow() {
-    const job = call('saveDraft', draftData()).then(() => { state.draftFailed = false; }, error => { state.draftFailed = true; throw error; });
+    // 끝났다는 표시는 결과를 받는 그 자리에서 지운다. 이 저장을 기다린 쪽이 다음 줄에서 볼 때 이미 지워져 있어야 한다.
+    const job = call('saveDraft', draftData()).then(
+      () => { if (state.draftSaving === job) state.draftSaving = null; state.draftFailed = false; },
+      error => { if (state.draftSaving === job) state.draftSaving = null; state.draftFailed = true; throw error; });
     state.draftSaving = job;
-    job.catch(() => {}).finally(() => { if (state.draftSaving === job) state.draftSaving = null; });
     return job;
   }
   function queueDraft() { clearTimeout(draftTimer); draftTimer = setTimeout(() => { draftTimer = 0; saveDraftNow().catch(error => message(error.message)); }, 500); }
   async function flushDraft() { if (!draftTimer) return; clearTimeout(draftTimer); draftTimer = 0; await saveDraftNow().catch(() => {}); }
-  // 업데이트 설치 직전에 쓰는 엄격한 저장이다. 기다리던 저장까지 끝나야 하고 실패하면 설치하지 않는다.
+  // 업데이트 설치 직전에 쓰는 엄격한 저장이다. 기다리던 저장과, 그사이 새로 적어 타이머에 걸린 저장까지 끝나야 하고 실패하면 설치하지 않는다.
+  // 계속 새로 적고 있으면 세 번까지만 기다린다.
+  // 지난 저장이 실패했으면 여기서 한 번 다시 저장해 본다. 그래서 실패해도 설치 단추를 잠그지 않고, 누르면 다시 저장한 뒤에만 설치한다.
   async function settleDraft() {
-    if (draftTimer) { clearTimeout(draftTimer); draftTimer = 0; await saveDraftNow(); }
-    else if (state.draftSaving) await state.draftSaving;
+    if (state.draftFailed && !draftTimer && !state.draftSaving) await saveDraftNow();
+    for (let round = 0; round < 3 && (draftTimer || state.draftSaving); round++) {
+      if (draftTimer) { clearTimeout(draftTimer); draftTimer = 0; await saveDraftNow(); }
+      else await state.draftSaving;
+    }
+    if (draftTimer || state.draftSaving) throw new Error('회의 준비 내용을 저장하는 중입니다. 잠시 뒤 다시 눌러 주세요.');
     if (state.draftFailed) throw new Error('회의 준비 내용을 저장하지 못했습니다. 잠시 뒤 다시 눌러 주세요.');
   }
   const stateLabels = { complete: '회의록', failed: '분석 실패', interrupted: '녹음 중단', saved: '음성 저장', analyzing: '분석 중', recording: '녹음 중' };
@@ -498,7 +506,7 @@
     if (state.customDirty) reasons.push('내 형식 변경을 저장한 뒤 설치하세요.');
     if (state.importToken) reasons.push('설정 불러오기 확인을 먼저 마치세요.');
     if ($('api-key').value.trim()) reasons.push('입력한 API 키를 등록하거나 지운 뒤 설치하세요.');
-    if (state.draftFailed) reasons.push('회의 준비 내용을 저장하지 못했습니다. 잠시 뒤 다시 눌러 주세요.');
+    // 회의 준비 저장 실패는 여기서 막지 않는다. 설치를 누르면 settleDraft가 다시 저장해 보고, 그래도 실패하면 설치하지 않는다.
     return reasons;
   }
   function applyUpdate(update) {
@@ -530,6 +538,8 @@
     $('update-check').disabled = v.check.disabled || state.updateRunning;
     $('update-fine').hidden = !v.fine;
   }
+  // 설치로 넘기기 직전의 마지막 확인이다. 막는 이유도, 기다리는 회의 준비 저장도 없어야 한다.
+  function readyToLeave() { return !updateReasons().length && !draftTimer && !state.draftSaving; }
   async function runUpdate(kind) {
     if (state.updateRunning || !kind) return;
     state.updateRunning = true; state.updateError = ''; renderUpdate();
@@ -541,9 +551,17 @@
         state.updateIntent = false;
         if (updateReasons().length) return;
         await settleDraft();
+        // 저장을 기다리는 사이 새로 생긴 입력·작업이 있으면 설치로 넘기지 않는다.
+        if (!readyToLeave()) return;
         applyUpdate(await call('updateInstall'));
       } else if (kind === 'permission') await call('updatePermission');
-      else if (kind === 'confirm') applyUpdate(await call('updateConfirm'));
+      else if (kind === 'confirm') {
+        // 설치 화면을 다시 열면 곧 앱이 닫히므로 같은 확인을 한다.
+        if (updateReasons().length) return;
+        await settleDraft();
+        if (!readyToLeave()) return;
+        applyUpdate(await call('updateConfirm'));
+      }
     } catch (error) {
       state.updateIntent = false; state.updateError = error.message; message(error.message);
     } finally { state.updateRunning = false; renderUpdate(); }

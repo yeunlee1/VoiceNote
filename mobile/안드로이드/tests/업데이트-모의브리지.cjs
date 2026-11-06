@@ -18,6 +18,11 @@ module.exports = '(' + function () {
   };
   m.update = { ...base, ...(presets[query.get('update') || 'latest'] || {}) };
   m.updateCalls = [];
+  // 회의 준비 저장과 설치 요청이 네이티브에 닿은 차례다. holdDraft를 켜면 저장 응답을 붙잡아 두었다가 releaseDrafts()로 차례대로 보낸다.
+  m.sequence = [];
+  m.holdDraft = false;
+  m.heldDrafts = [];
+  m.releaseDrafts = () => { m.holdDraft = false; for (const send of m.heldDrafts.splice(0)) send(); };
   // 시험이 받기를 끝내거나 상태를 바꿀 때 쓴다. 바뀐 상태는 다음 상태 조회(1.5초마다)로 화면에 간다.
   m.setUpdate = name => { m.update = { ...base, ...presets[name] }; };
   const snapshot = () => JSON.parse(JSON.stringify(m.update));
@@ -58,8 +63,19 @@ module.exports = '(' + function () {
   window.Native.request = function (id, method, json) {
     wrap();
     if (method === 'init' || method === 'status') { pending.add(id); return previous(id, method, json); }
+    if (method === 'saveDraft') {
+      // failDraft 횟수만큼 저장을 실패로 돌려준다.
+      const send = () => {
+        const title = JSON.parse(json).title;
+        if (m.failDraft > 0) { m.failDraft--; m.sequence.push('saveDraft-failed:' + title); setTimeout(() => window.receive(id, { value: null, error: '회의 준비를 저장하지 못했습니다(시험).' }), 0); return; }
+        m.sequence.push('saveDraft:' + title); previous(id, method, json);
+      };
+      if (m.holdDraft) m.heldDrafts.push(send); else send();
+      return;
+    }
     if (!(method in handlers)) return previous(id, method, json);
     m.updateCalls.push(method);
+    m.sequence.push(method);
     let value = null, error = null;
     try { value = handlers[method](); } catch (failure) { error = failure.message; }
     setTimeout(() => window.receive(id, { value, error }), 0);

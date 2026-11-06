@@ -5,6 +5,9 @@ module.exports = async ({ viewport, load, click, evaluate, until, wait, shot, ch
   // 프로그램 정보 안의 보이는 요소가 모두 화면 폭 안에 있고 문서도 가로로 밀리지 않는지 본다.
   const fits = "(()=>{const w=document.documentElement.clientWidth;return document.documentElement.scrollWidth<=w&&[...document.querySelectorAll('#about *')].every(e=>{const r=e.getBoundingClientRect();return r.width===0||(r.left>=-0.5&&r.right<=w+0.5)})})()";
   const closeAbout = () => click('[data-close=about]');
+  // 단추 글자가 한 줄에 다 들어가는지 본다. 글자 상자의 줄 위치가 하나여야 한다.
+  const oneLine = id => evaluate(`(()=>{const b=document.getElementById(${JSON.stringify(id)});if(b.hidden)return false;const r=document.createRange();r.selectNodeContents(b);return new Set([...r.getClientRects()].filter(x=>x.width>0).map(x=>Math.round(x.top))).size===1})()`);
+  const typeTitle = value => evaluate(`(()=>{const t=document.getElementById('title');t.value=${JSON.stringify(value)};t.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   for (const [width, height] of [[360, 800], [412, 915]]) {
     await viewport(width, height);
 
@@ -38,6 +41,7 @@ module.exports = async ({ viewport, load, click, evaluate, until, wait, shot, ch
     check(width + 'px 안내 줄을 누르면 프로그램 정보가 열린다', await evaluate("document.getElementById('about').open"));
     check(width + 'px 새 버전 안내 문장과 지금 업데이트 단추', /1\.5\.1 버전이 나왔습니다/.test(await text('update-state')) && (await text('update-action')) === '지금 업데이트' && await evaluate("!document.getElementById('update-action').disabled") && (await shown('update-fine')) && !(await shown('update-lock')));
     check(width + 'px 새 버전 화면 가로 넘침 없음', await evaluate(fits));
+    check(width + 'px 지금 업데이트와 다시 확인 단추 글자가 한 줄에 들어간다', (await oneLine('update-action')) && (await oneLine('update-check')));
     await shot('업데이트-' + width + '-정보새버전.png');
     // 한 번 누르면 받고, 받기가 끝나면 다시 누르지 않아도 휴대폰 설치 화면으로 넘어간다.
     await click('#update-action');
@@ -81,6 +85,7 @@ module.exports = async ({ viewport, load, click, evaluate, until, wait, shot, ch
     await load('?update=permission');
     await click('#update-note');
     check(width + 'px 설치 허용이 꺼져 있으면 허용 켜기 단추와 안내를 보인다', (await text('update-action')) === '설치 허용 켜기' && /설치 허용/.test(await text('update-state')));
+    check(width + 'px 설치 허용 켜기 글자가 한 줄에 들어간다', await oneLine('update-action'));
     await shot('업데이트-' + width + '-설치허용.png');
     await click('#update-action');
     check(width + 'px 허용 켜기는 휴대폰 설정을 연다', await until("__mock.updateCalls.includes('updatePermission')"));
@@ -114,4 +119,40 @@ module.exports = async ({ viewport, load, click, evaluate, until, wait, shot, ch
     await closeAbout();
     await click('#close-settings');
   }
+
+  // 회의 준비 저장을 기다리는 사이 새로 적은 내용도 저장된 뒤에야 설치로 넘긴다.
+  await viewport(412, 915);
+  await load('?update=ready');
+  await typeTitle('제목1');
+  await evaluate('__mock.holdDraft=true');
+  await wait(700);
+  check('412px 첫 회의 준비 저장을 붙잡아 둔다', await evaluate('__mock.heldDrafts.length===1'));
+  await click('#update-note');
+  await click('#update-action');
+  await closeAbout();
+  await typeTitle('제목2');
+  await evaluate('__mock.releaseDrafts()');
+  check('412px 저장을 기다리는 사이 새로 적은 회의 준비를 저장한 뒤에 설치로 넘긴다', (await until("__mock.sequence.includes('updateInstall')")) && await evaluate("(()=>{const s=__mock.sequence,last=s.lastIndexOf('saveDraft:제목2');return last>=0&&last<s.indexOf('updateInstall')&&__mock.draft.title==='제목2'})()"), await evaluate('JSON.stringify(__mock.sequence)'));
+
+  // 회의 준비 저장이 한 번 실패해도 설치 단추는 잠그지 않고, 누르면 다시 저장한 뒤에 설치한다.
+  await load('?update=ready');
+  await evaluate('__mock.failDraft=1');
+  await typeTitle('제목3');
+  await wait(700);
+  await click('#update-note');
+  check('412px 회의 준비 저장이 실패해도 설치 단추를 누를 수 있다', await evaluate("__mock.sequence.includes('saveDraft-failed:제목3')&&!document.getElementById('update-action').disabled&&document.getElementById('update-action').textContent==='설치'"));
+  await click('#update-action');
+  check('412px 설치를 누르면 실패한 저장을 다시 한 뒤에 설치로 넘긴다', (await until("__mock.sequence.includes('updateInstall')")) && await evaluate("(()=>{const s=__mock.sequence;return s.indexOf('saveDraft:제목3')>s.indexOf('saveDraft-failed:제목3')&&s.indexOf('saveDraft:제목3')<s.indexOf('updateInstall')})()"), await evaluate('JSON.stringify(__mock.sequence)'));
+  await closeAbout();
+
+  // 다시 저장해도 실패하면 설치로 넘기지 않고 이유를 보인다.
+  await load('?update=ready');
+  await evaluate('__mock.failDraft=2');
+  await typeTitle('제목4');
+  await wait(700);
+  await click('#update-note');
+  await click('#update-action');
+  await wait(300);
+  check('412px 다시 저장해도 실패하면 설치하지 않고 이유를 보인다', await evaluate("!__mock.sequence.includes('updateInstall')&&__mock.sequence.filter(x=>x==='saveDraft-failed:제목4').length===2&&!document.getElementById('update-detail').hidden&&document.getElementById('update-detail').textContent.includes('저장하지 못했습니다')"), await evaluate("JSON.stringify(__mock.sequence)+' / '+document.getElementById('update-detail').textContent"));
+  await closeAbout();
 };

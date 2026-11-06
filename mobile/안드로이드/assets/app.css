@@ -297,6 +297,8 @@ details.more { margin-top: 20px; border-top: 1px solid var(--rule); padding-top:
 .update-detail[data-tone="error"] { color: var(--rec-deep); }
 .update-lock { padding: 10px 12px; border: 1px dashed var(--rule-strong); border-radius: var(--radius-s); background: var(--sheet); font-size: 13px; color: var(--ink-soft); overflow-wrap: anywhere; }
 .update-page { justify-self: start; margin-left: -8px; }
+/* 업데이트 칸의 단추 글자는 줄을 바꾸지 않는다. 두 단추가 한 줄에 들어가지 않으면 단추째 다음 줄로 내려가 각자 한 줄을 다 쓴다. */
+.update-panel .row .button { flex: 1 1 auto; white-space: nowrap; }
 /* 버전별 바뀐 점은 진행 단계의 점과 선을 세로로 세운 연표다. 지금 쓰는 버전의 점은 청록으로 채운다. */
 .about-notes { display: grid; gap: 10px; }
 .release-list { list-style: none; margin: 0; padding: 0; display: grid; }
