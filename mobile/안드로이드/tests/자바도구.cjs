@@ -29,7 +29,10 @@ function run(tool, args, options) {
 
 module.exports = {
   android,
+  // 업데이트 목록 서명 시험이 PowerShell 스크립트에 넘길 한글 없는 JDK 경로다.
+  jdk,
   androidJar: path.join(tools, 'SDK', 'platforms', 'android-36', 'android.jar'),
   javac: (args, options) => run('javac', args, options),
   java: (args, options) => run('java', args, options),
+  keytool: (args, options) => run('keytool', args, options),
 };

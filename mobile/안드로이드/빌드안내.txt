@@ -1,4 +1,4 @@
-﻿안드로이드 빌드 (VoiceNote 1.4.0, versionCode 6)
+﻿안드로이드 빌드 (VoiceNote 1.5.0, versionCode 7)
 
 Windows 앱과 같은 요약 요청 양식을 쓰는 Android 네이티브 앱입니다. WebView는 APK 안의 화면을 표시하고 녹음, API 통신, 기록 보관·공유, 설정 파일과 폴더 선택은 Java 코드가 처리합니다. 프로젝트를 고르지 않고 회의를 시작하며, 이전 프로젝트 1~3의 기록은 원래 위치에서 함께 읽습니다. 이전 자료를 지우거나 옮기지 않습니다.
 
@@ -16,7 +16,9 @@ Windows 앱과 같은 요약 요청 양식을 쓰는 Android 네이티브 앱입
   .\mobile\안드로이드\빌드.ps1 -DebugBuild
   .\mobile\안드로이드\빌드.ps1
 
-첫 명령은 검증용, 두 번째는 release APK를 공용 기본 키 없이 만듭니다. 시도마다 다른 OutputRoot를 지정합니다. 내부 결과 이름은 VoiceNote-android-test.apk 또는 VoiceNote-android.apk이며, 날짜와 1.4.0이 든 한글 이름으로도 복사합니다. 사용자 전달은 이 산출물 경로가 아니라 루트 배포준비.ps1로 배포\최신과 배포\VoiceNote-배포.zip을 갱신하는 별도 단계입니다.
+첫 명령은 검증용, 두 번째는 release APK를 공용 기본 키 없이 만듭니다. 시도마다 다른 OutputRoot를 지정합니다. 내부 결과 이름은 VoiceNote-android-test.apk 또는 VoiceNote-android.apk이며, 날짜와 1.5.0이 든 한글 이름으로도 복사합니다.
+
+앱 안 업데이트(1.5.0부터)는 깃허브 최신 릴리즈의 VoiceNote-<버전>-update.json을 이 앱의 서명 인증서로 확인한 뒤 APK를 받아 PackageInstaller 세션으로 넘깁니다. 마지막 설치는 사람이 휴대폰 설치 화면에서 누르고, 처음 한 번 VoiceNote의 '이 출처 허용'을 켜야 합니다. 그래서 릴리즈마다 versionCode를 올리고 이전 버전과 같은 개인 서명 키로 서명해야 하며, 업데이트 목록은 .github\업데이트목록.ps1이 같은 키로 서명합니다. REQUEST_INSTALL_PACKAGES 권한과 UpdateReceiver가 이 기능에 쓰입니다. 사용자 전달은 이 산출물 경로가 아니라 루트 배포준비.ps1로 배포\최신과 배포\VoiceNote-배포.zip을 갱신하는 별도 단계입니다.
 
 요약 요청 양식
 
@@ -49,5 +51,6 @@ DefaultKeyFile의 기본값은 빈값이므로 지정하지 않으면 키가 들
 
   adb -s emulator-5554 install -r <검증용 APK>
   adb -s emulator-5554 shell am instrument -w kr.local.meetingjournal/kr.local.meetingjournal.AndroidChecks
+- 앱 안 업데이트는 node mobile/안드로이드/tests/업데이트기기시험.cjs . <결과폴더>로 가상기기에서 끝까지 봅니다. 버리는 서명으로 지금 버전의 검증용 APK와 versionCode를 하나 올린 다음 버전 APK, 서명한 업데이트 목록을 만들고, 기기 시험(probe u-e2e)이 확인·받기·설치 세션·시스템 설치 화면까지 진행하면 사람 대신 '업데이트'를 눌러 versionCode가 올랐는지 봅니다. 가상기기가 꺼져 있으면 창 없이 띄우고 끝나면 끕니다. 가상기기의 앱은 지우고 다시 설치합니다.
 
 영문 정션 C:\vn-emu\sdk와 C:\vn-emu\phone.avd를 사용합니다. ANDROID_SDK_ROOT를 C:\vn-emu\sdk로 정하고 emulator.exe -avd VoiceNotePhone -no-window -no-metrics로 실행합니다. 다른 작업자와 동시에 쓰지 않습니다. AndroidChecks는 앱 cache 아래 별도 UUID 폴더와 별도 설정 이름에 합성 기록을 만들고 실제 API는 호출하지 않습니다. 사용자 실기기에는 실행하지 않습니다.

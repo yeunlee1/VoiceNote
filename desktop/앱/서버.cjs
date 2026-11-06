@@ -20307,6 +20307,8 @@ function createMeetingServer(options = {}) {
   );
   const microphoneControl = options.microphoneControl ?? require("./마이크제어.cjs").setMicrophoneVolume;
   let microphoneBusy = false;
+  // 설치형 서버만 업데이트 담당을 넘긴다. 없으면(개발·시험 실행) 업데이트를 제공하지 않는다.
+  const updater = options.updater ?? null;
   const token = options.token ?? (0, import_node_crypto.randomBytes)(32).toString("base64url");
   const apiFetch = options.apiFetch ?? fetch;
   let apiKey = "";
@@ -20705,6 +20707,25 @@ function createMeetingServer(options = {}) {
           json2(response, 200, { keyConfigured: Boolean(apiKey), keySaved, ...trial.status(access()) });
           return;
         }
+        if (path === "/api/update" && request.method === "GET") {
+          json2(response, 200, { update: updater ? updater.ensureChecked() : require("./업데이트.cjs").unsupportedStatus(require("./앱버전.cjs").APP_VERSION) });
+          return;
+        }
+        if (path === "/api/update/check" || path === "/api/update/download" || path === "/api/update/launch") {
+          if (request.method !== "POST") throw fail("NOT_FOUND", "업데이트 경로를 확인하세요.", 404);
+          if (!updater) throw fail("UPDATE_UNSUPPORTED", "설치한 VoiceNote에서만 업데이트할 수 있습니다.", 409);
+          // AI 요청 중에는 설치를 시작하지 않는다. 반대로 설치를 시작하는 동안에는 AI 요청 경로가 새 요청을 거절한다.
+          if (path === "/api/update/launch" && active) throw fail("BUSY", "진행 중인 AI 요청이 끝난 뒤 업데이트를 설치해 주세요.", 409);
+          let update;
+          try {
+            update = path === "/api/update/check" ? await updater.check() : path === "/api/update/download" ? await updater.download() : await updater.launch();
+          } catch (error) {
+            if (error instanceof MeetingError) throw error;
+            throw fail(typeof error?.code === "string" ? error.code : "UPDATE_FAILED", error?.message || "업데이트를 처리하지 못했습니다.", Number.isInteger(error?.status) ? error.status : 409);
+          }
+          json2(response, 200, { update });
+          return;
+        }
         if (path === "/api/shutdown" && request.method === "POST") {
           if (active) throw fail("BUSY", "\uC9C4\uD589 \uC911\uC778 AI \uC694\uCCAD\uC774 \uB05D\uB09C \uB4A4 \uC885\uB8CC\uD574 \uC8FC\uC138\uC694.", 409);
           json2(response, 200, { closing: true });
@@ -20756,6 +20777,8 @@ function createMeetingServer(options = {}) {
             return;
           }
           if (active) throw fail("BUSY", "\uB2E4\uB978 AI \uC694\uCCAD\uC774 \uC9C4\uD589 \uC911\uC785\uB2C8\uB2E4.", 429);
+          // \uC124\uCE58\uB97C \uC2DC\uC791\uD588\uC73C\uBA74 \uACE7 \uC571\uC774 \uB2EB\uD788\uBBC0\uB85C \uC0C8 \uC720\uB8CC \uC694\uCCAD\uC744 \uBCF4\uB0B4\uC9C0 \uC54A\uB294\uB2E4. \uD655\uC778\uACFC active \uC124\uC815 \uC0AC\uC774\uC5D0 \uAE30\uB2E4\uB9BC\uC774 \uC5C6\uC5B4 \uC124\uCE58 \uC2DC\uC791\uACFC \uACB9\uCE58\uC9C0 \uC54A\uB294\uB2E4.
+          if (updater?.installing()) throw fail("UPDATING", "\uC5C5\uB370\uC774\uD2B8\uB97C \uC124\uCE58\uD558\uB294 \uC911\uC785\uB2C8\uB2E4. \uC571\uC774 \uB2E4\uC2DC \uC5F4\uB9B0 \uB4A4 \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.", 409);
           // \uAC1C\uC778 \uD0A4\uAC00 \uC5C6\uC73C\uBA74 \uAC19\uC740 \uBD84\uC11D ID\uC758 \uC804\uC0AC\u00B7\uBD84\uD560 \uC694\uCCAD\uC774 \uCCB4\uD5D8 1\uD68C \uC608\uC57D\uC744 \uD568\uAED8 \uC4F4\uB2E4.
           const analysisId = request.headers["x-analysis-id"];
           const grant = trial.begin({ analysisId, ...access() });
@@ -20818,11 +20841,12 @@ function createMeetingServer(options = {}) {
         throw fail("NOT_FOUND", "\uC694\uCCAD \uACBD\uB85C\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", 404);
       }
       if (request.method !== "GET") throw fail("NOT_FOUND", "\uC694\uCCAD \uACBD\uB85C\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", 404);
-      const file2 = path === "/" || path === "/index.html" ? "index.html" : path === "/app.js" ? "app.js" : path === "/app.css" ? "app.css" : path === "/ai-usage.js" ? "ai-usage.js" : path === "/formats.js" ? "formats.js" : null;
+      const file2 = path === "/" || path === "/index.html" ? "index.html" : path === "/app.js" ? "app.js" : path === "/app.css" ? "app.css" : path === "/ai-usage.js" ? "ai-usage.js" : path === "/formats.js" ? "formats.js" : path === "/release-notes.js" ? "release-notes.js" : null;
       if (!file2) throw fail("NOT_FOUND", "\uD398\uC774\uC9C0\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", 404);
       let content;
       try {
-        content = await (0, import_promises.readFile)(file2 === "ai-usage.js" ? (0, import_node_path.join)(__dirname, "AI\uC0AC\uC6A9\uB7C9.js") : file2 === "formats.js" ? (0, import_node_path.join)(__dirname, "\uCD9C\uB825\uD615\uC2DD.js") : (0, import_node_path.join)(__dirname, "\uD654\uBA74", file2));
+        // \uBC84\uC804\uBCC4 \uBC14\uB010 \uC810(\uB9B4\uB9AC\uC988\uB178\uD2B8.js)\uC740 \uD734\uB300\uD3F0 \uD654\uBA74\uACFC \uAC19\uC740 \uD30C\uC77C\uC744 \uADF8\uB300\uB85C \uB0B4\uBCF4\uB0B8\uB2E4.
+        content = await (0, import_promises.readFile)(file2 === "ai-usage.js" ? (0, import_node_path.join)(__dirname, "AI\uC0AC\uC6A9\uB7C9.js") : file2 === "formats.js" ? (0, import_node_path.join)(__dirname, "\uCD9C\uB825\uD615\uC2DD.js") : file2 === "release-notes.js" ? (0, import_node_path.join)(__dirname, "\uB9B4\uB9AC\uC988\uB178\uD2B8.js") : (0, import_node_path.join)(__dirname, "\uD654\uBA74", file2));
       } catch {
         throw fail("NOT_FOUND", "\uD398\uC774\uC9C0\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", 404);
       }

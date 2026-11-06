@@ -8,9 +8,9 @@ const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { randomUUID } = require('node:crypto');
 
-async function start(root) {
+async function start(root, extra = []) {
   const readyFile = path.join(root, `ready-${Date.now()}.json`);
-  const child = spawn(process.execPath, [path.join(__dirname, '설치형서버.cjs'), '--data-root', root, '--ready-file', readyFile, '--parent-pid', String(process.pid)], { windowsHide: true });
+  const child = spawn(process.execPath, [path.join(__dirname, '설치형서버.cjs'), '--data-root', root, '--ready-file', readyFile, '--parent-pid', String(process.pid), ...extra], { windowsHide: true });
   let stderr = '';
   child.stderr.on('data', data => stderr += data);
   for (let count = 0; count < 100; count++) {
@@ -51,6 +51,23 @@ test('설치 위치 밖에 회의 기록과 키를 저장하고 재실행 후 �
     assert.equal((await server.api('/api/config')).keySaved, true);
     assert.ok(fs.existsSync(path.join(root, '회의자료', '회의기록', `회의-${record.id}.json`)));
     await stop(server);
+  } finally {
+    if (server && server.child.exitCode === null) server.child.kill();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+test('업데이트 표시를 받아도 설치 폴더가 아니면(개발용 Node 실행) 업데이트를 제공하지 않는다', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meeting-updates-'));
+  let server;
+  try {
+    for (const extra of [[], ['--app-updates']]) {
+      server = await start(root, extra);
+      const { update } = await server.api('/api/update');
+      assert.equal(update.status, 'unsupported', extra.join(' '));
+      assert.equal(update.supported, false);
+      assert.equal(update.currentVersion, require('./앱버전.cjs').APP_VERSION);
+      await stop(server);
+    }
   } finally {
     if (server && server.child.exitCode === null) server.child.kill();
     fs.rmSync(root, { recursive: true, force: true });

@@ -2,6 +2,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createMeetingServer } = require('./서버.cjs');
+const { createUpdater } = require('./업데이트.cjs');
+const { APP_VERSION } = require('./앱버전.cjs');
 const args = process.argv.slice(2);
 function argument(name) {
   const index = args.indexOf(name);
@@ -14,8 +16,10 @@ const parentPid = Number(argument('--parent-pid'));
 if (!path.isAbsolute(root) || !path.isAbsolute(readyFile) || !Number.isSafeInteger(parentPid) || parentPid < 1)
   throw new Error('실행 경로와 부모 프로세스를 확인하세요.');
 fs.mkdirSync(root, { recursive: true });
+// Windows 창은 일반 실행일 때만 --app-updates를 넘긴다. 업데이트 담당은 node.exe 옆에 실행 파일과 제거 프로그램이 있을 때만 실제로 켜진다.
+const updater = createUpdater({ enabled: args.includes('--app-updates'), currentVersion: APP_VERSION, appDir: path.dirname(process.execPath), hostPid: parentPid });
 const meeting = createMeetingServer({ dataDir: path.join(root, '회의자료'), keyFile: path.join(root, '.env.회의록키'),
-  defaultKeyFile: path.join(__dirname, '기본키.json') });
+  defaultKeyFile: path.join(__dirname, '기본키.json'), updater });
 const watchdog = setInterval(() => {
   try { process.kill(parentPid, 0); }
   catch {

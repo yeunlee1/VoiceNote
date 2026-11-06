@@ -52,3 +52,19 @@ test('훅 시험은 이 PC의 실제 키 파일을 읽지 않도록 자료 폴�
   assert.ok(exported > 0, '자료 폴더를 바꾸는 줄이 없습니다');
   assert.ok(exported < hookTest.indexOf('git push'), '첫 push보다 먼저 바꿔야 합니다');
 });
+
+test('릴리즈 파일과 함께 업데이트 목록을 서명해 앱과 같은 검증기로 확인하고, 설치 시험은 러너의 리허설에서만 한다', () => {
+  const sign = script.indexOf('업데이트목록.ps1');
+  const verify = script.indexOf('업데이트목록확인.cjs');
+  const install = script.indexOf('업데이트설치시험.ps1');
+  const results = script.indexOf("Write-Host '== 결과'");
+  assert.ok(sign > 0 && sign < verify && verify < install && install < results, '서명 → 확인 → 설치 시험 → 결과 순서');
+  // 태그 배포는 Android 개인 서명 인증서로 서명한 목록만 남긴다.
+  assert.match(script, /if \(\$Tag\) \{ \$manifestArguments\.ExpectedCertificateSha256 = \$releaseCertificate \}/);
+  assert.match(script, /if \(\$env:GITHUB_ACTIONS -and -not \$Tag\) \{\n    Write-Host '== 업데이트 설치 시험'/);
+  const e2e = fs.readFileSync(path.join(root, '.github/업데이트설치시험.ps1'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(e2e, /if \(-not \$env:GITHUB_ACTIONS\) \{ throw/);
+  // 앱이 쓰는 설치 인자와 같은 인자로 업데이트 모드 설치를 띄운다.
+  const { INSTALLER_ARGUMENTS } = require('../앱/업데이트.cjs');
+  assert.ok(e2e.includes(`@(${INSTALLER_ARGUMENTS.map((value) => `'${value}'`).join(', ')}, `), '설치 인자');
+});

@@ -14,8 +14,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: AssemblyTitle("VoiceNote")]
 [assembly: AssemblyProduct("VoiceNote")]
-[assembly: AssemblyVersion("1.4.0.0")]
-[assembly: AssemblyFileVersion("1.4.0.0")]
+[assembly: AssemblyVersion("1.5.0.0")]
+[assembly: AssemblyFileVersion("1.5.0.0")]
 
 internal static class Program
 {
@@ -43,7 +43,8 @@ internal static class Program
             SetProcessDPIAware();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            using (var window = new MeetingWindow(root, selfTest))
+            // 앱 업데이트는 실제 자료 폴더로 띄운 일반 실행에서만 켠다. 자체 검사와 다른 자료 폴더 실행은 깃허브를 확인하지 않는다.
+            using (var window = new MeetingWindow(root, selfTest, !selfTest && !otherRoot))
             {
                 if (selfTest)
                 {
@@ -71,8 +72,11 @@ internal static class Program
 
 internal sealed class MeetingWindow : Form
 {
+    // 화면의 "깃허브에서 보기"가 여는 유일한 외부 주소다. 화면이 보낸 주소는 받지 않는다.
+    private const string UpdatePage = "https://github.com/yeunlee1/VoiceNote/releases/latest";
     private readonly string dataRoot;
     private readonly bool selfTest;
+    private readonly bool appUpdates;
     private readonly WebView2 view = new WebView2();
     private readonly JavaScriptSerializer json = new JavaScriptSerializer();
     private readonly Label loading = new Label();
@@ -85,10 +89,11 @@ internal sealed class MeetingWindow : Form
     private bool pickingFolder;
     public int ExitCode { get; private set; }
 
-    public MeetingWindow(string root, bool test)
+    public MeetingWindow(string root, bool test, bool updates)
     {
         dataRoot = root;
         selfTest = test;
+        appUpdates = updates;
         Text = "VoiceNote";
         ClientSize = new Size(1280, 820);
         MinimumSize = new Size(960, 680);
@@ -112,7 +117,7 @@ internal sealed class MeetingWindow : Form
             CoreWebView2Environment.GetAvailableBrowserVersionString();
             readyFile = Path.Combine(Path.GetTempPath(), "회의록-" + Guid.NewGuid().ToString("N") + ".json");
             var start = new ProcessStartInfo(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "node.exe"));
-            start.Arguments = Quote(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "앱", "설치형서버.cjs")) + " --data-root " + Quote(dataRoot) + " --ready-file " + Quote(readyFile) + " --parent-pid " + Process.GetCurrentProcess().Id;
+            start.Arguments = Quote(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "앱", "설치형서버.cjs")) + " --data-root " + Quote(dataRoot) + " --ready-file " + Quote(readyFile) + " --parent-pid " + Process.GetCurrentProcess().Id + (appUpdates ? " --app-updates" : "");
             start.UseShellExecute = false;
             start.CreateNoWindow = true;
             start.WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory;
@@ -155,6 +160,13 @@ internal sealed class MeetingWindow : Form
                     if (selfTest) return;
                     Directory.CreateDirectory(Path.Combine(dataRoot, "회의자료"));
                     Process.Start(new ProcessStartInfo("explorer.exe", Quote(Path.Combine(dataRoot, "회의자료"))) { UseShellExecute = true });
+                    return;
+                }
+                if (message as string == "open-update-page")
+                {
+                    // 앱 창 안에서는 외부 페이지로 이동하지 않으므로 고정한 릴리즈 주소만 기본 브라우저로 연다.
+                    if (selfTest) return;
+                    try { Process.Start(new ProcessStartInfo(UpdatePage) { UseShellExecute = true }); } catch { }
                     return;
                 }
                 var request = message as System.Collections.Generic.IDictionary<string, object>;
