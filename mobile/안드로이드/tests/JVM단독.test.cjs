@@ -18,7 +18,7 @@ function run(name, sources, classpath) {
 }
 
 // 아래 넷은 java.*만 쓰므로 해당 소스만으로 돈다.
-const plain = { SettingsFileTest: ['JsonText', 'CustomFormat', 'SettingsFile'], TextChunksTest: ['TextChunks'], TrialAccessTest: ['TrialAccess'], AiUsageTest: ['AiUsage', 'AiModels'] };
+const plain = { SettingsFileTest: ['JsonText', 'CustomFormat', 'SettingsFile'], TextChunksTest: ['TextChunks'], TrialAccessTest: ['TrialAccess'], AiUsageTest: ['AiUsage', 'AiModels'], UpdateRulesTest: ['JsonText', 'UpdateRules'] };
 for (const [name, sources] of Object.entries(plain)) test(`JVM 시험 ${name}`, () => run(name, sources.map(source)));
 // 아래 셋은 android.jar 스텁으로 컴파일하고, 실행 경로는 java.*만 쓰는 정적 메서드다.
 for (const name of ['AiResponseModelTest', 'AiFeedbackTest', 'CopyFilesTest']) test(`JVM 시험 ${name}`, () => run(name, allSources(), androidJar));
