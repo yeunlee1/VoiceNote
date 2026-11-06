@@ -55,6 +55,8 @@
       "review", "review-comment", "save-review", "refine", "refine-cost", "review-status", "result-versions", "result-version-field", "refined-badge",
       "copy-block", "copy-status", "copy-again", ...[1, 2, 3, 4, 5].map((stars) => `review-star-${stars}`),
       "tab-minutes", "tab-transcript", "panel-minutes", "panel-transcript", "transcript-view", "transcript-meta", "copy-result", "share-result", "save-result", "result-status",
+      "update-chip", "update-chip-label", "open-about", "about", "about-version", "about-version-meta", "about-update", "update-state", "update-progress-row", "update-progress",
+      "update-progress-text", "update-detail", "update-lock", "update-install", "update-check", "update-page", "release-list",
     ].map((id) => [id, $(id)]),
   );
   const Formats = window.MeetingFormats;
@@ -110,6 +112,8 @@
     analysisId: null,
     // 같은 녹음(회의)의 결과 목록과 지금 결과의 평가·반영한 의견·사본 저장 결과다. 평가는 결과마다 따로 저장한다.
     versions: [], feedback: "", review: null, reviewStars: null, reviewBusy: false, copies: null, copyBusy: false,
+    // 앱 업데이트 상태(서버가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 설치 시작 잠금, 상태 조회 간격이다.
+    update: null, updateIntent: false, updateLaunching: false, updateError: "", updatePoll: null, updatePollMs: 1000, updateNotified: false,
   };
 
   function applyAccess(data) {
@@ -494,7 +498,8 @@
   function refresh() {
     renderResultActions();
     const recording = Boolean(state.recorder && !state.recordingStopping);
-    const busy = Boolean(state.aiController) || state.keyBusy || state.historyBusy || state.archiveBusy;
+    // 업데이트 설치를 시작하면 창이 곧 닫히므로 녹음·불러오기·분석·지난 회의 열기를 함께 막는다.
+    const busy = Boolean(state.aiController) || state.keyBusy || state.historyBusy || state.archiveBusy || state.updateLaunching;
     const locked = busy || state.flowBusy || state.permissionPending || state.recorders.size > 0;
     ui.prepare.disabled = locked;
     ui.prepare.setAttribute("aria-expanded", String(state.setupOpen));
@@ -596,6 +601,8 @@
     ui["transcript-count"].textContent =
       `${Array.from(ui.transcript.value).length.toLocaleString("ko-KR")}자`;
     updateSize();
+    // 녹음·저장 상태가 바뀌면 업데이트 칸의 설치 가능 여부와 이유도 함께 바뀐다.
+    renderUpdate();
   }
 
   function stopTracks(stream) {
@@ -823,6 +830,8 @@
   async function startRecording() {
     if (state.flowBusy || state.historyBusy || state.archiveBusy || state.aiController) return;
     if (state.permissionPending || state.recorders.size) return;
+    // 업데이트 설치를 시작했으면 곧 창이 닫히므로 새 녹음을 시작하지 않는다.
+    if (state.updateLaunching) return announce("업데이트 설치를 시작해 새 회의를 시작할 수 없습니다. 앱이 다시 열린 뒤 시작하세요.");
     const blockers = startBlockers();
     if (blockers.length) {
       workflow(blockers[0]);
@@ -1986,8 +1995,9 @@
     dialog.addEventListener("close", () => {
       const target = dialog.returnFocus;
       dialog.returnFocus = null;
-      if (target?.isConnected && !target.disabled) target.focus();
-      else ui.prepare.focus();
+      // 연 단추가 그 사이 숨었으면(예: 새 버전 표시가 설치 뒤 사라짐) 프로그램 정보는 설정 단추로, 나머지는 회의 준비로 돌아간다.
+      if (target?.isConnected && !target.disabled && !target.hidden) target.focus();
+      else (dialog === ui.about ? ui["open-settings"] : ui.prepare).focus();
     });
   }
 
@@ -2203,6 +2213,184 @@
     }
   }
 
+  // 앱 업데이트와 프로그램 정보. 서버가 확인·받기·설치 시작을 맡고, 화면은 상태를 보여 주며 회의를 잃지 않게 설치 시작만 막는다.
+  const Notes = window.VoiceNoteReleaseNotes || { NOTES: [], find: () => null, dateLabel: () => "" };
+  const megabytes = (bytes) => `${(Number(bytes) / 1_048_576).toFixed(1)} MB`;
+  // 같은 글을 다시 넣지 않아야 상태 알림(role=status)이 같은 문장을 반복해 읽지 않는다.
+  const setText = (node, text) => { if (node.textContent !== text) node.textContent = text; };
+  const publishedText = (value) => {
+    try { return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric" }).format(new Date(value)); }
+    catch { return ""; }
+  };
+
+  // 지금 설치를 시작할 수 없는 이유다. 받기는 막지 않고, 창이 닫히는 설치 시작만 막는다.
+  function updateBlockers() {
+    if (state.recorders.size || state.permissionPending || state.recorder) return ["녹음 중에는 설치할 수 없습니다. 회의를 마친 뒤 설치하세요."];
+    if (state.aiController || state.flowBusy || state.archiveBusy) return ["분석과 저장이 끝난 뒤 설치하세요."];
+    if (state.historyBusy) return ["지난 회의를 불러오는 중입니다. 잠시 뒤 다시 누르세요."];
+    if (state.parts.some((part) => part.blob && !part.saved) || Boolean((ui.transcript.value || state.minutes) && !state.notesSaved))
+      return ["저장하지 않은 회의 내용이 있습니다. 회의록을 저장하거나 내려받은 뒤 설치하세요."];
+    return [];
+  }
+
+  // 회의를 시작하기 전 회의 준비에 적은 내용이다. 이 화면은 준비 내용을 따로 저장하지 않아 창이 닫히면 사라진다.
+  function preparedText() {
+    return !hasMeetingRecord() && Boolean(ui.title.value.trim() || ui.participants.value.trim() || ui["meeting-notes"].value.trim());
+  }
+
+  function applyUpdate(update) {
+    if (!update || typeof update.status !== "string") return;
+    const before = state.update?.status;
+    state.update = update;
+    // 지난 업데이트 결과(설치 완료·되돌림)는 이번 실행에서 한 번만 알린다.
+    if (update.lastResult?.message && !state.updateNotified) {
+      state.updateNotified = true;
+      announce(update.lastResult.message);
+    }
+    if (update.status === "available" && update.error) state.updateIntent = false;
+    renderUpdate();
+    clearTimeout(state.updatePoll);
+    if (["checking", "downloading"].includes(update.status)) state.updatePoll = setTimeout(loadUpdate, state.updatePollMs);
+    else if (update.status === "ready" && before !== "ready" && state.updateIntent) launchUpdate();
+  }
+
+  async function loadUpdate() {
+    // 업데이트 확인이 실패해도 회의 준비와 녹음은 막지 않는다. 이유는 프로그램 정보에서 본다.
+    try { applyUpdate((await api("/api/update")).update); } catch {}
+  }
+
+  function showUpdateError(message) {
+    state.updateError = message;
+    renderUpdate();
+    announce(message);
+  }
+
+  async function checkUpdate() {
+    state.updateError = "";
+    try { applyUpdate((await api("/api/update/check", { method: "POST" })).update); }
+    catch (error) { showUpdateError(error.message); }
+  }
+
+  async function startUpdate() {
+    const update = state.update;
+    if (!update || state.updateLaunching) return;
+    state.updateError = "";
+    if (update.status === "ready") return launchUpdate();
+    if (update.status !== "available") return;
+    // 한 번 누르면 받은 뒤 설치까지 이어 간다. 받는 동안 녹음을 시작하거나 저장하지 않은 내용이 생기면 설치는 그 뒤로 미룬다.
+    state.updateIntent = updateBlockers().length === 0;
+    try { applyUpdate((await api("/api/update/download", { method: "POST" })).update); }
+    catch (error) {
+      state.updateIntent = false;
+      showUpdateError(error.message);
+    }
+  }
+
+  async function launchUpdate() {
+    if (state.updateLaunching || state.update?.status !== "ready") return;
+    const reasons = updateBlockers();
+    if (reasons.length || (preparedText() && !confirm("회의 준비에 적은 회의명·참석자·메모는 업데이트하면 사라집니다. 계속할까요?"))) {
+      state.updateIntent = false;
+      renderUpdate();
+      return;
+    }
+    // 누른 순간부터 새 녹음·분석·불러오기를 막는다. 서버도 설치를 시작하는 동안 새 AI 요청을 받지 않는다.
+    state.updateLaunching = true;
+    state.updateIntent = false;
+    state.updateError = "";
+    refresh();
+    try {
+      applyUpdate((await api("/api/update/launch", { method: "POST" })).update);
+      // 창을 닫아야 설치가 이어진다. 안내를 잠깐 보여 준 뒤 미저장 확인 없이 닫는다.
+      window.removeEventListener("beforeunload", guardClose);
+      setTimeout(() => window.close(), 1200);
+    } catch (error) {
+      state.updateLaunching = false;
+      refresh();
+      showUpdateError(error.message);
+      await loadUpdate();
+    }
+  }
+
+  function renderUpdate() {
+    const update = state.update || { status: "checking", currentVersion: "", version: null, size: null, received: 0 };
+    const status = state.updateLaunching && update.status === "ready" ? "starting" : update.status;
+    const version = update.version || "";
+    const blockers = ["available", "ready"].includes(status) ? updateBlockers() : [];
+    const percent = update.size ? Math.min(100, Math.round((update.received / update.size) * 100)) : 0;
+    // 상단 표시는 새 버전이 있을 때만 보인다. 받는 중에는 받은 정도를 짧게 보여 준다.
+    const chip = { available: `새 버전 ${version}`, manual: `새 버전 ${version}`, downloading: `받는 중 ${percent}%`, ready: "설치 준비됨", starting: "설치 준비 중", launching: "설치 중" }[status] || "";
+    ui["update-chip"].hidden = !chip;
+    if (chip) {
+      setText(ui["update-chip-label"], chip);
+      ui["update-chip"].setAttribute("aria-label", `${chip}, 프로그램 정보 열기`);
+    }
+    const facts = [update.publishedAt && `${publishedText(update.publishedAt)} 게시`, update.size && megabytes(update.size)].filter(Boolean).join(" · ");
+    const message = {
+      unsupported: "이 실행에서는 새 버전을 확인하지 않습니다. 설치한 VoiceNote에서 확인할 수 있습니다.",
+      latest: `지금 쓰는 ${update.currentVersion} 버전이 최신입니다.`,
+      unknown: update.error?.message || "새 버전을 확인하지 못했습니다. 잠시 뒤 다시 확인을 눌러 주세요.",
+      available: `${version} 버전이 나왔습니다.${facts ? ` (${facts})` : ""}`,
+      manual: `${version} 버전이 나왔지만 앱에서 바로 설치할 수 없습니다.`,
+      downloading: `${version} 버전을 받는 중입니다.`,
+      ready: `${version} 버전을 받았습니다. 설치하면 VoiceNote가 닫혔다가 다시 열립니다.`,
+      starting: "설치를 준비하는 중입니다. 창을 닫지 마세요.",
+      launching: "설치를 시작했습니다. 잠시 뒤 VoiceNote가 닫혔다가 다시 열립니다.",
+    }[status] || "새 버전을 확인하는 중입니다.";
+    setText(ui["update-state"], message);
+    ui["about-update"].dataset.status = status;
+    // 받은 양은 상태 알림과 따로 두어 화면 읽기 프로그램이 진행률마다 읽지 않게 한다.
+    ui["update-progress-row"].hidden = status !== "downloading";
+    if (status === "downloading") {
+      ui["update-progress"].value = percent;
+      setText(ui["update-progress-text"], `${megabytes(update.received)} / ${megabytes(update.size)}`);
+    }
+    const detail = state.updateError ? { text: state.updateError, tone: "error" }
+      : update.error && status !== "unknown" ? { text: update.error.message, tone: status === "manual" ? "info" : "error" }
+        : update.lastResult?.message ? { text: update.lastResult.message, tone: update.lastResult.outcome === "installed" ? "info" : "error" } : null;
+    ui["update-detail"].hidden = !detail;
+    if (detail) {
+      setText(ui["update-detail"], detail.text);
+      ui["update-detail"].dataset.tone = detail.tone;
+    }
+    // 설치를 지금 못 하는 이유는 단추 가까이에 계속 보인다. 새 버전이 있을 때 누르면 받아 두기만 한다.
+    ui["update-lock"].hidden = !blockers.length;
+    if (blockers.length) setText(ui["update-lock"], status === "available" ? `${blockers[0]} 지금 누르면 받아 두기만 합니다.` : blockers[0]);
+    ui["update-install"].hidden = !["available", "ready", "starting"].includes(status);
+    setText(ui["update-install"], status === "available" ? (blockers.length ? "받아 두기" : "지금 업데이트") : "설치 시작");
+    ui["update-install"].disabled = status === "starting" || (status === "ready" && blockers.length > 0);
+    ui["update-check"].hidden = status === "unsupported";
+    ui["update-check"].disabled = ["idle", "checking", "downloading", "ready", "starting", "launching"].includes(status);
+  }
+
+  function renderAbout() {
+    // 지금 버전과 그 버전의 배포일, 그리고 버전별 바뀐 점을 최신 버전부터 보여 준다.
+    const version = state.update?.currentVersion || "";
+    const note = Notes.find(version);
+    const date = note ? Notes.dateLabel(note.date) : "";
+    setText(ui["about-version"], version);
+    setText(ui["about-version-meta"], version ? `지금 쓰는 버전${date ? ` · ${date} 배포` : ""}` : "버전 정보를 불러오지 못했습니다.");
+    ui["release-list"].replaceChildren(...Notes.NOTES.map((entry) => {
+      const item = element("li", "", "release");
+      item.dataset.current = String(entry.version === version);
+      const head = element("div", "", "release-head");
+      head.append(element("span", entry.version, "release-version"));
+      const when = Notes.dateLabel(entry.date);
+      if (when) head.append(element("span", when, "release-date"));
+      if (entry.version === version) head.append(element("span", "지금 버전", "release-badge"));
+      const list = element("ul", "", "release-items");
+      list.append(...entry.items.map((text) => element("li", text)));
+      item.append(head, element("p", entry.title, "release-title"), list);
+      return item;
+    }));
+  }
+
+  function openAbout(opener) {
+    renderAbout();
+    renderUpdate();
+    openDialog(ui.about, opener);
+  }
+
   function bind() {
     ui.prepare.addEventListener("click", prepareMeeting);
     ui["retry-analysis"].addEventListener("click", finishMeeting);
@@ -2259,7 +2447,11 @@
       refresh();
       ui.prepare.focus();
     });
-    for (const dialog of [ui["meeting-detail"], ui.settings, ui["settings-import"]]) bindDialog(dialog);
+    for (const dialog of [ui["meeting-detail"], ui.settings, ui["settings-import"], ui.about]) bindDialog(dialog);
+    ui["update-chip"].addEventListener("click", () => openAbout(ui["update-chip"]));
+    ui["open-about"].addEventListener("click", () => openAbout(ui["open-about"]));
+    ui["update-install"].addEventListener("click", startUpdate);
+    ui["update-check"].addEventListener("click", checkUpdate);
     ui["output-format"].addEventListener("change", () => {
       state.resultStored = false;
       state.notesSaved = false;
@@ -2305,6 +2497,9 @@
     ui["settings-data"].hidden = !webview;
     for (const kind of STORAGE_KINDS) ui[`pick-${kind}`].hidden = !webview;
     ui["open-data-folder"].addEventListener("click", () => webview?.postMessage("open-data-folder"));
+    // 깃허브 릴리즈 페이지는 Windows 창이 정해 둔 주소로만 기본 브라우저에서 연다. 창 밖(개발용 브라우저)에서는 숨긴다.
+    ui["update-page"].hidden = !webview;
+    ui["update-page"].addEventListener("click", () => webview?.postMessage("open-update-page"));
     webview?.addEventListener("message", (event) => onHostMessage(event.data));
     ui.clear.addEventListener("click", () => { if (clearLocal()) resetMeetingForm(); });
     ui.shutdown.addEventListener("click", shutdown);
@@ -2340,6 +2535,8 @@
       await loadHistory();
       refresh();
       announce(canAnalyze() ? "‘회의 시작’을 누르면 바로 녹음합니다." : state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요." : "처음이면 상단 ‘설정’에서 API 키를 등록하세요.");
+      // 새 버전 확인은 회의 준비를 기다리게 하지 않도록 맨 마지막에 따로 시작한다.
+      loadUpdate();
     } catch (error) {
       announce(`서버 연결을 확인하지 못했습니다. ${error.message}`);
     }
