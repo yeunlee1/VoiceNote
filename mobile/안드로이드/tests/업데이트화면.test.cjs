@@ -58,6 +58,10 @@ test('설치 확인을 기다리면 화면이 닫혔을 때 설치 계속을 보
   assert.equal(view({ status: 'confirming', version: '1.5.1' }).action, null);
   assert.deepEqual(view({ status: 'confirming', version: '1.5.1', canContinue: true }).action, { kind: 'confirm', label: '설치 계속', disabled: false });
   assert.equal(view({ status: 'confirming', version: '1.5.1' }).note, '설치 확인 대기');
+  // 설치 계속도 앱이 곧 닫히므로, 사라질 입력이 있으면 단추를 잠그고 이유를 단추 가까이에 보인다.
+  const lockedContinue = view({ status: 'confirming', version: '1.5.1', canContinue: true }, ['내 형식 변경을 저장한 뒤 설치하세요.']);
+  assert.deepEqual(lockedContinue.action, { kind: 'confirm', label: '설치 계속', disabled: true });
+  assert.equal(lockedContinue.lock, '내 형식 변경을 저장한 뒤 설치하세요.');
   const aborted = view({ status: 'ready', version: '1.5.1', error: { code: 'UPDATE_INSTALL_FAILED', message: '설치가 취소되거나 중단되었습니다. 다시 설치를 눌러 주세요.' } });
   assert.deepEqual(aborted.detail, { text: '설치가 취소되거나 중단되었습니다. 다시 설치를 눌러 주세요.', tone: 'error' });
 });

@@ -100,6 +100,13 @@ module.exports = async ({ viewport, load, click, evaluate, until, wait, shot, ch
     await click('#update-action');
     check(width + 'px 설치 계속은 설치 확인 화면을 다시 연다', await until("__mock.updateCalls.includes('updateConfirm')"));
     await closeAbout();
+    // 설치 계속도 앱이 곧 닫히므로, 저장하지 않은 내 형식이 있으면 잠그고 이유를 보인다.
+    await click('#open-settings');
+    await evaluate("(()=>{const n=document.getElementById('custom-name');n.value='주간 보고';n.dispatchEvent(new Event('input',{bubbles:true}));})()");
+    await click('#open-about');
+    check(width + 'px 설치 계속도 저장하지 않은 내 형식이 있으면 잠그고 이유를 보인다', (await evaluate("document.getElementById('update-action').disabled&&document.getElementById('update-action').textContent==='설치 계속'")) && /내 형식/.test(await text('update-lock')), await text('update-lock'));
+    await closeAbout();
+    await click('#close-settings');
 
     // 앱에서 바로 설치할 수 없으면 깃허브에서 받도록 안내한다.
     await load('?update=manual');

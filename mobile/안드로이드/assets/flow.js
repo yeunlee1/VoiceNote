@@ -104,9 +104,10 @@
     let action = null;
     if (u.status === 'available') action = { kind: 'download', label: blocked ? '받아 두기' : '지금 업데이트', disabled: false };
     else if (u.status === 'ready') action = u.needsPermission ? { kind: 'permission', label: '설치 허용 켜기', disabled: false } : { kind: 'install', label: '설치', disabled: Boolean(blocked) };
-    else if (u.status === 'confirming' && u.canContinue) action = { kind: 'confirm', label: '설치 계속', disabled: false };
+    else if (u.status === 'confirming' && u.canContinue) action = { kind: 'confirm', label: '설치 계속', disabled: Boolean(blocked) };
     const error = u.error && u.status !== 'unknown' ? { text: u.error.message, tone: u.status === 'manual' ? 'info' : 'error' } : null;
-    const lockable = (u.status === 'available' || (u.status === 'ready' && !u.needsPermission)) && blocked;
+    // 설치·설치 계속은 앱이 곧 닫히므로 사라질 입력이 있으면 잠그고 그 이유를 단추 가까이에 보인다.
+    const lockable = (u.status === 'available' || (u.status === 'ready' && !u.needsPermission) || (u.status === 'confirming' && u.canContinue)) && blocked;
     return {
       status: u.status,
       note: notes[u.status] || null,

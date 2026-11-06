@@ -538,8 +538,11 @@
     $('update-check').disabled = v.check.disabled || state.updateRunning;
     $('update-fine').hidden = !v.fine;
   }
-  // 설치로 넘기기 직전의 마지막 확인이다. 막는 이유도, 기다리는 회의 준비 저장도 없어야 한다.
-  function readyToLeave() { return !updateReasons().length && !draftTimer && !state.draftSaving; }
+  // 설치로 넘기기 직전의 마지막 확인이다. 막는 이유도, 기다리는 회의 준비 저장도 없어야 한다. 넘기지 못하면 그 이유를 알린다.
+  function readyToLeave() {
+    const reason = updateReasons()[0] || (draftTimer || state.draftSaving ? '회의 준비 내용을 저장하는 중입니다. 잠시 뒤 다시 눌러 주세요.' : '');
+    if (reason) throw new Error(reason);
+  }
   async function runUpdate(kind) {
     if (state.updateRunning || !kind) return;
     state.updateRunning = true; state.updateError = ''; renderUpdate();
@@ -552,14 +555,14 @@
         if (updateReasons().length) return;
         await settleDraft();
         // 저장을 기다리는 사이 새로 생긴 입력·작업이 있으면 설치로 넘기지 않는다.
-        if (!readyToLeave()) return;
+        readyToLeave();
         applyUpdate(await call('updateInstall'));
       } else if (kind === 'permission') await call('updatePermission');
       else if (kind === 'confirm') {
         // 설치 화면을 다시 열면 곧 앱이 닫히므로 같은 확인을 한다.
         if (updateReasons().length) return;
         await settleDraft();
-        if (!readyToLeave()) return;
+        readyToLeave();
         applyUpdate(await call('updateConfirm'));
       }
     } catch (error) {
