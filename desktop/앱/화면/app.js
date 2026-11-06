@@ -414,6 +414,8 @@
   }
 
   async function saveCustom() {
+    // 앞선 저장·삭제가 끝나기 전에는 새로 보내지 않는다. 겹치면 먼저 끝난 쪽이 저장 중 표시를 풀어 버린다.
+    if (state.customBusy) return;
     const value = editorValue(true);
     // 저장이 끝나기 전에 업데이트로 창이 닫히지 않도록 저장 중임을 표시한다.
     state.customBusy = true;
@@ -429,7 +431,7 @@
   }
 
   async function deleteCustom() {
-    if (!state.customFormat || !confirm(`‘${state.customFormat.name}’ 형식을 삭제할까요? 이미 저장된 회의는 그대로입니다.`)) return;
+    if (state.customBusy || !state.customFormat || !confirm(`‘${state.customFormat.name}’ 형식을 삭제할까요? 이미 저장된 회의는 그대로입니다.`)) return;
     state.customBusy = true;
     try { await api("/api/custom-format", { method: "DELETE" }); }
     finally { state.customBusy = false; }

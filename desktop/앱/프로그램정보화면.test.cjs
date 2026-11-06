@@ -206,6 +206,30 @@ test('내 형식을 저장하는 중에는 설정 창을 닫아도 설치하지 
   assert.equal(review.updateBlockers().length, 0);
 });
 
+test('내 형식 저장을 겹쳐 눌러도 두 번째는 보내지 않고, 첫 저장이 끝날 때까지 설치를 막는다', async () => {
+  let release;
+  const until = new Promise((resolve) => { release = resolve; });
+  const saved = { name: '주간 보고', sections: [{ key: 'overview', title: '요약' }], instruction: '' };
+  const review = fixture({ updates: [snapshot('ready', { received: 26_214_400 })], hold: { url: '/api/custom-format', until, body: { customFormat: saved } } });
+  await review.loadUpdate();
+  review.ui.settings.open = true;
+  review.loadEditor();
+  review.ui['custom-name'].value = '주간 보고';
+  const first = review.saveCustom();
+  const second = review.saveCustom();
+  // 두 번째 저장은 보내지 않고 바로 끝나야 한다. 보냈다면 붙잡힌 응답을 기다리며 끝나지 않으므로 짧게만 기다린다.
+  const outcome = await Promise.race([second.then(() => 'returned', () => 'returned'), review.wait(200).then(() => 'waiting')]);
+  try {
+    assert.equal(outcome, 'returned');
+    assert.equal(review.count('/api/custom-format'), 1);
+    assert.match(review.updateBlockers()[0] || '', /저장하는 중/);
+  } finally { release(); }
+  // 저장 뒤 화면 갱신은 이 시험 틀의 가짜 요소로는 끝까지 돌지 않으므로, 저장 중 표시가 풀리는지만 본다.
+  await first.catch(() => {});
+  assert.equal(review.state.customBusy, false);
+  assert.doesNotMatch(review.updateBlockers()[0] || '', /저장하는 중/);
+});
+
 test('저장한 평가의 별점과 의견을 모두 지운 상태는 저장할 수 없으므로 설치를 막지 않는다', async () => {
   const review = fixture({ updates: [snapshot('ready', { received: 26_214_400 })] });
   await review.loadUpdate();
