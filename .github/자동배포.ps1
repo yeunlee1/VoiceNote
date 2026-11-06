@@ -41,6 +41,13 @@ function Get-AppVersion {
   $values[0]
 }
 
+function Get-VersionCode {
+  # 휴대폰이 새 버전으로 알아보는 번호다. 업데이트 목록에도 같은 번호를 적는다.
+  $found = [regex]::Match([IO.File]::ReadAllText((Join-Path $root 'mobile/안드로이드/AndroidManifest.xml')), 'android:versionCode="(\d+)"')
+  if (-not $found.Success) { throw 'AndroidManifest.xml에서 versionCode를 찾지 못했습니다.' }
+  [int]$found.Groups[1].Value
+}
+
 function Invoke-Tests([string]$directory, [string[]]$patterns) {
   Push-Location $directory
   try {
@@ -140,8 +147,34 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not ($certificates -match "SHA-256 digest: $releaseCertificate")) { throw 'APK 서명 인증서가 이전 버전과 달라 업데이트 설치가 막힙니다.' }
   }
 
-  Copy-Item -LiteralPath $installers[0].FullName -Destination (Join-Path $OutputDir "VoiceNote-$version-Windows-Setup.exe")
-  Copy-Item -LiteralPath $apk -Destination (Join-Path $OutputDir "VoiceNote-$version-Android.apk")
+  $windowsAsset = Join-Path $OutputDir "VoiceNote-$version-Windows-Setup.exe"
+  $androidAsset = Join-Path $OutputDir "VoiceNote-$version-Android.apk"
+  Copy-Item -LiteralPath $installers[0].FullName -Destination $windowsAsset
+  Copy-Item -LiteralPath $apk -Destination $androidAsset
+
+  # 앱이 새 버전을 받기 전에 확인하는 업데이트 목록을 Android 서명 키로 서명한다. 태그 배포는 개인 서명 인증서가 아니면 멈춘다.
+  Write-Host '== 업데이트 목록 서명'
+  $versionCode = Get-VersionCode
+  $manifestArguments = @{ Version = $version; VersionCode = $versionCode; WindowsInstaller = $windowsAsset; AndroidApk = $androidAsset; SigningDir = $signing; KeystoreName = 'release.p12'; Jdk = $Jdk; OutputDir = $OutputDir }
+  if ($Tag) { $manifestArguments.ExpectedCertificateSha256 = $releaseCertificate }
+  & (Join-Path $PSScriptRoot '업데이트목록.ps1') @manifestArguments
+  # 앱과 같은 검증기로 다시 확인한다. 리허설은 버리는 서명의 인증서로, 태그 배포는 앱에 넣은 인증서로 본다.
+  $checkArguments = @((Join-Path $PSScriptRoot '업데이트목록확인.cjs'), '--manifest', (Join-Path $OutputDir "VoiceNote-$version-update.json"), '--version', $version, '--version-code', "$versionCode", '--windows', $windowsAsset, '--android', $androidAsset)
+  $rehearsalCertificate = ''
+  if (-not $Tag) {
+    $rehearsalCertificate = Join-Path $signing 'rehearsal.pem'
+    & (Join-Path $Jdk 'bin\keytool.exe') -exportcert -rfc -alias rehearsal -keystore $keystore -storepass $throwaway -file $rehearsalCertificate *> $null
+    if ($LASTEXITCODE -ne 0) { throw '시험 서명의 인증서를 꺼내지 못했습니다.' }
+    $checkArguments += '--certificate', $rehearsalCertificate
+  }
+  & node @checkArguments
+  if ($LASTEXITCODE -ne 0) { throw '업데이트 목록 확인이 실패했습니다.' }
+
+  # 실제로 설치하고 업데이트해 보는 시험은 러너에서만, 버리는 서명을 쓰는 리허설에서만 한다. 사람이 쓰는 PC에는 설치하지 않는다.
+  if ($env:GITHUB_ACTIONS -and -not $Tag) {
+    Write-Host '== 업데이트 설치 시험'
+    & (Join-Path $PSScriptRoot '업데이트설치시험.ps1') -Files $OutputDir -Version $version -Certificate $rehearsalCertificate -Work (Join-Path $work 'update-e2e')
+  }
   Write-Host '== 결과'
   foreach ($file in Get-ChildItem -LiteralPath $OutputDir -File) {
     Write-Host ('{0} | {1} 바이트 | {2}' -f $file.Name, $file.Length, (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash)
