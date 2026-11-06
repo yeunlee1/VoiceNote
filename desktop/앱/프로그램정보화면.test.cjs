@@ -140,6 +140,25 @@ test('받는 동안 녹음을 시작하면 설치는 미루고 회의를 마친 
   assert.equal(review.count('/api/update/launch'), 0);
 });
 
+test('받는 동안 녹음을 시작했다가 받기 전에 마쳐도 자동으로 설치하지 않고 다시 누르게 한다', async () => {
+  const review = fixture({ updates: [snapshot('available'), snapshot('downloading'), snapshot('downloading'), snapshot('ready', { received: 26_214_400 })] });
+  await review.loadUpdate();
+  await review.startUpdate();
+  assert.equal(review.state.updateIntent, true);
+  // 녹음을 시작한다(화면 갱신이 예약을 취소한다). 받기가 끝나기 전에 녹음을 마치고 저장까지 끝낸다.
+  review.state.recorders.add({ recorder: { state: 'recording' } });
+  review.refresh();
+  review.state.recorders.clear();
+  review.refresh();
+  await review.wait(80);
+  assert.equal(review.ui['about-update'].dataset.status, 'ready');
+  assert.equal(review.count('/api/update/launch'), 0);
+  assert.equal(review.ui['update-install'].textContent, '설치 시작');
+  assert.equal(review.ui['update-install'].disabled, false);
+  await review.launchUpdate();
+  assert.equal(review.count('/api/update/launch'), 1);
+});
+
 test('저장하지 않은 회의 내용이 있으면 설치를 시작하지 않고 이유를 보인다', async () => {
   const review = fixture({ updates: [snapshot('ready', { received: 26_214_400 })] });
   await review.loadUpdate();

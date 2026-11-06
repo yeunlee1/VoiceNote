@@ -496,6 +496,8 @@
   }
 
   function refresh() {
+    // 받는 동안 녹음·분석·저장이 시작되면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 다시 눌러야 설치한다.
+    if (state.updateIntent && (state.recorders.size || state.permissionPending || state.recorder || state.aiController || state.flowBusy || state.archiveBusy)) state.updateIntent = false;
     renderResultActions();
     const recording = Boolean(state.recorder && !state.recordingStopping);
     // 업데이트 설치를 시작하면 창이 곧 닫히므로 녹음·불러오기·분석·지난 회의 열기를 함께 막는다.
