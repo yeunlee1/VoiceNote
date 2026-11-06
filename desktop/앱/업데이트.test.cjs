@@ -270,6 +270,25 @@ test('설치 묶음을 끝내지 못하면 취소 표시를 남기고, 남은 �
   assert.equal(spawned.length, 2);
 });
 
+test('오래된 취소 표시를 지우지 못하면 설치파일을 띄우지 않고 직접 설치를 안내한다', async (t) => {
+  // 띄우면 새 설치파일도 같은 표시를 보고 멈추고, 실패하며 표시를 새로 남겨 '잠시 뒤 다시'가 끝없이 되풀이된다.
+  const spawned = [];
+  const working = launcher('spawn');
+  const spawn = (file, args, options) => { spawned.push(args); return working.spawn(file, args, options); };
+  const { updater, tempRoot } = fixture(t, { start: { spawn, calls: [] } });
+  updater.ensureChecked();
+  await updater.settled();
+  await updater.download();
+  await updater.settled();
+  // 지울 수 없는 표시를 흉내 내려고 표시 자리에 비어 있지 않은 폴더를 두고 오래된 것으로 만든다.
+  const cancel = path.join(tempRoot, 'VoiceNote-업데이트', '1.5.1', '업데이트상태.txt.cancel');
+  fs.mkdirSync(path.join(cancel, '안'), { recursive: true });
+  const old = new Date(Date.now() - 4 * 60 * 1000);
+  fs.utimesSync(cancel, old, old);
+  await assert.rejects(updater.launch(), (error) => error.code === 'UPDATE_LAUNCH_FAILED' && /직접 받아/.test(error.message));
+  assert.equal(spawned.length, 0);
+});
+
 test('오래 남은 취소 표시는 남은 설치가 없는 것으로 보고 지운 뒤 다시 띄운다', async (t) => {
   const silent = launcher('silent'), working = launcher('spawn');
   let attempt = 0;

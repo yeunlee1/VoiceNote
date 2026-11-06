@@ -33,6 +33,7 @@ const MESSAGES = {
   UPDATE_NOT_READY: '설치할 업데이트가 아직 준비되지 않았습니다.',
   UPDATE_LAUNCH_FAILED: `설치파일을 실행하지 못했습니다. 보안 프로그램이 막았는지 확인하거나 ${DIRECT}`,
   UPDATE_LAUNCH_BUSY: '앞서 띄운 설치파일을 정리하는 중입니다. 잠시 뒤 다시 눌러 주세요.',
+  UPDATE_CANCEL_STUCK: `업데이트 임시 파일을 지우지 못해 앱에서 바로 설치할 수 없습니다. ${DIRECT}`,
 };
 // 끝내지 못한 설치파일이 취소 표시를 보고 지울 때까지 기다리는 최대 시간이다. 설치파일은 앱이 켜져 있는 동안 0.25초마다 이 표시를 본다.
 const CANCEL_GRACE = 3 * 60 * 1000;
@@ -240,7 +241,10 @@ function createUpdater({ enabled = false, currentVersion, appDir, hostPid = 0, s
     try { pending = fs.statSync(cancelFile); } catch {}
     if (pending && Date.now() - pending.mtimeMs < CANCEL_GRACE) throw fail('UPDATE_LAUNCH_BUSY');
     await fs.promises.rm(statusFile, { force: true }).catch(() => {});
+    // 오래된 표시를 지우지 못하면 새 설치파일도 그 표시를 보고 멈추고, 실패하며 표시를 새로 남겨 같은 안내가 끝없이 되풀이된다.
+    // 그러니 띄우지 않고 직접 설치를 안내한다.
     await fs.promises.rm(cancelFile, { force: true }).catch(() => {});
+    if (fs.existsSync(cancelFile)) throw fail('UPDATE_LAUNCH_FAILED', MESSAGES.UPDATE_CANCEL_STUCK);
     let child = null;
     try {
       await new Promise((resolve, reject) => {
