@@ -293,6 +293,22 @@ test('요약과 줄이기 모두 일본어·중국어 글자를 섞지 말라고
   for (const call of server.calls) assert.match(call.body.input.filter(item => item.role === 'system').map(item => item.content).join('\n'), /일본어·중국어 글자를 섞지/);
 });
 
+test('AI 결과에 섞인 일본어·중국어 글자를 지우고 나머지 글은 그대로 둔다', async t => {
+  const mixed = { suggestedTitle: '基準', overview: '문제を 기준표', topics: [{ title: '양식', points: ['이력·表示·입력', 'A・B 그대로'] }], decisions: ['QR 코드로 통일'], actions: [{ task: '필터と 월말 보고', owner: '李明 과장', due: null }], openQuestions: ['스ーパー 확인'] };
+  const server = await start(t, () => [200, completed(mixed)]);
+  const result = await server.post('/api/summary', { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '' });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.minutes, { overview: '문제 기준표', topics: [{ title: '양식', points: ['이력·입력', 'A・B 그대로'] }], decisions: ['QR 코드로 통일'], actions: [{ task: '필터 월말 보고', owner: '과장', due: null }], openQuestions: ['스 확인'] });
+});
+
+test('줄이기 결과에 섞인 일본어·중국어 글자도 지운다', async t => {
+  const server = await start(t, () => [200, completed({ overview: '전체 방향 | 짧게 씁니다を.', topics: [{ title: '양식', points: ['합쳐서 씁니다表示.'] }] })]);
+  const result = await server.post('/api/summary/compact', request());
+  assert.equal(result.status, 200);
+  assert.equal(result.body.minutes.overview, '전체 방향 | 짧게 씁니다.');
+  assert.deepEqual(result.body.minutes.topics, [{ title: '양식', points: ['합쳐서 씁니다.'] }]);
+});
+
 const audio = new Uint8Array([26, 69, 223, 163, 0, 0, 0, 0, 0, 0, 0, 0]);
 const transcribed = { text: '전사 결과', usage: { type: 'duration', seconds: 1 } };
 

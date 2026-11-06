@@ -103,6 +103,8 @@ public final class AndroidChecks extends Instrumentation {
             JSONObject legacy=new JSONObject().put("title","옛 회의").put("date","2026-09-30").put("dailySequence",1);
             expect(Store.format(legacy,minutes()).contains("상세 회의 내용")&&Store.format(new JSONObject(legacy.toString()).put("outputFormat","summary"),minutes()).contains("주요 내용"),"old records keep meeting layout, summary has its layout");
             expect(Store.format(new JSONObject(legacy.toString()).put("outputFormat","custom"),minutes()).contains("상세 회의 내용"),"내 형식 정의가 없는 옛 결과도 회의록으로 열고 복사한다");
+            JSONObject mixed=Ai.withoutForeignScript(new JSONObject("{\"suggestedTitle\":\"基準\",\"overview\":\"문제を 기준표\",\"topics\":[{\"title\":\"양식\",\"points\":[\"이력·表示·입력\"]}],\"decisions\":[],\"actions\":[{\"task\":\"필터と 월말\",\"owner\":null,\"due\":\"다음 주\"}],\"openQuestions\":[\"A・B\"]}"));
+            expect(!mixed.has("suggestedTitle")&&mixed.getString("overview").equals("문제 기준표")&&mixed.getJSONArray("topics").getJSONObject(0).getJSONArray("points").getString(0).equals("이력·입력")&&mixed.getJSONArray("actions").getJSONObject(0).getString("task").equals("필터 월말")&&mixed.getJSONArray("actions").getJSONObject(0).isNull("owner")&&mixed.getJSONArray("actions").getJSONObject(0).getString("due").equals("다음 주")&&mixed.getJSONArray("openQuestions").getString(0).equals("A・B"),"AI 결과에 섞인 일본어·중국어 글자를 지운다");
 
             // 공용 기본 키 체험: 개인 키를 잠시 비우고 시험용 상태 파일과 모의 키로만 확인한다.
             Store.sessionKey=null;prefs.edit().remove("key").commit();

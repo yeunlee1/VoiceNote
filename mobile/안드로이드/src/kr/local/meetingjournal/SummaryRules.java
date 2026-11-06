@@ -3,9 +3,16 @@ package kr.local.meetingjournal;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 final class SummaryRules {
     private SummaryRules(){}
+    private static final Pattern FOREIGN_SCRIPT=Pattern.compile("[\\p{IsHiragana}\\p{IsKatakana}\\p{IsHan}\\u30FC]+");
+    static String withoutForeignText(String value){
+        // AI가 결과에 섞어 쓴 일본어·중국어 글자를 지운다. 데스크톱 출력형식.js withoutForeignText와 같은 규칙이다.
+        if(value==null||!FOREIGN_SCRIPT.matcher(value).find())return value;
+        return FOREIGN_SCRIPT.matcher(value).replaceAll("").replaceAll("·{2,}","·").replaceAll(" {2,}"," ").replaceAll("^ +| +$","");
+    }
     static int goal(String format){
         if("summary".equals(format))return 1000;
         if("tasks".equals(format))return 2000;

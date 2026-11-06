@@ -20156,7 +20156,8 @@ openQuestions는 '미확정 사항'입니다. 다음 회의에서 실제로 확�
     }
     const minutes = (compact ? compactSchema : minutesSchema).safeParse(parsed);
     if (!minutes.success) throw malformed();
-    const merged = compact ? mergeCompact(input2.minutes, minutes.data) : minutes.data;
+    const cleaned = meetingFormats.withoutForeignScript(minutes.data);
+    const merged = compact ? mergeCompact(input2.minutes, cleaned) : cleaned;
     return {
       minutes: merged,
       ...compact ? { shortened: merged !== input2.minutes } : {},

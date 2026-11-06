@@ -171,11 +171,23 @@ final class Ai {
             if(cache.exists())return new JSONObject(Store.read(cache));
             JSONObject body=requestBody(instructions,custom);
             body.getJSONArray("input").put(new JSONObject().put("role","user").put("content",input.toString()));
-            JSONObject merged=mergeCompact(minutes,new JSONObject(minutesText(record,body)));
+            JSONObject merged=mergeCompact(minutes,withoutForeignScript(new JSONObject(minutesText(record,body))));
             // 모델이 줄이지 못한 답을 주면 실패로 알리고, 성공으로 재사용하지 않게 저장하지 않는다.
             if(merged==minutes){shortenFailed=true;return minutes;}
             Store.write(cache,merged.toString());return merged;
         }catch(Exception ex){check();shortenFailed=true;return minutes;}
+    }
+    static JSONObject withoutForeignScript(JSONObject minutes)throws Exception {
+        // AI가 섞어 쓴 일본어·중국어 글자를 모든 문자열에서 지우고, 비게 된 제목은 뺀다. 데스크톱 출력형식.js withoutForeignScript와 같은 규칙이다.
+        JSONObject result=(JSONObject)withoutForeign(minutes);
+        if(result.has("suggestedTitle")&&!result.isNull("suggestedTitle")&&result.optString("suggestedTitle").isEmpty())result.remove("suggestedTitle");
+        return result;
+    }
+    private static Object withoutForeign(Object value)throws Exception {
+        if(value instanceof String)return SummaryRules.withoutForeignText((String)value);
+        if(value instanceof JSONArray){JSONArray in=(JSONArray)value,out=new JSONArray();for(int i=0;i<in.length();i++)out.put(withoutForeign(in.get(i)));return out;}
+        if(value instanceof JSONObject){JSONObject in=(JSONObject)value,out=new JSONObject();for(Iterator<String> keys=in.keys();keys.hasNext();){String key=keys.next();out.put(key,withoutForeign(in.get(key)));}return out;}
+        return value;
     }
     static JSONObject mergeCompact(JSONObject before,JSONObject after)throws Exception {
         // 모델 답에서 overview와 topics만 쓴다. 더 짧아지지 않았거나 있던 핵심 요약·주제를 비운 답은 버리고 원래 결과를 쓴다. 데스크톱 mergeCompact와 같은 규칙이다.
@@ -238,7 +250,7 @@ final class Ai {
             try{JSONObject body=requestBody(instructions,custom);
                 if(feedbackInstructions!=null)body.getJSONArray("input").put(new JSONObject(feedbackInstructions));
                 body.getJSONArray("input").put(new JSONObject().put("role","user").put("content",input.toString()));
-                JSONObject minutes=new JSONObject(minutesText(record,body));minutes.getString("overview");minutes.getJSONArray("topics");minutes.getJSONArray("decisions");minutes.getJSONArray("actions");minutes.getJSONArray("openQuestions");Store.write(cache,minutes.toString());return minutes;
+                JSONObject minutes=withoutForeignScript(new JSONObject(minutesText(record,body)));minutes.getString("overview");minutes.getJSONArray("topics");minutes.getJSONArray("decisions");minutes.getJSONArray("actions");minutes.getJSONArray("openQuestions");Store.write(cache,minutes.toString());return minutes;
             }catch(Limit limit){if(text.length()<=2000||extra>=6)throw new IOException("길이 한도를 복구하지 못했습니다. 전사와 성공 구간은 저장되어 있습니다.");parts=new JSONArray(TextChunks.split(text,(text.length()+1)/2));Store.write(split,parts.toString());}
         }
         progress.update("길이 한도에 도달해 작은 구간으로 나눠 분석합니다.");JSONObject result=previous;

@@ -131,5 +131,22 @@
     return words;
   }
 
-  return { LABELS, DESCRIPTIONS, KEYS, KEY_LABELS, LIMITS, LENGTH_GOALS, SAMPLE, format, validateCustom, customInstruction, actionLine, customSections, customText, defaultCustom, minutesLengths, compactTarget, participantKeywords };
+  // AI가 결과에 섞어 쓴 일본어·중국어 글자(히라가나·가타카나·한자와 장음 부호)를 지운다(2026-11-06 사용자 결정). 휴대폰 SummaryRules.java가 같은 규칙으로 지운다.
+  const FOREIGN_SCRIPT = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}\u30FC]+/gu;
+  function withoutForeignText(value) {
+    if (typeof value !== 'string' || value.search(FOREIGN_SCRIPT) < 0) return value;
+    // 지운 자리에 남는 겹친 공백과 가운뎃점은 하나로 줄이고 앞뒤 공백을 뺀다.
+    return value.replace(FOREIGN_SCRIPT, '').replace(/·{2,}/g, '·').replace(/ {2,}/g, ' ').replace(/^ +| +$/g, '');
+  }
+  function withoutForeignScript(value) {
+    // 결과의 모든 문자열에서 지우고, 비게 된 제목은 빼서 다음 구간의 결과 검사를 통과하게 한다.
+    const clean = item => typeof item === 'string' ? withoutForeignText(item)
+      : Array.isArray(item) ? item.map(clean)
+        : item && typeof item === 'object' ? Object.fromEntries(Object.entries(item).map(([key, entry]) => [key, clean(entry)])) : item;
+    const result = clean(value);
+    if (result && result.suggestedTitle === '') delete result.suggestedTitle;
+    return result;
+  }
+
+  return { LABELS, DESCRIPTIONS, KEYS, KEY_LABELS, LIMITS, LENGTH_GOALS, SAMPLE, format, validateCustom, customInstruction, actionLine, customSections, customText, defaultCustom, minutesLengths, compactTarget, participantKeywords, withoutForeignText, withoutForeignScript };
 });
