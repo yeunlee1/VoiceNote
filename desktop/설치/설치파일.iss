@@ -72,6 +72,7 @@ var
   BackupStarted: Boolean;
   Installed: Boolean;
   RestoreFailed: Boolean;
+  LeftoverBackup: Boolean;
   AppFolder: String;
   BackupFolder: String;
 
@@ -177,9 +178,12 @@ begin
   Result := '';
   AppFolder := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
   BackupFolder := AppFolder + '.업데이트전';
-  if DirExists(BackupFolder) and not DelTree(BackupFolder, True, True, True) then
+  { 보관 폴더가 남아 있으면 지난 업데이트가 원래 파일을 다 되돌리지 못한 것이다. 그 폴더가 정상 파일의 마지막 사본이므로
+    지우거나 덮어쓰지 않고 자동 설치를 멈춘다. 사람이 설치파일로 직접 다시 설치하면(ssPostInstall) 그때 정리된다. }
+  if DirExists(BackupFolder) then
   begin
-    Result := '지난 업데이트의 보관 폴더를 지우지 못해 설치를 멈췄습니다: ' + BackupFolder;
+    LeftoverBackup := True;
+    Result := '지난 업데이트에서 되돌리지 못한 파일이 남아 있어 자동 설치를 멈췄습니다. 깃허브에서 설치파일을 직접 받아 다시 설치하세요.';
     Exit;
   end;
   ExtractTemporaryFile('업데이트백업목록.txt');
@@ -234,6 +238,9 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  { 업데이트든 사람이 직접 한 설치든 설치를 마치면 앱 파일이 온전하므로, 남아 있던 업데이트 보관 폴더를 정리한다. }
+  if CurStep = ssPostInstall then
+    DelTree(RemoveBackslashUnlessRoot(ExpandConstant('{app}')) + '.업데이트전', True, True, True);
   if not UpdateMode then Exit;
   if CurStep = ssInstall then
     WriteStatus('installing')
@@ -241,7 +248,6 @@ begin
   begin
     Installed := True;
     WriteStatus('installed');
-    DelTree(BackupFolder, True, True, True);
   end;
 end;
 
@@ -264,6 +270,9 @@ begin
       DelTree(BackupFolder, True, True, True);
     end;
   end
+  else if LeftoverBackup then
+    { 지난 업데이트의 보관 폴더가 남아 있어 아무것도 바꾸지 않고 멈췄다. 사람이 직접 다시 설치해야 한다. }
+    WriteStatus('blocked')
   else if AppClosed and not Installed then
     { 파일을 바꾸기 전에 멈췄다. 옛 앱은 그대로다. }
     WriteStatus('restored');

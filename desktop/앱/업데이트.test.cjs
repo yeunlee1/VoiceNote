@@ -254,6 +254,13 @@ test('다음 실행 때 지난 업데이트 결과를 한 번 읽어 알린다',
   assert.equal(fs.existsSync(path.join(back.tempRoot, 'VoiceNote-업데이트', '1.5.1', '업데이트상태.txt')), false);
   const none = fixture(t);
   assert.equal(none.updater.status().lastResult, null);
+  // 지난 업데이트가 다 되돌리지 못한 파일이 남아 자동 설치를 멈췄으면 직접 다시 설치하라고 알린다.
+  const blocked = fixture(t, { current: '1.5.0', before: (base) => {
+    fs.mkdirSync(path.join(base, '1.5.1'), { recursive: true });
+    fs.writeFileSync(path.join(base, '1.5.1', '업데이트상태.txt'), 'blocked');
+  } });
+  assert.equal(blocked.updater.status().lastResult.outcome, 'blocked');
+  assert.match(blocked.updater.status().lastResult.message, /직접 받아 다시 설치/);
 });
 
 test('받은 뒤 파일이 바뀌었으면 설치파일을 띄우지 않는다', async (t) => {

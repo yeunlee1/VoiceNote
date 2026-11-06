@@ -21,6 +21,7 @@ const RESULTS = {
   restored: (version) => `${version} 버전 업데이트를 설치하지 못해 이전 버전으로 되돌렸습니다. 다시 받아 설치하거나 깃허브에서 직접 받아 설치하세요.`,
   failed: (version) => `${version} 버전 업데이트를 마치지 못했습니다. 앱이 이상하면 깃허브에서 설치파일을 직접 받아 다시 설치하세요.`,
   timeout: (version) => `앱이 닫히지 않아 ${version} 버전 업데이트를 멈췄습니다. 다시 시도하세요.`,
+  blocked: (version) => `지난 업데이트에서 되돌리지 못한 파일이 남아 있어 ${version} 버전 자동 설치를 멈췄습니다. 깃허브에서 설치파일을 직접 받아 다시 설치하세요.`,
 };
 const DIRECT = '깃허브 릴리즈 페이지에서 설치파일을 직접 받아 설치하세요.';
 const MESSAGES = {
@@ -90,7 +91,7 @@ function createUpdater({ enabled = false, currentVersion, appDir, hostPid = 0, s
     const done = names.find((name) => name === currentVersion && readStatus(path.join(base, name, STATUS_FILE)) === 'installed');
     if (done) return { outcome: 'installed', version: done, message: RESULTS.installed(done) };
     const failed = names.filter((name) => check.compareVersions(name, currentVersion) > 0).sort((a, b) => check.compareVersions(b, a))
-      .map((name) => ({ name, outcome: readStatus(path.join(base, name, STATUS_FILE)) })).find((item) => ['restored', 'failed', 'timeout'].includes(item.outcome));
+      .map((name) => ({ name, outcome: readStatus(path.join(base, name, STATUS_FILE)) })).find((item) => ['restored', 'failed', 'timeout', 'blocked'].includes(item.outcome));
     if (!failed) return null;
     try { fs.rmSync(path.join(base, failed.name, STATUS_FILE), { force: true }); } catch {}
     return { outcome: failed.outcome, version: failed.name, message: RESULTS[failed.outcome](failed.name) };
