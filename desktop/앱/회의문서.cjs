@@ -15,9 +15,10 @@ function markdown(record) {
     return [...head, '## 업무 요약', m.overview, '', '## 할 일', ...(m.actions.length ? m.actions.map(action) : ['- 확인된 할 일 없음']), '',
       ...list('미확정 항목', m.openQuestions), ...list('결정 사항', m.decisions), ...topics('참고 내용')].join('\n');
   return [...head,
-    '## 핵심 요약', m.overview, '', '## 상세 회의 내용', '', '## 합의된 방향', ...m.decisions.flatMap(x => [x, '']),
-    ...m.topics.flatMap(t => [`## ${t.title}`, '', ...t.points.flatMap(p => [p, ''])]), '## 다음 할 일',
+    '## 핵심 요약', m.overview, '', '## 다음 할 일',
     ...m.actions.map(a => `- ${a.task} · 담당 ${a.owner || '미정'} · 기한 ${a.due || '미정'}`), '',
+    '## 상세 회의 내용', '', '## 합의된 방향', ...m.decisions.flatMap(x => [x, '']),
+    ...m.topics.flatMap(t => [`## ${t.title}`, '', ...t.points.flatMap(p => [p, ''])]),
     '## 미확정 사항', ...m.openQuestions.map(x => `- ${x}`), ''].join('\n');
 }
 
@@ -42,7 +43,7 @@ function plainText(record) {
     return `${head} · 핵심 요약\n\n핵심 요약\n${m.overview}\n\n주요 내용\n${topics()}\n합의된 방향\n${entries(m.decisions)}\n다음 할 일\n${actions(false)}\n미확정 사항\n${entries(m.openQuestions)}`;
   if (record.outputFormat === 'tasks')
     return `${head} · 업무 정리\n\n업무 요약\n${m.overview}\n\n할 일\n${actions(true)}\n확인 필요\n${entries(m.openQuestions)}\n결정 사항\n${entries(m.decisions)}\n관련 논의\n${topics()}`;
-  return `${head}\n\n핵심 요약\n${m.overview}\n\n상세 회의 내용\n\n합의된 방향\n${entries(m.decisions)}${topics()}\n다음 할 일\n${actions(false)}\n미확정 사항\n${entries(m.openQuestions)}`;
+  return `${head}\n\n핵심 요약\n${m.overview}\n\n다음 할 일\n${actions(false)}\n상세 회의 내용\n\n합의된 방향\n${entries(m.decisions)}${topics()}\n미확정 사항\n${entries(m.openQuestions)}`;
 }
 
 module.exports = { markdown, plainText };

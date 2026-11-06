@@ -6,6 +6,8 @@ param(
   [string]$ServerScript=(Join-Path $PSScriptRoot '..\..\desktop\앱\서버.cjs'),
   [string]$SigningDir='',
   [string]$DefaultKeyFile='',
+  # 자동 배포는 Java 도구가 읽도록 한글 없는 이름의 서명 파일을 넘긴다.
+  [string]$KeystoreName='회의록서명.p12',
   [switch]$DebugBuild
 )
 $ErrorActionPreference='Stop'
@@ -14,10 +16,17 @@ New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
 $suffix=[guid]::NewGuid().ToString('N')
 $toolLink=Join-Path $env:TEMP ('vn-tools-'+$suffix)
 $outLink=Join-Path $env:TEMP ('vn-out-'+$suffix)
-New-Item -ItemType Junction -Path $toolLink -Target $ToolRoot | Out-Null
-New-Item -ItemType Junction -Path $outLink -Target $OutputRoot | Out-Null
+# Java 도구는 자기 위치와 명령줄을 시스템 코드 페이지로 읽어 영어 Windows에서 한글 경로를 열지 못하므로 JDK와 소스도 한글 없는 정션으로 넘긴다.
+$sourceLink=Join-Path $env:TEMP ('vn-src-'+$suffix)
+$jdkLink=Join-Path $env:TEMP ('vn-jdk-'+$suffix)
+$previousJavaHome=$env:JAVA_HOME
 try {
-  $env:JAVA_HOME=(Get-ChildItem -LiteralPath (Join-Path $ToolRoot '도구\JDK') -Directory | Select-Object -First 1).FullName
+  # 준비 중 실패해도 finally가 이미 만든 정션을 풀도록 try 안에서 만든다.
+  New-Item -ItemType Junction -Path $toolLink -Target $ToolRoot | Out-Null
+  New-Item -ItemType Junction -Path $outLink -Target $OutputRoot | Out-Null
+  New-Item -ItemType Junction -Path $sourceLink -Target $PSScriptRoot | Out-Null
+  New-Item -ItemType Junction -Path $jdkLink -Target (Get-ChildItem -LiteralPath (Join-Path $ToolRoot '도구\JDK') -Directory | Select-Object -First 1).FullName | Out-Null
+  $env:JAVA_HOME=$jdkLink
   $javaBin=Join-Path $env:JAVA_HOME 'bin'
   $sdk=Join-Path $toolLink 'SDK'
   $tools=Join-Path $sdk 'build-tools\36.0.0'
@@ -48,8 +57,8 @@ try {
   $manifest=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'AndroidManifest.xml'))
   if($DebugBuild){$manifest=$manifest.Replace('<application ','<application android:debuggable="true" ').Replace('</manifest>','<instrumentation android:name="kr.local.meetingjournal.AndroidChecks" android:targetPackage="kr.local.meetingjournal" /></manifest>')}
   [IO.File]::WriteAllText((Join-Path $stage 'AndroidManifest.xml'),$manifest,$utf8)
-  $sources=@(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Recurse -Filter '*.java' | ForEach-Object {$_.FullName})
-  if($DebugBuild){$sources+=Join-Path $PSScriptRoot 'tests\AndroidChecks.java'}
+  $sources=@(Get-ChildItem -LiteralPath (Join-Path $sourceLink 'src') -Recurse -Filter '*.java' | ForEach-Object {$_.FullName})
+  if($DebugBuild){$sources+=Join-Path $sourceLink 'tests\AndroidChecks.java'}
   & (Join-Path $javaBin 'javac.exe') -encoding UTF-8 -source 8 -target 8 -Xlint:-options -bootclasspath "$androidJar;$(Join-Path $tools 'core-lambda-stubs.jar')" -d $classes @sources
   if($LASTEXITCODE -ne 0){throw 'Java 컴파일 실패'}
   $classFiles=@(Get-ChildItem -LiteralPath $classes -Recurse -Filter '*.class' | ForEach-Object {$_.FullName})
@@ -70,7 +79,7 @@ try {
   if($LASTEXITCODE -ne 0){throw 'APK 정렬 실패'}
   # 기존 설치본 위에 업데이트해 데이터를 보존하도록 기존 개인 서명을 읽기만 한다. 서명 파일이 없으면 만들지 않고 중단한다.
   $passwordFile=Join-Path $SigningDir '서명암호.txt'
-  $keystore=Join-Path $SigningDir '회의록서명.p12'
+  $keystore=Join-Path $SigningDir $KeystoreName
   if(!(Test-Path -LiteralPath $passwordFile) -or !(Test-Path -LiteralPath $keystore)){throw "서명 파일이 없습니다: $SigningDir"}
   $env:MEETING_SIGN_PASS=[IO.File]::ReadAllText($passwordFile)
   $output=Join-Path $outLink $(if($DebugBuild){'VoiceNote-android-test.apk'}else{'VoiceNote-android.apk'})
@@ -87,14 +96,16 @@ try {
   if($entries -notcontains 'assets/formats.js'){throw 'APK에 출력 형식 파일(formats.js)이 없습니다.'}
   foreach($format in 'meeting','summary','tasks'){if($entries -notcontains "assets/summary-$format.json"){throw "APK에 $format 요약 양식이 없습니다."}}
   if($entries -notcontains 'assets/summary-feedback.json'){throw 'APK에 의견 반영 지시문(summary-feedback.json)이 없습니다.'}
+  if($entries -notcontains 'assets/summary-compact.json'){throw 'APK에 결과 줄이기 지시문(summary-compact.json)이 없습니다.'}
   '의견 반영 지시문 포함: 예'
   "공용 기본 키 포함: $(if($entries -contains 'assets/default.key'){'예'}else{'아니요'})"
-  $korean=Join-Path $OutputRoot $(if($DebugBuild){((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.3.0-안드로이드-검증용.apk')}else{((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.3.0-안드로이드-설치본.apk')})
+  $korean=Join-Path $OutputRoot $(if($DebugBuild){((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.4.0-안드로이드-검증용.apk')}else{((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.4.0-안드로이드-설치본.apk')})
   Copy-Item -LiteralPath (Join-Path $OutputRoot (Split-Path $output -Leaf)) -Destination $korean -Force
   Get-Item -LiteralPath $korean | Select-Object FullName,Length
 } finally {
   $env:MEETING_SIGN_PASS=$null
   # 공용 키가 든 임시 자산과 서명 전 중간 APK는 산출물 폴더에 남기지 않는다.
   if($stage -and (Test-Path -LiteralPath (Join-Path $stage 'assets\default.key'))){foreach($name in 'assets\default.key','unsigned.apk','aligned.apk'){$file=Join-Path $stage $name;if(Test-Path -LiteralPath $file){[IO.File]::Delete((Get-Item -LiteralPath $file).FullName)}}}
-  foreach($link in $toolLink,$outLink){if(Test-Path -LiteralPath $link){(Get-Item -LiteralPath $link).Delete()}}
+  foreach($link in $toolLink,$outLink,$sourceLink,$jdkLink){if(Test-Path -LiteralPath $link){(Get-Item -LiteralPath $link).Delete()}}
+  $env:JAVA_HOME=$previousJavaHome
 }

@@ -7,7 +7,7 @@
   'use strict';
   const LABELS = Object.freeze({ meeting: '회의록', summary: '핵심 요약', tasks: '업무 정리', custom: '내 형식' });
   const DESCRIPTIONS = Object.freeze({
-    meeting: '회의에 없던 사람도 무엇을 왜 정했는지 알 수 있게 핵심 요약, 합의된 방향, 주제별 설명, 다음 할 일, 미확정 사항을 모두 씁니다.',
+    meeting: '회의에 없던 사람도 무엇을 왜 정했는지 알 수 있게 핵심 요약, 다음 할 일, 합의된 방향, 주제별 설명, 미확정 사항을 모두 씁니다.',
     summary: '짧은 시간에 흐름을 파악하도록 핵심 요약과 주요 주제를 중심으로 쓰고, 결정·할 일·확인할 점은 있는 것만 붙입니다.',
     tasks: '회의 뒤 바로 할 일을 담당·기한과 함께 먼저 보여 주고, 정해지지 않은 일과 결정 사항을 이어서 씁니다.',
     custom: '들어갈 항목과 순서, 항목 이름, AI에게 줄 추가 지시를 직접 정한 형식입니다.',
@@ -15,6 +15,8 @@
   const KEYS = Object.freeze(['overview', 'topics', 'decisions', 'actions', 'openQuestions']);
   const KEY_LABELS = Object.freeze({ overview: '핵심 요약', topics: '주요 내용', decisions: '결정 사항', actions: '할 일', openQuestions: '확인 필요' });
   const LIMITS = Object.freeze({ name: 30, title: 30, instruction: 1000 });
+  // 결과 문서의 목표 글자 수다. 휴대폰 SummaryRules.java와 같은 값을 쓴다.
+  const LENGTH_GOALS = Object.freeze({ meeting: 3000, summary: 1000, tasks: 2000, custom: 3000 });
   // 예시 화면에만 쓰는 가상의 회의 결과다. 실제 회의 내용과 관계없다.
   const SAMPLE = Object.freeze({
     title: '사내 회의실 예약 화면 개편 회의',
@@ -98,5 +100,54 @@
     return { name: '', sections: KEYS.map(key => ({ key, title: KEY_LABELS[key] })), instruction: '' };
   }
 
-  return { LABELS, DESCRIPTIONS, KEYS, KEY_LABELS, LIMITS, SAMPLE, format, validateCustom, customInstruction, actionLine, customSections, customText, defaultCustom };
+  function minutesLengths(minutes) {
+    // 줄일 수 있는 본문(overview·topics)과 그대로 둘 목록(결정·할 일·미확정)의 글자 수를 따로 센다. 휴대폰 Ai.java도 같은 항목을 센다.
+    const m = minutes || {};
+    const size = list => (list || []).reduce((sum, value) => sum + String(value ?? '').length, 0);
+    return {
+      body: String(m.overview || '').length + (m.topics || []).reduce((sum, topic) => sum + String(topic.title || '').length + size(topic.points), 0),
+      kept: size(m.decisions) + size(m.openQuestions) + (m.actions || []).reduce((sum, action) => sum + size([action.task, action.owner, action.due]), 0),
+    };
+  }
+
+  function compactTarget(minutes, outputFormat) {
+    // 결과가 목표의 1.2배를 넘고 줄일 본문이 남아 있으면 본문에 허용할 글자 수를, 아니면 0을 돌려준다. 휴대폰 SummaryRules.java와 같은 규칙이다.
+    const goal = LENGTH_GOALS[format(outputFormat) || 'meeting'];
+    const { body, kept } = minutesLengths(minutes);
+    if (body + kept <= goal * 6 / 5) return 0;
+    const target = Math.max(goal / 2, goal - kept);
+    return body > target ? target : 0;
+  }
+
+  function participantKeywords(value) {
+    // 참석자 칸을 전사 힌트 단어로 바꾼다. 꺾쇠·줄바꿈이 들어가면 OpenAI가 요청 전체를 거절하므로 글자·숫자·밑줄·하이픈만 남긴다. 휴대폰 SummaryRules.java와 같은 규칙이다.
+    const words = [];
+    for (const piece of String(value ?? '').split(/[\s,，、;；/|·・]+/u)) {
+      const word = piece.replace(/[^\p{L}\p{N}_-]/gu, '');
+      if (word.length < 2 || word.length > 30 || words.includes(word)) continue;
+      words.push(word);
+      if (words.length === 20) break;
+    }
+    return words;
+  }
+
+  // AI가 결과에 섞어 쓴 일본어·중국어 글자(히라가나·가타카나·한자와 장음 부호)를 지운다(2026-11-06 사용자 결정). 휴대폰 SummaryRules.java가 같은 범위로 지운다.
+  // 유니코드 표준 버전이 달라도 두 앱이 같은 글자를 지우도록 문자 체계 이름 대신 번호 범위를 쓴다. 한국어에서 쓰는 ㈜·㎏ 같은 기호와 가운뎃점 ・은 넣지 않는다.
+  const FOREIGN_SCRIPT = /[\u2E80-\u2FDF\u3005-\u3007\u3021-\u3029\u3038-\u303B\u3040-\u309F\u30A0-\u30FA\u30FC-\u30FF\u31F0-\u31FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF66-\uFF9F\u{1B000}-\u{1B16F}\u{20000}-\u{323AF}]+/gu;
+  function withoutForeignText(value) {
+    if (typeof value !== 'string' || value.search(FOREIGN_SCRIPT) < 0) return value;
+    // 지운 자리에 남는 겹친 공백과 가운뎃점은 하나로 줄이고 앞뒤 공백을 뺀다.
+    return value.replace(FOREIGN_SCRIPT, '').replace(/·{2,}/g, '·').replace(/ {2,}/g, ' ').replace(/^ +| +$/g, '');
+  }
+  function withoutForeignScript(value) {
+    // 결과의 모든 문자열에서 지우고, 비게 된 제목은 빼서 다음 구간의 결과 검사를 통과하게 한다.
+    const clean = item => typeof item === 'string' ? withoutForeignText(item)
+      : Array.isArray(item) ? item.map(clean)
+        : item && typeof item === 'object' ? Object.fromEntries(Object.entries(item).map(([key, entry]) => [key, clean(entry)])) : item;
+    const result = clean(value);
+    if (result && result.suggestedTitle === '') delete result.suggestedTitle;
+    return result;
+  }
+
+  return { LABELS, DESCRIPTIONS, KEYS, KEY_LABELS, LIMITS, LENGTH_GOALS, SAMPLE, format, validateCustom, customInstruction, actionLine, customSections, customText, defaultCustom, minutesLengths, compactTarget, participantKeywords, withoutForeignText, withoutForeignScript };
 });

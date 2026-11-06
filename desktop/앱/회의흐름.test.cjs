@@ -10,17 +10,19 @@ function fixture(summaryResponse, responses = {}) {
     classList: { add() {}, remove() {} }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
     addEventListener() {}, setAttribute() {}, removeAttribute() {}, querySelectorAll() { return []; }, querySelector() { return null; },
     focus() {}, showModal() { this.open = true; }, close() { this.open = false; } });
-  const nodes = new Map(), calls = [], summaryBodies = [], posts = [];
+  const nodes = new Map(), calls = [], summaryBodies = [], posts = [], requests = [];
   const sandbox = { crypto, Blob, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: { MeetingFormats: require('./출력형식.js') },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
     document: { getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element },
     async fetch(url, options = {}) {
       calls.push(url);
+      requests.push({ url, headers: options.headers || {} });
       if (options.method === 'POST' && typeof options.body === 'string') posts.push({ url, body: JSON.parse(options.body) });
       if (url === '/api/summary') {
         summaryBodies.push(JSON.parse(options.body));
         if (summaryResponse) return summaryResponse(summaryBodies.at(-1), summaryBodies.length);
       }
+      if (typeof responses[url] === 'function') return responses[url](JSON.parse(options.body));
       let body = {};
       if (Object.hasOwn(responses, url)) body = responses[url];
       else if (url === '/api/meetings') body = { meetings: [], skipped: 0 };
@@ -34,7 +36,7 @@ function fixture(summaryResponse, responses = {}) {
   vm.runInNewContext(source, sandbox);
   const { state, ui } = sandbox.review;
   ui.title.value = '시험 회의'; ui.date.value = '2026-09-15';
-  return { ...sandbox.review, calls, summaryBodies, posts, closeStatus: sandbox.window.meetingDesktopStatus };
+  return { ...sandbox.review, calls, summaryBodies, posts, requests, closeStatus: sandbox.window.meetingDesktopStatus };
 }
 const texts = node => [node.textContent, ...(node.children || []).flatMap(texts)].filter(Boolean);
 const historyItems = ui => ui['meeting-history'].children.map(button => texts(button).join(' | '));
@@ -175,13 +177,15 @@ test('일부 구간이 성공해도 자동 추가 요청은 6회를 넘지 않�
 });
 
 test('AI 제목을 화면과 저장 자료에 적용해도 결과가 오래된 것으로 처리되지 않는다', async () => {
-  const { state, ui, summarize, lines } = fixture(() => Response.json({ minutes: { suggestedTitle: '문서 표준화와 개발 순서', overview: '전체 방향 | 제조지시서를 먼저 만듭니다.\n주요 결정 | JPA를 사용합니다.\n다음 할 일 | 화면을 그립니다.\n남은 쟁점 | 기준 제품 미정.', topics: [{title:'상세 설명',points:['전체 양식을 확정하기보다 먼저 사용할 화면을 검토합니다.']}], decisions: [], actions: [], openQuestions: [] } }));
+  const { state, ui, summarize, lines } = fixture(() => Response.json({ minutes: { suggestedTitle: '문서 표준화와 개발 순서', overview: '전체 방향 | 제조지시서를 먼저 만듭니다.\n주요 결정 | JPA를 사용합니다.\n다음 할 일 | 화면을 그립니다.\n남은 쟁점 | 기준 제품 미정.', topics: [{title:'상세 설명',points:['전체 양식을 확정하기보다 먼저 사용할 화면을 검토합니다.']}], decisions: [], actions: [{task:'화면 시안 작성',owner:null,due:null}], openQuestions: ['기준 제품'] } }));
   state.keyConfigured = true; ui.transcript.value = '제조지시서부터 개발합니다.';
   assert.equal(await summarize(true), true);
   assert.equal(ui.title.value, '문서 표준화와 개발 순서');
   assert.equal(state.resultStored, true);
   const output = lines().join('\n');
-  assert.ok(output.indexOf('핵심 요약') < output.indexOf('상세 회의 내용'));
+  const positions = ['## 핵심 요약', '## 다음 할 일', '## 상세 회의 내용', '## 합의된 방향', '## 상세 설명', '## 미확정 사항'].map(title => output.indexOf(title));
+  assert.ok(positions.every(position => position >= 0), '회의록 절이 모두 있어야 합니다');
+  assert.deepEqual(positions, [...positions].sort((a, b) => a - b), '핵심 요약 다음에 다음 할 일이 와야 합니다');
   assert.match(output, /전체 양식을 확정하기보다/);
 });
 test('수동 재분석 경로도 음성을 저장한 다음 AI를 호출한다', async () => {
@@ -250,4 +254,122 @@ test('회의록 내보내기는 전사와 상세 메모를 제외하고 내부 �
   assert.match(lines().join('\n'), /이유와 결과를 연결한 설명입니다\./);
   assert.equal(documentObject().transcript, ui.transcript.value);
   assert.equal(documentObject().partTranscripts[0].transcript, '분할 전사 발언');
+});
+
+const longResult = { suggestedTitle: '긴 회의', overview: `전체 방향 | ${'가'.repeat(3000)}`, topics: [{ title: '주제', points: ['나'.repeat(1000)] }], decisions: ['결정 내용'], actions: [{ task: '할 일', owner: '김과장', due: null }], openQuestions: ['미정 사항'] };
+const shortened = body => Response.json({ minutes: { ...body.minutes, overview: '전체 방향 | 짧게', topics: [{ title: '주제', points: ['짧은 문단'] }] } });
+const compactFailure = () => Response.json({ error: { code: 'AI_UNAVAILABLE', message: '시험 장애' } }, { status: 503 });
+function analyzeLong(compact) {
+  const compactBodies = [];
+  const view = fixture(() => Response.json({ minutes: longResult }), { '/api/summary/compact': body => { compactBodies.push(body); return compact(body, view); } });
+  view.state.keyConfigured = true;
+  view.ui.transcript.value = '회의 발언입니다.';
+  view.ui.participants.value = '김과장, 이대리';
+  return { ...view, compactBodies };
+}
+const savedMeeting = posts => posts.find(post => post.url === '/api/meetings/main').body;
+
+test('결과가 목표보다 길면 한 번 줄여서 저장한다', async () => {
+  const { state, ui, summarize, compactBodies, posts } = analyzeLong(shortened);
+  assert.equal(await summarize(true), true);
+  assert.equal(compactBodies.length, 1);
+  assert.equal(compactBodies[0].targetCharacters, 2984);
+  assert.equal(compactBodies[0].participants, '김과장, 이대리');
+  assert.equal(compactBodies[0].outputFormat, 'meeting');
+  assert.deepEqual(compactBodies[0].minutes, longResult);
+  assert.equal('text' in compactBodies[0], false);
+  assert.equal(state.minutes.overview, '전체 방향 | 짧게');
+  assert.equal(savedMeeting(posts).minutes.overview, '전체 방향 | 짧게');
+  assert.equal(state.resultStored, true);
+  assert.doesNotMatch(ui.status.textContent, /길이를 줄이지 못해/);
+});
+
+test('결과가 목표 안이면 줄이기 요청을 보내지 않는다', async () => {
+  const { state, ui, summarize, calls } = fixture();
+  state.keyConfigured = true;
+  ui.transcript.value = '회의 발언입니다.';
+  assert.equal(await summarize(true), true);
+  assert.equal(calls.includes('/api/summary/compact'), false);
+});
+
+test('줄이기가 실패해도 전체 결과를 저장하고 알린다', async () => {
+  const { state, ui, summarize, posts } = analyzeLong(compactFailure);
+  assert.equal(await summarize(true), true);
+  assert.equal(state.minutes.overview, longResult.overview);
+  assert.equal(state.resultStored, true);
+  assert.equal(savedMeeting(posts).minutes.overview, longResult.overview);
+  assert.match(ui.status.textContent, /길이를 줄이지 못해/);
+  assert.match(ui['workflow-status'].textContent, /길이를 줄이지 못해/);
+  assert.match(ui['workflow-status'].textContent, /의견 칸에 요청을 적고/);
+});
+
+test('모델이 줄이지 못한 답을 주면 실패로 알리고 다음 분석에서 다시 시도한다', async () => {
+  let attempts = 0;
+  const { state, ui, summarize, compactBodies, summaryBodies } = analyzeLong(body => (++attempts === 1 ? Response.json({ minutes: body.minutes, shortened: false }) : shortened(body)));
+  ui.title.value = '긴 회의';
+  assert.equal(await summarize(true), true);
+  assert.equal(state.minutes.overview, longResult.overview);
+  assert.match(ui['workflow-status'].textContent, /길이를 줄이지 못해/);
+  assert.equal(await summarize(true), true);
+  assert.equal(summaryBodies.length, 1);
+  assert.equal(compactBodies.length, 2, '효과 없던 줄이기는 성공으로 재사용하지 않는다');
+  assert.equal(state.minutes.overview, '전체 방향 | 짧게');
+  assert.doesNotMatch(ui['workflow-status'].textContent, /길이를 줄이지 못해/);
+});
+
+test('줄이는 중에 멈추면 저장하지 않는다', async () => {
+  const { state, summarize, posts } = analyzeLong((body, view) => { view.state.aiController.abort(); return compactFailure(); });
+  assert.equal(await summarize(true), false);
+  assert.equal(state.resultStored, false);
+  assert.equal(posts.some(post => post.url === '/api/meetings/main'), false);
+});
+
+test('줄이는 중에 입력을 고치면 저장하지 않고 고친 내용을 유지한다', async () => {
+  const { state, ui, summarize } = analyzeLong((body, view) => { view.ui.title.value = '고친 제목'; return shortened(body); });
+  assert.equal(await summarize(true), false);
+  assert.equal(state.resultStored, false);
+  assert.equal(ui.title.value, '고친 제목');
+});
+
+test('같은 화면에서 다시 분석하면 성공한 요약은 재사용하고 줄이기만 다시 한다', async () => {
+  let attempts = 0;
+  const { summarize, summaryBodies, compactBodies, state, ui } = analyzeLong(body => (++attempts === 1 ? compactFailure() : shortened(body)));
+  ui.title.value = '긴 회의';
+  assert.equal(await summarize(true), true);
+  assert.equal(await summarize(true), true);
+  assert.equal(summaryBodies.length, 1);
+  assert.equal(compactBodies.length, 2);
+  assert.equal(state.minutes.overview, '전체 방향 | 짧게');
+  assert.equal(await summarize(true), true);
+  assert.equal(compactBodies.length, 2, '성공한 줄이기는 다시 요청하지 않는다');
+});
+
+test('의견 반영과 내 형식의 정의를 줄이기 요청에도 싣는다', async () => {
+  const custom = { name: '주간', sections: [{ key: 'overview', title: '요약' }, { key: 'topics', title: '내용' }], instruction: '' };
+  const { state, ui, summarize, compactBodies } = analyzeLong(shortened);
+  ui['output-format'].value = 'custom';
+  state.meetingCustom = custom;
+  assert.equal(await summarize(true, '일정을 자세히'), true);
+  assert.equal(compactBodies[0].feedback, '일정을 자세히');
+  assert.equal(compactBodies[0].outputFormat, 'custom');
+  assert.deepEqual(compactBodies[0].customFormat, custom);
+});
+
+test('전사 요청에 참석자 이름 힌트를 보낸다', async () => {
+  const { state, ui, summarize, requests } = fixture();
+  state.keyConfigured = true;
+  ui.participants.value = '김철수, <이영희>';
+  state.parts = [{ blob: new Blob(['시험 원음'], { type: 'audio/webm' }), saved: false, transcript: '', applied: false }];
+  await summarize();
+  const sent = requests.find(request => request.url === '/api/transcribe');
+  assert.equal(decodeURIComponent(sent.headers['X-Transcribe-Keywords']), '김철수,이영희');
+});
+
+test('참석자가 없으면 힌트를 보내지 않는다', async () => {
+  const { state, summarize, requests } = fixture();
+  state.keyConfigured = true;
+  state.parts = [{ blob: new Blob(['시험 원음'], { type: 'audio/webm' }), saved: false, transcript: '', applied: false }];
+  await summarize();
+  const sent = requests.find(request => request.url === '/api/transcribe');
+  assert.equal('X-Transcribe-Keywords' in sent.headers, false);
 });
