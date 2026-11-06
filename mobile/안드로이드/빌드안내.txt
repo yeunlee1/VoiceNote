@@ -51,5 +51,6 @@ DefaultKeyFile의 기본값은 빈값이므로 지정하지 않으면 키가 들
 
   adb -s emulator-5554 install -r <검증용 APK>
   adb -s emulator-5554 shell am instrument -w kr.local.meetingjournal/kr.local.meetingjournal.AndroidChecks
+- 앱 안 업데이트는 node mobile/안드로이드/tests/업데이트기기시험.cjs . <결과폴더>로 가상기기에서 끝까지 봅니다. 버리는 서명으로 지금 버전의 검증용 APK와 versionCode를 하나 올린 다음 버전 APK, 서명한 업데이트 목록을 만들고, 기기 시험(probe u-e2e)이 확인·받기·설치 세션·시스템 설치 화면까지 진행하면 사람 대신 '업데이트'를 눌러 versionCode가 올랐는지 봅니다. 가상기기가 꺼져 있으면 창 없이 띄우고 끝나면 끕니다. 가상기기의 앱은 지우고 다시 설치합니다.
 
 영문 정션 C:\vn-emu\sdk와 C:\vn-emu\phone.avd를 사용합니다. ANDROID_SDK_ROOT를 C:\vn-emu\sdk로 정하고 emulator.exe -avd VoiceNotePhone -no-window -no-metrics로 실행합니다. 다른 작업자와 동시에 쓰지 않습니다. AndroidChecks는 앱 cache 아래 별도 UUID 폴더와 별도 설정 이름에 합성 기록을 만들고 실제 API는 호출하지 않습니다. 사용자 실기기에는 실행하지 않습니다.

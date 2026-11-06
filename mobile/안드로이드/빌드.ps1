@@ -61,8 +61,11 @@ try {
   if($DebugBuild){$sources+=Join-Path $sourceLink 'tests\AndroidChecks.java'}
   & (Join-Path $javaBin 'javac.exe') -encoding UTF-8 -source 8 -target 8 -Xlint:-options -bootclasspath "$androidJar;$(Join-Path $tools 'core-lambda-stubs.jar')" -d $classes @sources
   if($LASTEXITCODE -ne 0){throw 'Java 컴파일 실패'}
-  $classFiles=@(Get-ChildItem -LiteralPath $classes -Recurse -Filter '*.class' | ForEach-Object {$_.FullName})
-  & (Join-Path $tools 'd8.bat') --lib $androidJar --min-api 26 --output $dex @classFiles
+  # d8.bat은 배치 파일이라 명령줄이 cmd 한도(8191자)를 넘으면 실패한다. 클래스 파일을 하나씩 넘기지 않고 jar 하나로 묶어 넘긴다.
+  $classesJar=Join-Path $stage 'classes.jar'
+  & (Join-Path $javaBin 'jar.exe') --create --file $classesJar -C $classes .
+  if($LASTEXITCODE -ne 0){throw '클래스 묶기 실패'}
+  & (Join-Path $tools 'd8.bat') --lib $androidJar --min-api 26 --output $dex $classesJar
   if($LASTEXITCODE -ne 0){throw 'DEX 생성 실패'}
   $unsigned=Join-Path $stage 'unsigned.apk'
   $res=Join-Path $stage 'res'

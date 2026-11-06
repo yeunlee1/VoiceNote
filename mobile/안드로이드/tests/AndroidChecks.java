@@ -586,9 +586,66 @@ public final class AndroidChecks extends Instrumentation {
         Updates.opener=url->{throw new IOException("기기 시험 중에는 업데이트를 확인하지 않습니다.");};
         Updates.resetForTest();
     }
+    // 가상기기 7→8 업데이트 시험(probe u-e2e)이다. 바깥 스크립트가 run-as로 files/update-e2e/에 시험 릴리즈(서명한 목록과 새 APK)를 넣고
+    // 설치 허용(appops)을 켠 뒤 부른다. 확인·받기·설치 세션까지 진행하고 앱 화면에서 시스템 설치 화면을 연 다음 READY_FOR_TAP을 알린다.
+    // 바깥 스크립트가 사람 대신 '업데이트'를 누르면 패키지가 바뀌면서 이 프로세스가 끝나므로, 통과는 바깥 스크립트가 versionCode로 판정한다.
+    static HttpURLConnection fileConnection(URL url,File file){
+        return new HttpURLConnection(url){public void connect(){}public void disconnect(){}public boolean usingProxy(){return false;}
+            public int getResponseCode(){return 200;}
+            public InputStream getInputStream()throws IOException{return new FileInputStream(file);}};
+    }
+    static JSONObject releaseAsset(String version,File file)throws Exception{
+        java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
+        try(InputStream in=new FileInputStream(file)){byte[] buffer=new byte[65536];for(int count;(count=in.read(buffer))!=-1;)digest.update(buffer,0,count);}
+        StringBuilder hex=new StringBuilder();for(byte b:digest.digest())hex.append(String.format(Locale.ROOT,"%02x",b&0xff));
+        return new JSONObject().put("name",file.getName()).put("size",file.length()).put("digest","sha256:"+hex).put("state","uploaded").put("browser_download_url",UpdateRules.assetUrl(version,file.getName()));
+    }
+    void updateEndToEnd()throws Exception{
+        android.content.Context context=getTargetContext();
+        File folder=new File(context.getFilesDir(),"update-e2e");
+        File[] lists=folder.listFiles((dir,name)->name.endsWith("-update.json"));
+        expect(lists!=null&&lists.length==1,"시험 업데이트 목록이 하나 있다");
+        String version=lists[0].getName().substring("VoiceNote-".length(),lists[0].getName().length()-"-update.json".length());
+        File manifest=lists[0],apk=new File(folder,UpdateRules.apkName(version));
+        expect(apk.isFile(),"시험 APK가 있다");
+        String release=new JSONObject().put("tag_name","v"+version).put("draft",false).put("prerelease",false).put("published_at","2026-11-20T01:00:00Z")
+            .put("assets",new JSONArray().put(releaseAsset(version,manifest)).put(releaseAsset(version,apk))).toString();
+        Updates.resetForTest();
+        Updates.opener=url->{String target=url.toString();
+            if(target.equals(UpdateRules.RELEASE_API))return fakeConnection(url,200,release);
+            if(target.equals(UpdateRules.assetUrl(version,manifest.getName())))return fileConnection(url,manifest);
+            if(target.equals(UpdateRules.assetUrl(version,apk.getName())))return fileConnection(url,apk);
+            throw new IOException("시험 밖 주소: "+target);};
+        Updates.check(context,true);Updates.awaitIdleForTest(20000);
+        JSONObject state=Updates.snapshot(context);
+        expect("available".equals(state.getString("status")),"서명한 목록을 확인해 새 버전을 알린다 ← "+state);
+        Updates.download(context);Updates.awaitIdleForTest(120000);
+        state=Updates.snapshot(context);
+        expect("ready".equals(state.getString("status")),"APK를 받아 확인한다 ← "+state);
+        expect(context.getPackageManager().canRequestPackageInstalls(),"설치 허용(appops)이 켜져 있어야 합니다");
+        state=Updates.install(context);
+        expect("confirming".equals(state.getString("status")),"설치 세션을 넘긴다 ← "+state);
+        long end=System.currentTimeMillis()+30000;
+        while(!Updates.snapshot(context).getBoolean("canContinue")&&System.currentTimeMillis()<end)Thread.sleep(200);
+        expect(Updates.snapshot(context).getBoolean("canContinue"),"시스템 확인 화면 인텐트를 받는다");
+        // 앱이 뒤에 있으면 확인 화면을 바로 열지 않는다. 앱 화면을 띄운 뒤 '설치 계속'과 같은 경로로 연다.
+        android.app.Activity activity=startActivitySync(new android.content.Intent(context,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        boolean[] opened={false};
+        runOnMainSync(()->opened[0]=Updates.openConfirm(activity));
+        expect(opened[0],"앱 화면에서 시스템 설치 화면을 연다");
+        Bundle ready=new Bundle();ready.putString("stream","READY_FOR_TAP\n");sendStatus(1,ready);
+        end=System.currentTimeMillis()+180000;
+        while(System.currentTimeMillis()<end){
+            JSONObject now=Updates.snapshot(context);
+            if(!"confirming".equals(now.getString("status")))throw new AssertionError("설치가 끝나기 전에 상태가 바뀌었습니다: "+now);
+            Thread.sleep(500);
+        }
+        throw new AssertionError("3분 안에 업데이트되지 않았습니다.");
+    }
     @Override public void onStart(){Bundle result=new Bundle();try{
         // 기기 시험 중에는 업데이트 확인이 실제 깃허브나 아래 AI 모의 응답에 닿지 않게 한다.
         Updates.opener=url->{throw new IOException("기기 시험 중에는 업데이트를 확인하지 않습니다.");};
+        if(probe.equals("u-e2e")){updateEndToEnd();return;}
         if(!probe.isEmpty()&&!probe.startsWith("f-")&&!probe.startsWith("g-")){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
         for(String name:new String[]{"first","open","review","draft","finish","n1new","n1old","n1meta"})regressionCheck(name);
         archiveChecks(new Store(testContext()));
