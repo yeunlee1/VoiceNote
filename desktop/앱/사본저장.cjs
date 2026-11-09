@@ -1,7 +1,7 @@
 // 분석 결과의 전사·요약(.md·.txt)·원음을 사용자가 고른 폴더에 사본으로 쓰고, 무엇을 어디에 썼는지 보관함의 사본 기록에 남긴다.
 const realFs = require('node:fs');
 const path = require('node:path');
-const { randomBytes } = require('node:crypto');
+const { randomBytes, createHash } = require('node:crypto');
 const { markdown, plainText } = require('./회의문서.cjs');
 const { artifactPrefix } = require('./회의보관.cjs');
 
@@ -12,6 +12,7 @@ const RESULT_KINDS = [
 ];
 const NOT_SELECTED = '설정에서 저장 위치를 고르지 않았습니다.';
 const ALREADY = '이미 이 폴더에 저장했습니다.';
+const digestOf = data => createHash('sha256').update(data).digest('hex');
 
 function reason(error) {
   if (error?.code === 'EPERM' || error?.code === 'EACCES') return '고른 폴더에 쓸 권한이 없습니다.';
@@ -112,10 +113,14 @@ function createCopyWriter({ store, storage, fs = realFs }) {
     for (const spec of RESULT_KINDS) {
       const folder = folders[spec.folder];
       const match = item => item.kind === spec.kind;
+      const content = spec.content(files), digest = digestOf(content);
+      // 사람이 할 일을 고쳐 내용이 달라졌으면 기존 사본은 그대로 두고 새 파일로 쓴다. 옛 기록에는 지문이 없어 고치기 전 내용과 비교한다.
+      const kept = folder ? items.find(item => match(item) && item.folder === folder && item.ok && fs.existsSync(path.join(folder, item.name))) : null;
+      const unchanged = Boolean(kept) && (kept.digest ?? digestOf(spec.content({ ...files, record: files.original }))) === digest;
       if (!folder) report.skipped.push({ kind: spec.kind, reason: NOT_SELECTED });
-      else if (saved(items, match, folder)) report.skipped.push({ kind: spec.kind, reason: ALREADY });
+      else if (unchanged) report.skipped.push({ kind: spec.kind, reason: ALREADY });
       else {
-        items = remember(items, match, { kind: spec.kind, folder, ...attempt(spec.kind, folder, `${prefix}${spec.suffix}`, spec.content(files)) });
+        items = remember(items, match, { kind: spec.kind, folder, digest, ...attempt(spec.kind, folder, `${prefix}${spec.suffix}`, content) });
         changed = true;
       }
     }

@@ -70,14 +70,14 @@
   function minutesSections(format, minutes, custom) {
     const m = minutes || {}, actions = undecided => (m.actions || []).map(a => actionLine(a, undecided));
     const overview = title => ({ type: 'overview', title, text: String(m.overview || '') });
-    const list = (title, items, empty) => ({ type: 'list', title, items: items || [], empty });
+    const list = (title, items, empty, key) => ({ type: 'list', title, items: items || [], empty, ...(key ? { key } : {}) });
     const topics = title => ({ type: 'topics', title, topics: m.topics || [] });
     // 내 형식은 정의가 있을 때만 고른 항목·순서·이름으로 보여 주고, 정의가 없으면 회의록으로 보여 준다.
     if (outputFormat(format) === 'custom' && custom) return Formats.customSections(m, custom).map(section => section.type === 'list' ? { ...section, empty: '없음' } : section);
     switch (outputFormat(format)) {
-      case 'summary': return [overview('핵심 요약'), topics('주요 내용'), list('합의된 방향', m.decisions), list('다음 할 일', actions(false)), list('미확정 사항', m.openQuestions)];
-      case 'tasks': return [overview('업무 요약'), list('할 일', actions(true), '정해진 할 일이 없습니다.'), list('확인 필요', m.openQuestions), list('결정 사항', m.decisions), topics('관련 논의')];
-      default: return [overview('핵심 요약'), list('다음 할 일', actions(false)), list('합의된 방향', m.decisions), topics(''), list('미확정 사항', m.openQuestions)];
+      case 'summary': return [overview('핵심 요약'), topics('주요 내용'), list('합의된 방향', m.decisions), list('다음 할 일', actions(false), undefined, 'actions'), list('미확정 사항', m.openQuestions)];
+      case 'tasks': return [overview('업무 요약'), list('할 일', actions(true), '정해진 할 일이 없습니다.', 'actions'), list('확인 필요', m.openQuestions), list('결정 사항', m.decisions), topics('관련 논의')];
+      default: return [overview('핵심 요약'), list('다음 할 일', actions(false), undefined, 'actions'), list('합의된 방향', m.decisions), topics(''), list('미확정 사항', m.openQuestions)];
     }
   }
   // 앱 업데이트 상태(네이티브가 알려 준 그대로)와 지금 설치를 막는 이유로 첫 화면 안내 줄과 프로그램 정보의 문장·단추를 정한다.

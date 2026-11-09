@@ -8,6 +8,7 @@
 <title>VoiceNote</title>
 <link rel="stylesheet" href="app.css">
 <script src="formats.js" defer></script>
+<script src="todos.js" defer></script>
 <script src="flow.js" defer></script>
 <script src="release-notes.js" defer></script>
 <script src="app.js" defer></script>
@@ -26,38 +27,38 @@
   <symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h10.5v10.5H9zM15 9V4.5H4.5V15H9"/></symbol>
   <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="m6 12.5 4 4 8-9"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.3-4.3"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6.5h12M8 12h12M8 17.5h12M4 6.5h.5M4 12h.5M4 17.5h.5"/></symbol>
   <symbol id="i-update" viewBox="0 0 24 24"><path d="M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5 15.5v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></symbol>
 </svg>
 
 <header class="topbar">
   <svg class="logo" aria-hidden="true"><use href="#i-logo"/></svg>
-  <strong class="wordmark">VoiceNote</strong>
-  <button id="open-settings" class="chip" type="button" aria-haspopup="dialog" aria-controls="settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>설정</span><span id="connection" class="chip-state">확인 중</span></button>
+  <h1 id="console-heading" class="view-title">새 회의</h1>
+  <button id="start" class="button primary" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-mic"/></svg><span id="start-label">회의 시작</span></button>
+  <button id="finish" class="button stop" type="button" disabled hidden><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg><span>회의 종료</span></button>
 </header>
 
 <main id="main">
 <button id="update-note" class="update-note" type="button" aria-haspopup="dialog" aria-controls="about" hidden><svg class="icon" aria-hidden="true"><use href="#i-update"/></svg><span id="update-note-label">새 버전</span><span class="update-note-more" aria-hidden="true">자세히</span></button>
-<section class="console" aria-labelledby="console-heading">
-    <div class="console-head">
-      <h1 id="console-heading">새 회의</h1>
+<section id="view-new" class="console" aria-labelledby="console-heading">
+    <p class="hint consent">녹음 전에 참석자에게 녹음과 AI 분석(OpenAI 전송)을 알려 주세요.</p>
+    <div class="rec-panel">
       <span id="timer" aria-label="녹음 시간">00:00</span>
+      <p id="recording-info" class="recording-info" hidden></p>
     </div>
     <ol id="stage" class="stage" aria-label="진행 단계">
       <li data-stage="prepare">준비</li><li data-stage="record">녹음</li><li data-stage="analyze">분석</li><li data-stage="done">완료</li>
     </ol>
     <p id="record-state" class="visually-hidden">회의 준비 전</p>
     <p id="workflow" class="status" role="status" aria-live="polite">키를 등록하면 바로 회의를 시작할 수 있습니다.</p>
-
-    <button id="prepare" class="prepare" type="button" aria-expanded="false" aria-controls="prep">
-      <span>회의 준비</span><span id="prepare-hint" class="prepare-hint">회의명 · 참석자 · 상세 내용</span>
-      <svg class="icon chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
-    </button>
-    <div id="prep" class="prep" hidden>
+    <button id="prepare" class="prepare" type="button" aria-expanded="true" aria-controls="prep" hidden><span>회의 준비</span><span id="prepare-hint" class="prepare-hint"></span></button>
+    <div id="prep" class="prep">
       <div class="field"><label for="title">회의명</label><small id="title-hint" class="field-note">선택 · 비워 두면 AI가 회의 내용을 보고 정합니다</small><input id="title" maxlength="160" placeholder="선택" aria-describedby="title-hint" autocomplete="off"></div>
-      <div class="pair">
-        <label class="field">날짜<input id="date" type="date"></label>
-        <label class="field">참석자<input id="participants" maxlength="1000" placeholder="선택" autocomplete="off"></label>
-      </div>
+      <label class="field">날짜<input id="date" type="date"></label>
+      <label class="field">참석자<input id="participants" maxlength="1000" placeholder="이름을 쉼표로 구분해 적으세요" autocomplete="off"></label>
+      <ol id="people-preview" class="people" aria-label="참석자 번호"></ol>
       <div class="field">
         <label for="output-format">출력 형식</label>
         <div class="format-row">
@@ -81,17 +82,23 @@
     </div>
   </section>
 
-  <section class="records" aria-labelledby="history-heading">
+  <section id="view-records" class="records" aria-labelledby="history-heading" hidden>
+    <label class="search"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input id="history-search" type="search" placeholder="회의 검색" aria-label="회의 검색" autocomplete="off"></label>
+    <section class="open-block" aria-labelledby="open-title">
+      <h2 id="open-title">아직 안 끝난 일</h2>
+      <p id="open-status" class="hint">확인 중입니다.</p>
+      <ul id="open-todos" class="open-todos"></ul>
+    </section>
     <div class="records-head"><h2 id="history-heading">지난 회의</h2><button id="refresh" class="icon-button" type="button" aria-label="지난 회의 새로고침"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg></button></div>
     <div id="history" class="history"><p class="empty">보관된 회의가 없습니다.</p></div>
     <p class="foot">원음과 전사는 이 휴대폰에 보관됩니다. 중요한 기록은 회의를 열어 공유해 두세요.</p>
   </section>
 </main>
 
-<nav class="dock" aria-label="회의 조작">
-  <button id="start" class="button primary" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-mic"/></svg><span id="start-label">회의 시작</span></button>
-  <button id="finish" class="button stop" type="button" disabled hidden><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg><span>회의 종료</span></button>
-  <p class="hint">녹음 전에 참석자에게 녹음과 AI 분석(OpenAI 전송)을 알려 주세요.</p>
+<nav class="dock" aria-label="화면 이동">
+  <button id="tab-records" class="dock-tab" type="button"><svg class="icon" aria-hidden="true"><use href="#i-list"/></svg><span>회의 기록</span></button>
+  <button id="tab-new" class="dock-tab" type="button" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span>새 회의</span></button>
+  <button id="open-settings" class="dock-tab" type="button" aria-haspopup="dialog" aria-controls="settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>설정</span><span id="connection" class="visually-hidden">확인 중</span></button>
 </nav>
 
 <section id="result" class="detail" role="dialog" aria-modal="true" aria-labelledby="meeting-title" hidden tabindex="-1">

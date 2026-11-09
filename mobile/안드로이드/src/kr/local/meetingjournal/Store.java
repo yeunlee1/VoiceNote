@@ -206,6 +206,104 @@ final class Store {
         JSONObject review=new JSONObject().put("version",1).put("stars",stars==null?JSONObject.NULL:stars).put("comment",JsonText.trim(comment)).put("savedAt",date.format(new Date()));
         write(new File(directory(location,id),"평가-"+selected+".json"),review.toString(2));return review;
     }
+    // 할 일 수정본도 평가처럼 결과마다 따로 둔다. 파일이 없거나 읽지 못하면 null이고 AI 결과를 그대로 쓴다.
+    File todoFile(String location,String id,String resultId)throws Exception {return new File(directory(location,id),"할일-"+checkedResultId(resultId)+".json");}
+    JSONObject loadTodos(String location,String id,String resultId)throws Exception {
+        File file=todoFile(location,id,resultId);if(!file.exists())return null;
+        // 수정본은 AI 결과와 항목 수가 같아야 한다. 다르면 쓸 수 없는 수정본으로 본다.
+        try{JSONObject saved=new JSONObject(read(file));if(saved.optInt("version")!=1)return null;JSONObject checked=checkedTodos(new JSONObject().put("finalized",saved.get("finalized")).put("items",saved.get("items")),result(location,id,resultId).getJSONObject("minutes").getJSONArray("actions"));return checked.put("savedAt",saved.opt("savedAt"));}
+        catch(Exception ex){return null;}
+    }
+    boolean todosUnreadable(String location,String id,String resultId)throws Exception {return todoFile(location,id,resultId).exists()&&loadTodos(location,id,resultId)==null;}
+    private static IOException invalidTodos(){return new IOException("할 일 내용을 확인하세요.");}
+    private static Object todoField(Object value)throws IOException {
+        if(value==null||value==JSONObject.NULL)return JSONObject.NULL;if(!(value instanceof String))throw invalidTodos();
+        String text=JsonText.trim((String)value);if(text.length()>Todos.MAX_FIELD)throw invalidTodos();return text.isEmpty()?JSONObject.NULL:text;
+    }
+    static JSONObject checkedTodos(JSONObject data,JSONArray actions)throws IOException,JSONException {
+        int count=actions.length();
+        for(Iterator<String> keys=data.keys();keys.hasNext();){String key=keys.next();if(!key.equals("finalized")&&!key.equals("items"))throw invalidTodos();}
+        JSONArray items=data.optJSONArray("items");if(!(data.opt("finalized") instanceof Boolean)||items==null||items.length()!=count)throw invalidTodos();
+        JSONArray cleaned=new JSONArray();
+        for(int i=0;i<items.length();i++){
+            JSONObject item=items.optJSONObject(i);if(item==null)throw invalidTodos();
+            for(Iterator<String> keys=item.keys();keys.hasNext();){String key=keys.next();if(!key.equals("task")&&!key.equals("owner")&&!key.equals("due")&&!key.equals("done"))throw invalidTodos();}
+            if(!(item.opt("task") instanceof String)||!(item.opt("done") instanceof Boolean))throw invalidTodos();
+            // AI 결과에 원래 빈 문장이 있으면 그 줄 때문에 나머지 저장이 막히지 않게 둔다. 사람이 문장을 지우는 것은 막는다.
+            String task=JsonText.trim(item.getString("task"));boolean blankFromAi=JsonText.trim(actions.getJSONObject(i).optString("task")).isEmpty();
+            if((task.isEmpty()&&!blankFromAi)||task.length()>Todos.MAX_TASK)throw invalidTodos();
+            cleaned.put(new JSONObject().put("task",task).put("owner",todoField(item.opt("owner"))).put("due",todoField(item.opt("due"))).put("done",item.getBoolean("done")));
+        }
+        return new JSONObject().put("version",1).put("finalized",data.getBoolean("finalized")).put("items",cleaned);
+    }
+    private static List<Todos.Item> todoItems(JSONArray values)throws JSONException {
+        List<Todos.Item> list=new ArrayList<>();
+        for(int i=0;i<values.length();i++){JSONObject item=values.getJSONObject(i);list.add(new Todos.Item(item.getString("task"),item.isNull("owner")?null:item.getString("owner"),item.isNull("due")?null:item.getString("due"),item.optBoolean("done")));}
+        return list;
+    }
+    private static JSONObject todoJson(Todos.Item item,boolean withDone)throws JSONException {
+        JSONObject value=new JSONObject().put("task",item.task).put("owner",item.owner==null?JSONObject.NULL:item.owner).put("due",item.due==null?JSONObject.NULL:item.due);return withDone?value.put("done",item.done):value;
+    }
+    private void writeTodos(String location,String id,String resultId,JSONObject checked)throws Exception {
+        File file=todoFile(location,id,resultId);
+        // 읽지 못한 수정본을 새 내용으로 덮지 않고 이름을 바꿔 남겨 둔다.
+        if(file.exists()&&loadTodos(location,id,resultId)==null)writeBytes(new File(directory(location,id),"할일-"+checkedResultId(resultId)+"-읽기실패-"+System.currentTimeMillis()+".json"),bytes(file));
+        java.text.SimpleDateFormat date=new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.ROOT);date.setTimeZone(TimeZone.getTimeZone("UTC"));
+        write(file,checked.put("savedAt",date.format(new Date())).toString(2));
+    }
+    private JSONObject analyzedResult(String location,String id,String resultId)throws Exception {
+        JSONObject target=result(location,id,resultId);if(target.optJSONObject("minutes")==null||!target.has("resultId"))throw new IOException("정리된 결과에서만 할 일을 고칠 수 있습니다.");return target;
+    }
+    JSONObject saveTodos(String location,String id,String resultId,JSONObject data)throws Exception {
+        synchronized(Store.class){
+            JSONObject target=analyzedResult(location,id,resultId);JSONObject checked=checkedTodos(data,target.getJSONObject("minutes").getJSONArray("actions"));
+            writeTodos(location,id,target.getString("resultId"),checked);return checked;
+        }
+    }
+    JSONObject setTodoDone(String location,String id,String resultId,int index,boolean done)throws Exception {
+        synchronized(Store.class){
+            JSONObject target=analyzedResult(location,id,resultId);String selected=target.getString("resultId");JSONArray actions=target.getJSONObject("minutes").getJSONArray("actions");JSONObject edits=loadTodos(location,id,selected);
+            JSONArray source=edits!=null&&edits.getJSONArray("items").length()==actions.length()?edits.getJSONArray("items"):actions,items=new JSONArray();
+            if(index<0||index>=source.length())throw invalidTodos();
+            for(int i=0;i<source.length();i++){JSONObject item=new JSONObject(source.getJSONObject(i).toString());item.put("done",i==index?done:item.optBoolean("done"));items.put(item);}
+            JSONObject checked=checkedTodos(new JSONObject().put("finalized",edits!=null&&edits.getBoolean("finalized")).put("items",items),actions);
+            writeTodos(location,id,selected,checked);return checked;
+        }
+    }
+    // 복사·공유·고른 폴더 사본에는 사람이 고친 할 일을 합친 회의록을 쓴다. 보관된 AI 결과는 그대로 둔다.
+    JSONObject appliedMinutes(String location,String id,JSONObject record)throws Exception {
+        JSONObject minutes=record.getJSONObject("minutes");if(!record.has("resultId"))return minutes;
+        JSONObject edits=loadTodos(location,id,record.getString("resultId"));JSONArray actions=minutes.getJSONArray("actions");
+        if(edits==null||edits.getJSONArray("items").length()!=actions.length())return minutes;
+        List<Todos.Item> items=todoItems(edits.getJSONArray("items"));JSONArray merged=new JSONArray();
+        for(int index:Todos.outputOrder(edits.getBoolean("finalized"),items,todoItems(actions)))merged.put(todoJson(items.get(index),false));
+        return new JSONObject(minutes.toString()).put("actions",merged);
+    }
+    // 회의마다 최신 결과에서 아직 끝나지 않은 일만 최신 날짜순으로 모은다.
+    JSONObject openTodos()throws Exception {
+        List<JSONObject> found=new ArrayList<>();int skipped=0;
+        for(String location:LOCATIONS){
+            File[] dirs=locationDirectory(location).listFiles(File::isDirectory);if(dirs==null)continue;
+            for(File dir:dirs){if(!new File(dir,"회의정보.json").exists())continue;
+                try{JSONObject record=load(location,dir.getName());String id=record.getString("id"),resultId=latestResultId(location,record);if(resultId==null)continue;
+                    JSONObject result=result(location,id,resultId),minutes=result.optJSONObject("minutes");if(minutes==null)continue;
+                    JSONArray actions=minutes.getJSONArray("actions");JSONObject edits=loadTodos(location,id,resultId);
+                    JSONArray items=edits!=null&&edits.getJSONArray("items").length()==actions.length()?edits.getJSONArray("items"):actions;
+                    for(int i=0;i<items.length();i++){JSONObject item=items.getJSONObject(i);if(item.optBoolean("done"))continue;
+                        found.add(new JSONObject().put("location",location).put("id",id).put("resultId",resultId).put("title",result.optString("title")).put("date",record.optString("date")).put("createdAt",record.optLong("createdAt")).put("index",i).put("task",item.getString("task")).put("owner",item.opt("owner")).put("due",item.opt("due")));}
+                }catch(Exception ex){skipped++;}
+            }
+        }
+        found.sort((a,b)->{int order=b.optString("date").compareTo(a.optString("date"));return order!=0?order:Long.compare(b.optLong("createdAt"),a.optLong("createdAt"));});
+        JSONArray all=new JSONArray();for(JSONObject item:found)all.put(item);return new JSONObject().put("items",all).put("skipped",skipped);
+    }
+    private void carryTodos(String location,String id,String previousId,JSONObject minutes,String resultId)throws Exception {
+        JSONObject edits=loadTodos(location,id,previousId);if(edits==null)return;
+        JSONObject before=result(location,id,previousId).optJSONObject("minutes");if(before==null)return;
+        Todos.Carried carried=Todos.carryOver(todoItems(before.getJSONArray("actions")),edits.getBoolean("finalized"),todoItems(edits.getJSONArray("items")),todoItems(minutes.getJSONArray("actions")));if(carried==null)return;
+        JSONArray items=new JSONArray();for(Todos.Item item:carried.items)items.put(todoJson(item,true));
+        writeTodos(location,id,resultId,checkedTodos(new JSONObject().put("finalized",carried.finalized).put("items",items),minutes.getJSONArray("actions")));
+    }
     static String notes(JSONObject input) throws IOException {
         String value=input.optString("notes","");if(value.length()>4000)throw new IOException("회의별 상세 내용은 4,000자 이내로 입력하세요.");return value;
     }
@@ -277,6 +375,9 @@ final class Store {
         synchronized(Store.class){
             if(feedback!=null&&feedback.length()>1000)throw new IOException("의견은 1,000자 이하로 입력하세요.");
             String location=location(record),id=record.getString("id");File dir=directory(location,id);preserveLegacy(location,id);
+            // 의견 반영은 보던 결과에서, 그 밖에는 가장 최근 결과에서 사람이 고친 할 일을 잇는다.
+            String previousResult=record.has("resultId")&&!record.isNull("resultId")?record.getString("resultId"):null;
+            if(previousResult==null)try{previousResult=latestResultId(location,load(location,id));}catch(Exception ignored){}
             // 최신 포인터를 발행하기 전에는 입력·쓰기 실패가 호출자의 현재 결과를 바꾸지 않는다.
             JSONObject next=new JSONObject(record.toString());next.remove("minutes");
             String title=minutes.optString("suggestedTitle","").trim();if(title.isEmpty())title=next.optString("title","").trim();if(title.isEmpty())title="회의";
@@ -290,6 +391,8 @@ final class Store {
             List<String> oldKeys=new ArrayList<>();for(Iterator<String> keys=record.keys();keys.hasNext();)oldKeys.add(keys.next());for(String key:oldKeys)record.remove(key);
             for(Iterator<String> keys=next.keys();keys.hasNext();){String key=keys.next();record.put(key,next.get(key));}
             write(new File(dir,"요약.json"),minutes.toString(2));write(new File(dir,"회의록.txt"),MeetingDocument.text(next,minutes));
+            // 결과는 이미 저장됐다. 사람이 고친 할 일을 잇지 못해도 새 결과 저장을 실패로 돌리지 않는다.
+            if(previousResult!=null)try{carryTodos(location,id,previousResult,minutes,next.getString("resultId"));}catch(Exception ignored){}
         }
     }
     static String meetingFormat(JSONObject record){

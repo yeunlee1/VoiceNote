@@ -57,14 +57,21 @@
       "tab-minutes", "tab-transcript", "panel-minutes", "panel-transcript", "transcript-view", "transcript-meta", "copy-result", "share-result", "save-result", "result-status",
       "update-chip", "update-chip-label", "open-about", "about", "about-version", "about-version-meta", "about-update", "update-state", "update-progress-row", "update-progress",
       "update-progress-text", "update-detail", "update-lock", "update-install", "update-check", "update-page", "update-note", "release-list",
+      "desk-work", "recording-info", "people-preview", "history-search", "open-status", "open-todos", "open-toggle", "open-panel",
     ].map((id) => [id, $(id)]),
   );
   const Formats = window.MeetingFormats;
+  const Todos = window.MeetingTodos;
+  const OPEN_TODO_LIMIT = 30;
+  const TODO_NOTICES = { editing: "고치던 할 일을 저장하거나 취소해 주세요.", saving: "할 일을 저장하는 중입니다. 잠시 뒤 다시 눌러 주세요." };
   const formatLabels = Formats.LABELS;
   const outputFormat = (value) => (Object.hasOwn(formatLabels, value) ? value : "meeting");
   const state = {
     token: "",
     setupOpen: false, historyBusy: false, flowBusy: false, archiveBusy: false,
+    // 사람이 고친 할 일 수정본이다. 없으면 AI 결과를 그대로 쓴다. todoEditing은 문장·기한을 고치는 중인 줄이다.
+    // todoConfirmed는 파일에 저장된 것이 확인된 수정본, todoSerial은 가장 늦게 누른 저장의 번호, todoSource는 의견 반영의 출발 결과다.
+    todos: null, todoConfirmed: null, todoEditing: null, todoQueue: Promise.resolve(), todoPending: 0, todoSerial: 0, todoSource: null,
     // 열린 회의가 든 보관함(main, p1~p3)과 그 녹음 id다. 새 녹음은 언제나 main에 만든다.
     // 녹음이 서버에 있을 때만 recordingStored가 참이고, 녹음 없이 전사로 만든 회의는 meetingId(처음 결과 id)로 다음 결과를 잇는다.
     location: "main", projectName: "", recordingId: null, recordingStored: false, meetingId: null, resultId: null, recordingMetadata: null, audioStored: false, resultStored: false,
@@ -451,8 +458,8 @@
   function startBlockers() {
     const blockers = [];
     if (hasMeetingRecord()) blockers.push("지난 회의 기록이 열려 있습니다. ‘회의 준비’를 눌러 새 회의를 준비하세요.");
-    if (!canAnalyze()) blockers.push(state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요. 상단 ‘설정’에서 등록합니다." : "상단 ‘설정’에서 API 키를 등록하세요.");
-    if (state.modelError) blockers.push(`상단 ‘설정’에서 요약 모델을 다시 선택하세요. ${state.modelError}`);
+    if (!canAnalyze()) blockers.push(state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요. 아래 ‘설정’에서 등록합니다." : "아래 ‘설정’에서 API 키를 등록하세요.");
+    if (state.modelError) blockers.push(`아래 ‘설정’에서 요약 모델을 다시 선택하세요. ${state.modelError}`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(ui.date.value)) blockers.push("‘회의 준비’에서 회의 날짜를 확인하세요.");
     if (ui["meeting-notes"].value.length > 4000) blockers.push("‘회의 준비’의 상세 회의내용을 4,000자 이하로 줄이세요.");
     if (customMissing()) blockers.push("설정 › 출력 형식에서 내 형식을 먼저 만드세요.");
@@ -505,6 +512,14 @@
     ui.stage.dataset.current = current;
   }
 
+  function renderPeople(target, names) {
+    target.replaceChildren(...names.map((name, index) => {
+      const row = document.createElement("li");
+      row.append(element("b", index + 1), element("span", name));
+      return row;
+    }));
+  }
+
   function refresh() {
     // 받는 동안 녹음·분석·저장이 시작되면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 다시 눌러야 설치한다.
     if (state.updateIntent && (state.recorders.size || state.permissionPending || state.recorder || state.aiController || state.flowBusy || state.archiveBusy)) state.updateIntent = false;
@@ -523,7 +538,13 @@
     ui.shutdown.disabled = state.flowBusy || state.archiveBusy || state.historyBusy;
     for (const id of ["title", "date", "output-format", "participants", "meeting-notes", "transcript", "audio-file"])
       ui[id].disabled = Boolean(locked);
-    for (const button of ui["meeting-history"].querySelectorAll("button")) button.disabled = Boolean(locked);
+    for (const button of ui["meeting-history"].querySelectorAll("button")) {
+      button.disabled = Boolean(locked);
+      // 지금 가운데에 열린 회의를 목록에서 강조한다. 결과 버전을 바꿔도 같은 녹음이면 그대로 둔다.
+      const current = ui["meeting-detail"].open && (button.dataset.meeting === state.resultId || (state.recordingId && button.dataset.recording === state.recordingId));
+      if (current) button.setAttribute("aria-current", "true");
+      else button.removeAttribute("aria-current");
+    }
     const allowedAI = (canAnalyze() || needsNewKey()) && !busy;
     const canSendAudio = state.parts.some(
       (part) =>
@@ -534,6 +555,12 @@
     renderStartHint(recording, locked && !recording);
     renderStage(recording);
     if (document.body) document.body.dataset.recording = String(recording);
+    renderPeople(ui["people-preview"], Todos.people(ui.participants.value));
+    // 녹음 중에는 준비 입력이 접히므로 회의 전에 적은 참석자와 내용을 읽기로 보여 준다.
+    const recordingInfo = [ui.participants.value.trim() && `참석자 ${ui.participants.value.trim()}`, ui["meeting-notes"].value.trim()].filter(Boolean).join("\n");
+    ui["recording-info"].textContent = recordingInfo;
+    ui["recording-info"].hidden = !recording || !recordingInfo;
+    for (const box of ui["open-todos"].querySelectorAll("button, input")) box.disabled = Boolean(locked);
     ui["workflow-status"].hidden = Boolean(state.workflowGuide) && ui.stage.dataset.current === "prepare";
     ui["microphone-volume"].disabled = state.microphoneBusy || state.permissionPending || state.recorders.size > 0;
     ui["cancel-permission"].hidden = !state.permissionPending;
@@ -681,6 +708,9 @@
     state.dailySequence = null;
     state.resultId = null;
     state.resultStored = false;
+    setSavedTodos(null);
+    state.todoEditing = null;
+    state.todoSource = null;
     ui.transcript.value = "";
     state.minutes = null;
     state.minutesFormat = null;
@@ -1221,8 +1251,12 @@
       if (previousMinutes.suggestedTitle) ui.title.value = previousMinutes.suggestedTitle;
       state.summarySource = summaryInput();
       state.notesSaved = false;
+      // 새 결과가 사람이 고친 할 일을 보던 결과에서 이어받도록 어느 결과에서 다시 만들었는지 기억해 둔다.
+      state.todoSource = state.resultId;
       state.resultId = newOperationId();
       state.resultStored = false;
+      setSavedTodos(null);
+      state.todoEditing = null;
       state.feedback = feedback;
       state.copies = null;
       clearReview();
@@ -1295,14 +1329,274 @@
       return;
     }
     const format = outputFormat(state.minutesFormat ?? ui["output-format"].value);
-    renderMinutesInto(ui.minutes, minutes, format, format === "custom" ? currentCustom() : null);
+    renderMinutesInto(ui.minutes, Todos.apply(minutes, state.todos), format, format === "custom" ? currentCustom() : null, renderTodos);
   }
 
-  function renderMinutesInto(target, minutes, format, custom) {
+  function currentTodos() {
+    return Todos.effective(state.minutes, state.todos);
+  }
+
+  function todoEditable() {
+    return Boolean(state.minutes && state.resultStored && state.resultId && !stale());
+  }
+
+  function renderTodos(target, title, undecided = false) {
+    // 저장된 결과에서만 고칠 수 있다. 참석자를 안 적은 회의는 번호 없이 체크와 문장 수정만 된다.
+    const section = element("section", "", "todo-section");
+    section.append(element("h3", title));
+    const people = Todos.people(ui.participants.value);
+    const finalized = Boolean(state.todos?.finalized);
+    const editable = todoEditable();
+    const assigning = editable && people.length > 0 && !finalized;
+    if (assigning) {
+      section.append(element("p", "번호를 누르면 담당자 이름이 들어가고 복사·저장에도 반영됩니다.", "todo-hint"));
+      const legend = element("ol", "", "people");
+      renderPeople(legend, people);
+      section.append(legend);
+    }
+    const items = currentTodos().map((item, index) => ({ ...item, index }));
+    const list = element("ol", "", "todo-list");
+    // 번호를 누르는 동안에는 줄이 움직이지 않게 맞추기를 끝낸 뒤에만 이름순으로 보여 준다.
+    for (const item of finalized ? Todos.sorted(items) : items) list.append(todoRow(item, people, assigning, editable, undecided));
+    section.append(list);
+    if (editable && people.length) {
+      const finish = element("button", finalized ? "담당자 다시 맞추기" : "맞추기 완료", "button button-outline todo-finish");
+      finish.type = "button";
+      finish.dataset.todoFocus = "finish";
+      finish.addEventListener("click", () => commitTodos({ finalized: !finalized, items: currentTodos() }, "finish"));
+      section.append(finish);
+    }
+    target.append(section);
+  }
+
+  function todoRow(item, people, assigning, editable, undecided) {
+    const row = element("li", "", `todo-row${item.done ? " is-done" : ""}`);
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.checked = item.done;
+    check.disabled = !editable;
+    check.setAttribute("aria-label", `${item.task} 완료`);
+    check.dataset.todoFocus = `${item.index}:check`;
+    check.addEventListener("change", () => updateTodo(item.index, { done: check.checked }, check.dataset.todoFocus));
+    const box = element("label", "", "todo-check");
+    box.append(check);
+    row.append(box);
+    if (state.todoEditing?.index === item.index) { row.append(todoEditor()); return row; }
+    row.append(element("span", item.task, "todo-task"));
+    const meta = element("span", "", "todo-meta");
+    // 업무 정리 형식은 담당·기한이 없으면 미정으로 보여 준다.
+    meta.append(element("span", item.owner || (undecided ? "담당 미정" : ""), "todo-owner"), element("span", item.due || (undecided ? "기한 미정" : ""), "todo-due"));
+    row.append(meta);
+    if (assigning) {
+      const numbers = element("div", "", "todo-nums");
+      numbers.setAttribute("role", "group");
+      numbers.setAttribute("aria-label", `${item.task} 담당자`);
+      people.forEach((name, position) => {
+        const button = element("button", position + 1, "todo-num");
+        button.type = "button";
+        button.title = name;
+        button.setAttribute("aria-pressed", String(item.owner === name));
+        button.setAttribute("aria-label", `${position + 1}번 ${name}`);
+        button.dataset.todoFocus = `${item.index}:n${position + 1}`;
+        button.addEventListener("click", () => assignTodo(item.index, name, button.dataset.todoFocus));
+        numbers.append(button);
+      });
+      row.append(numbers);
+      // 숫자 키는 1~9번까지 바로 고를 수 있다.
+      row.addEventListener("keydown", (event) => {
+        const name = /^[1-9]$/.test(event.key) ? people[Number(event.key) - 1] : null;
+        if (!name) return;
+        event.preventDefault();
+        assignTodo(item.index, name, event.target.dataset?.todoFocus);
+      });
+    }
+    // 참석자를 안 적은 회의는 체크만 된다.
+    if (editable && people.length) {
+      const edit = element("button", "수정", "todo-edit");
+      edit.type = "button";
+      edit.setAttribute("aria-label", `${item.task} 수정`);
+      edit.dataset.todoFocus = `${item.index}:edit`;
+      edit.addEventListener("click", () => {
+        state.todoEditing = { index: item.index, task: item.task, due: item.due || "" };
+        renderTodosAgain(`${item.index}:task`);
+      });
+      row.append(edit);
+    }
+    return row;
+  }
+
+  function todoEditor() {
+    const box = element("div", "", "todo-editor");
+    const editing = state.todoEditing;
+    const field = (name, label, max, placeholder) => {
+      const input = document.createElement("input");
+      input.value = editing[name];
+      input.maxLength = max;
+      input.placeholder = placeholder;
+      input.setAttribute("aria-label", label);
+      input.dataset.todoFocus = `${editing.index}:${name}`;
+      input.addEventListener("input", () => { editing[name] = input.value; });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") { event.preventDefault(); saveTodoEdit(); }
+        else if (event.key === "Escape") { event.preventDefault(); cancelTodoEdit(); }
+      });
+      return input;
+    };
+    const save = element("button", "저장", "button button-primary button-small");
+    save.type = "button";
+    save.addEventListener("click", saveTodoEdit);
+    const cancel = element("button", "취소", "button button-quiet button-small");
+    cancel.type = "button";
+    cancel.addEventListener("click", cancelTodoEdit);
+    box.append(field("task", "할 일 문장", Todos.LIMITS.task, "할 일"), field("due", "기한", Todos.LIMITS.field, "기한 (선택)"), save, cancel);
+    return box;
+  }
+
+  function cancelTodoEdit() {
+    const index = state.todoEditing?.index;
+    state.todoEditing = null;
+    clearTodoNotice();
+    renderTodosAgain(`${index}:edit`);
+  }
+
+  async function saveTodoEdit() {
+    const editing = state.todoEditing;
+    if (!editing) return;
+    if (!editing.task.trim()) { ui["result-status"].textContent = "할 일 문장을 적어 주세요."; return; }
+    const items = currentTodos().map((item) => ({ ...item }));
+    Object.assign(items[editing.index], { task: editing.task.trim(), due: editing.due.trim() || null });
+    // 저장에 실패하면 고치던 칸을 그대로 두어 입력을 잃지 않게 한다.
+    if (await commitTodos({ finalized: Boolean(state.todos?.finalized), items }, `${editing.index}:task`)) {
+      state.todoEditing = null;
+      clearTodoNotice();
+      renderTodosAgain(`${editing.index}:edit`);
+    }
+  }
+
+  function renderTodosAgain(focusKey) {
+    renderMinutes();
+    if (focusKey) ui.minutes.querySelector(`[data-todo-focus="${focusKey}"]`)?.focus();
+  }
+
+  function assignTodo(index, name, focusKey) {
+    return updateTodo(index, { owner: currentTodos()[index].owner === name ? null : name }, focusKey);
+  }
+
+  function updateTodo(index, patch, focusKey) {
+    const items = currentTodos().map((item) => ({ ...item }));
+    Object.assign(items[index], patch);
+    return commitTodos({ finalized: Boolean(state.todos?.finalized), items }, focusKey);
+  }
+
+  function setSavedTodos(todos) {
+    state.todos = todos || null;
+    state.todoConfirmed = state.todos;
+  }
+
+  function todoHolding(target = ui["result-status"]) {
+    // 고치던 입력을 잃거나 저장 중인 내용이 어긋나지 않게 결과를 떠나는 동작을 잠시 막는다.
+    if (!state.todoEditing && !state.todoPending) return false;
+    target.textContent = state.todoEditing ? TODO_NOTICES.editing : TODO_NOTICES.saving;
+    return true;
+  }
+
+  function clearTodoNotice() {
+    // 막을 이유가 없어졌으면 안내를 남겨 두지 않는다. 저장 실패처럼 다른 안내는 그대로 둔다.
+    if (state.todoEditing || state.todoPending) return;
+    for (const target of [ui["result-status"], ui["review-status"]]) {
+      if (Object.values(TODO_NOTICES).includes(target.textContent)) target.textContent = "";
+    }
+  }
+
+  function commitTodos(next, focusKey) {
+    // 저장 대상을 지금 결과로 고정한다. 저장 도중 새 회의로 넘어가도 원래 결과에만 저장되고 화면에는 적용하지 않는다.
+    const resultId = state.resultId, route = `/api/meetings/${state.location}/${resultId}/todos`, serial = ++state.todoSerial;
+    state.todos = next;
+    state.todoPending++;
+    renderTodosAgain(focusKey);
+    // 빠르게 여러 번 눌러도 누른 순서대로 저장하도록 줄을 세운다.
+    state.todoQueue = state.todoQueue.then(async () => {
+      try {
+        await api(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ finalized: next.finalized, items: next.items.map(({ task, owner, due, done }) => ({ task, owner, due, done })) }) });
+        if (state.resultId === resultId) { state.todoConfirmed = next; ui["result-status"].textContent = ""; }
+        await loadOpenTodos();
+        return true;
+      } catch (error) {
+        if (state.resultId === resultId) {
+          // 뒤에 더 누른 저장이 남아 있으면 그 저장이 목록 전체를 다시 쓰므로 되돌리지 않는다. 마지막 저장이 실패했을 때만 저장이 확인된 값으로 돌아간다.
+          if (serial === state.todoSerial) { state.todos = state.todoConfirmed; renderTodosAgain(focusKey); }
+          ui["result-status"].textContent = `할 일을 저장하지 못했습니다. ${error.message}`;
+        } else announce(`이전 회의의 할 일을 저장하지 못했습니다. ${error.message}`);
+        return false;
+      } finally { state.todoPending--; clearTodoNotice(); refresh(); }
+    });
+    return state.todoQueue;
+  }
+
+  async function loadOpenTodos() {
+    try {
+      const { items = [] } = await api("/api/meetings/open-todos");
+      ui["open-status"].textContent = !items.length ? "남은 일이 없습니다." : items.length > OPEN_TODO_LIMIT ? `최근 ${OPEN_TODO_LIMIT}건 · 전체 ${items.length}건` : `${items.length}건`;
+      ui["open-toggle"].textContent = items.length ? `아직 안 끝난 일 ${items.length}건` : "아직 안 끝난 일";
+      ui["open-todos"].replaceChildren(...items.slice(0, OPEN_TODO_LIMIT).map(openTodoRow));
+    } catch (error) { ui["open-status"].textContent = `확인 실패. ${error.message}`; }
+  }
+
+  function openTodoRow(item) {
+    const row = document.createElement("li");
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.setAttribute("aria-label", `${item.task} 완료`);
+    check.addEventListener("change", () => finishOpenTodo(item, check));
+    const open = element("button", item.task, "open-todo-open");
+    open.type = "button";
+    open.append(element("small", [item.owner, item.due, item.title].filter(Boolean).join(" · ")));
+    open.addEventListener("click", async () => {
+      // 좁은 창에서는 패널이 닫히며 이 단추가 숨으므로, 결과를 닫으면 패널 단추로 초점을 돌린다.
+      const fromPanel = document.body.dataset.panel === "open";
+      // 회의가 실제로 열렸을 때만 패널을 닫는다. 저장 중이거나 확인을 취소해 열지 않으면 패널과 초점을 그대로 둔다.
+      if (await openMeeting(item.location, item.id, fromPanel ? ui["open-toggle"] : open)) toggleOpenPanel(false);
+    });
+    row.append(check, open);
+    return row;
+  }
+
+  function finishOpenTodo(item, check) {
+    const sameResult = state.resultId === item.id && state.location === item.location;
+    // 지금 열린 회의의 일이면 회의록 저장과 같은 수정본으로 보내 서로 덮어쓰지 않게 한다.
+    if (sameResult && todoEditable()) return updateTodo(item.index, { done: true }).then((saved) => { if (!saved) check.checked = false; return saved; });
+    state.todoPending++;
+    refresh();
+    state.todoQueue = state.todoQueue.then(async () => {
+      try {
+        const { todos } = await api(`/api/meetings/${item.location}/${item.id}/todos/${item.index}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ done: true }) });
+        if (sameResult && state.resultId === item.id) { setSavedTodos(todos); renderMinutes(); }
+        await loadOpenTodos();
+        return true;
+      } catch (error) {
+        check.checked = false;
+        ui["open-status"].textContent = `저장하지 못했습니다. ${error.message}`;
+        return false;
+      } finally { state.todoPending--; clearTodoNotice(); refresh(); }
+    });
+    return state.todoQueue;
+  }
+
+  function toggleOpenPanel(open = document.body.dataset.panel !== "open") {
+    // 창이 좁을 때 상태줄 단추로 여닫는 남은 일 패널이다. 넓은 창에서는 패널이 늘 보여 영향이 없다.
+    document.body.dataset.panel = open ? "open" : "";
+    ui["open-toggle"].setAttribute("aria-expanded", String(open));
+    if (open) ui["open-panel"].focus();
+  }
+
+  function renderMinutesInto(target, minutes, format, custom, renderActions = null) {
+    // 결과 창에서는 할 일을 고칠 수 있게 그리고, 형식 예시에서는 읽기용 목록으로 그린다.
+    const actionBlock = (title, formatItem) => (renderActions && minutes.actions?.length ? renderActions(target, title, format === "tasks") : renderList(target, title, minutes.actions, formatItem));
     if (format === "custom" && !custom) format = "meeting";
     if (format === "custom" && custom) {
       // 내 형식은 사용자가 고른 항목만 고른 순서와 이름으로 보여 준다.
       for (const section of Formats.customSections(minutes, custom)) {
+        if (section.type === "list" && section.key === "actions" && renderActions && minutes.actions?.length) { renderActions(target, section.title); continue; }
         if (section.type === "list") { renderList(target, section.title, section.items); continue; }
         const block = document.createElement("section");
         block.append(element("h3", section.title));
@@ -1331,14 +1625,14 @@
       const optional = (title, items, formatItem) => { if (items?.length) renderList(target, title, items, formatItem); };
       target.append(overview);
       if (format === "tasks") {
-        renderList(target, "할 일", minutes.actions, action);
+        actionBlock("할 일", action);
         optional("미확정 항목", minutes.openQuestions);
         optional("결정 사항", minutes.decisions);
         if (minutes.topics?.length) target.append(topics);
       } else {
         if (minutes.topics?.length) target.append(topics);
         optional("결정 사항", minutes.decisions);
-        optional("후속 작업", minutes.actions, action);
+        if (minutes.actions?.length) actionBlock("후속 작업", action);
         optional("확인 필요", minutes.openQuestions);
       }
       return;
@@ -1347,7 +1641,7 @@
     overview.className = "summary-overview";
     overview.append(element("h3", "핵심 요약"), element("p", minutes.overview));
     target.append(overview);
-    renderList(target, "다음 할 일", minutes.actions, (action) =>
+    actionBlock("다음 할 일", (action) =>
       [action.task, action.owner && `담당 ${action.owner}`, action.due && `기한 ${action.due}`]
         .filter(Boolean)
         .join(" · "),
@@ -1517,7 +1811,8 @@
 
   function exportDocument() {
     const { projectName, title, date, dailySequence, participants, outputFormat, customFormat, minutes } = documentObject();
-    return { projectName, title, date, dailySequence, participants, outputFormat, ...(customFormat ? { customFormat } : {}), minutes };
+    // 복사·저장에는 사람이 고친 할 일을 합친다. 보관하는 AI 결과(documentObject)는 그대로 둔다.
+    return { projectName, title, date, dailySequence, participants, outputFormat, ...(customFormat ? { customFormat } : {}), minutes: Todos.apply(minutes, state.todos) };
   }
 
   function saveMinutes(format) {
@@ -1538,7 +1833,8 @@
       Boolean(state.aiController) ||
       state.flowBusy || state.archiveBusy || state.historyBusy ||
       state.parts.some((part) => part.blob && !part.saved) ||
-      Boolean((ui.transcript.value || state.minutes) && !state.notesSaved)
+      Boolean((ui.transcript.value || state.minutes) && !state.notesSaved) ||
+      state.todoPending > 0 || Boolean(state.todoEditing)
     );
   }
 
@@ -1578,7 +1874,8 @@
     ui["record-state"].textContent = "대기";
     ui.timer.textContent = "00:00";
     refresh();
-    announce("이 창의 회의 내용을 지웠습니다.");
+    // 지난 회의를 열면서 화면을 바꿀 때는 지웠다고 알리지 않는다.
+    if (skipConfirmation !== true) announce("이 창의 회의 내용을 지웠습니다.");
     return true;
   }
 
@@ -1675,6 +1972,13 @@
     refresh();
   }
 
+  function closeResultForNewMeeting() {
+    // 결과를 닫은 뒤 초점이 목록이 아니라 새 회의 입력으로 가게 한다.
+    if (!ui["meeting-detail"].open) return;
+    ui["meeting-detail"].returnFocus = ui.title;
+    ui["meeting-detail"].close();
+  }
+
   function focusSetup() {
     const target = ui.title.value.trim() ? ui["meeting-notes"] : ui.title;
     target.focus?.();
@@ -1684,6 +1988,7 @@
     if (state.historyBusy || state.flowBusy || state.recorders.size || state.aiController || state.permissionPending) return;
     if (hasMeetingRecord()) {
       if (hasUnsavedWork() && !confirm("저장하지 않은 이전 회의 내용을 비우고 새 회의를 준비할까요?")) return;
+      closeResultForNewMeeting();
       clearParts();
       resetResult();
       state.recordingId = null;
@@ -1721,24 +2026,38 @@
         const button = element("button", "", "history-button");
         button.type = "button";
         const format = outputFormat(meeting.outputFormat);
-        const status = [meeting.analyzed ? `${format === "meeting" ? "회의록" : formatLabels[format]} 완료 · 눌러서 보기` : "분석 대기", `음성 ${meeting.audioCount}개`, meeting.stars && `별 ${meeting.stars}개`];
-        button.append(element("strong", `${meeting.date || "날짜 미입력"} · ${meeting.dailySequence || 1}차 · ${meeting.title || "제목 미정 회의"}`),
-          element("span", status.filter(Boolean).join(" · ")));
+        const status = [`${meeting.date || "날짜 미입력"} · ${meeting.dailySequence || 1}차`, meeting.analyzed ? (format === "meeting" ? "회의록" : formatLabels[format]) : "분석 대기", `음성 ${meeting.audioCount}개`, meeting.stars && `별 ${meeting.stars}개`];
+        const title = meeting.title || "제목 미정 회의";
+        const name = element("strong", title);
+        name.title = title;
+        button.append(name, element("span", status.filter(Boolean).join(" · ")));
         if (meeting.projectName) button.append(element("span", `이전 프로젝트: ${meeting.projectName}`));
+        button.dataset.search = `${title} ${meeting.date || ""} ${meeting.projectName || ""}`.toLowerCase();
+        button.dataset.meeting = meeting.id;
+        if (meeting.recordingId) button.dataset.recording = meeting.recordingId;
         button.addEventListener("click", () => openMeeting(meeting.location, meeting.id, button));
         ui["meeting-history"].append(button);
       }
+      filterHistory();
     } catch (error) { ui["history-status"].textContent = `목록 확인 실패. ${error.message}`; }
+    await loadOpenTodos();
     refresh();
+  }
+
+  function filterHistory() {
+    const query = ui["history-search"].value.trim().toLowerCase();
+    for (const button of ui["meeting-history"].querySelectorAll("button")) button.hidden = Boolean(query) && !button.dataset.search.includes(query);
   }
 
   async function openMeeting(location, id, opener) {
     if (state.historyBusy || state.flowBusy || state.recorders.size || state.aiController || state.reviewBusy || state.copyBusy) return;
+    // 저장이 끝나기 전에 회의를 다시 읽으면 저장 전 할 일이 화면에 올라와 저장본과 어긋난다.
+    if (state.todoPending) { announce(TODO_NOTICES.saving); return; }
     if (hasUnsavedWork() && !confirm("현재 저장하지 않은 내용을 비우고 지난 회의를 열까요?")) return;
     state.historyBusy = true;
     refresh();
     try {
-      const { meeting, versions, review } = await api(`/api/meetings/${location}/${id}`);
+      const { meeting, versions, review, todos, todosUnreadable } = await api(`/api/meetings/${location}/${id}`);
       const parts = [];
       for (const audio of meeting.audio || []) {
         const response = await fetch(`/api/recordings/${location}/${meeting.recordingId || id}/audio/${audio.index}`, { headers: { "X-Meeting-Token": state.token } });
@@ -1767,6 +2086,10 @@
       state.dailySequence = meeting.dailySequence;
       state.resultId = meeting.minutes ? id : null;
       state.resultStored = Boolean(meeting.minutes);
+      setSavedTodos(todos);
+      state.todoEditing = null;
+      state.todoSource = null;
+      ui["result-status"].textContent = todosUnreadable ? "저장된 할 일 수정본을 읽지 못해 AI 결과를 보여 줍니다. 원본 파일은 보존합니다." : "";
       state.summarySource = summaryInput();
       state.notesSaved = true;
       state.usage = usageTools().normalize(meeting.analysis?.usage);
@@ -1785,6 +2108,7 @@
       if (meeting.transcript && !meeting.minutes) document.getElementById("transcript-details").open = true;
       openDialog(ui["meeting-detail"], opener);
       workflow(meeting.minutes ? "지난 회의를 불러왔습니다. ‘회의록 보기’에서 결과·내보내기·재분석을 할 수 있습니다." : state.audioStored ? "음성 저장 완료. AI 연결을 확인한 뒤 다시 분석하세요." : "일부 음성 저장이 끝나지 않은 회의입니다. 원래 녹음 창에서 저장을 완료하세요.");
+      return true;
     } catch (error) { workflow(error.message); }
     finally { state.historyBusy = false; refresh(); }
   }
@@ -1794,12 +2118,15 @@
     state.archiveBusy = true;
     state.resultId ||= newOperationId();
     refresh();
-    const document = { ...documentObject(), id: state.resultId, ...(state.recordingStored ? { recordingId: state.recordingId } : state.meetingId ? { meetingId: state.meetingId } : {}) };
+    const document = { ...documentObject(), id: state.resultId, ...(state.recordingStored ? { recordingId: state.recordingId } : state.meetingId ? { meetingId: state.meetingId } : {}), ...(state.todoSource ? { sourceResultId: state.todoSource } : {}) };
     try {
       const saved = await api(`/api/meetings/${state.location}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(document) });
       state.dailySequence = saved.meeting?.dailySequence;
       state.resultStored = true;
       state.notesSaved = true;
+      // 의견 반영으로 이어받은 수정본이 있으면 받아 오고, 이제 고칠 수 있으므로 할 일을 다시 그린다.
+      setSavedTodos(saved.todos);
+      renderMinutes();
       // 저장한 결과를 결과 버전 끝에 더하고, 고른 폴더에 쓴 사본 결과를 결과 창에 보여 준다.
       const record = saved.meeting;
       if (record?.id) state.versions = [...state.versions.filter((version) => version.id !== record.id),
@@ -1851,6 +2178,7 @@
     // 의견을 먼저 평가로 저장하고, 열린 결과의 전사로 요약만 다시 요청해 새 결과로 저장한다. 원음은 다시 전사하지 않는다.
     const comment = ui["review-comment"].value.trim();
     if (!comment || !state.minutes || !state.resultStored) return;
+    if (todoHolding(ui["review-status"])) return;
     const target = state.resultId;
     try { await saveReview(); }
     catch (error) { ui["review-status"].textContent = `평가를 저장하지 못했습니다. ${error.message}`; return; }
@@ -1963,7 +2291,7 @@
         promptNewKey();
         throw new Error("새로운 API키를 등록하세요.");
       }
-      if (!canAnalyze()) throw new Error("음성은 저장했습니다. 상단 ‘설정’에서 API 키를 확인한 뒤 다시 분석하세요.");
+      if (!canAnalyze()) throw new Error("음성은 저장했습니다. 아래 ‘설정’에서 API 키를 확인한 뒤 다시 분석하세요.");
       workflow("음성 저장 완료. 전사와 회의록을 분석하고 있습니다…");
       await summarize();
     } catch (error) {
@@ -1978,20 +2306,43 @@
   }
 
   function openDialog(dialog, opener) {
-    if (!dialog || dialog.open) return;
+    if (!dialog) return;
+    const result = dialog === ui["meeting-detail"];
+    // 회의 결과는 가운데 영역에 열려 있어 다른 회의를 고르면 내용만 바꾼다.
+    if (result) { renderMinutes(); showResultTab(state.minutes || !ui.transcript.value.trim() ? "minutes" : "transcript"); }
+    if (dialog.open) {
+      // 목록이나 패널에서 고르면 초점이 결과 밖에 남아 Esc가 닿지 않는다. 안으로 옮기고 닫을 때 돌아갈 곳도 새로 누른 항목으로 바꾼다.
+      // 결과 안의 버전 선택에서 온 요청은 불러오는 동안 초점이 잠시 빠질 뿐이므로 돌아갈 곳을 바꾸지 않는다.
+      if (!dialog.contains?.(opener) && !dialog.contains?.(document.activeElement)) {
+        dialog.returnFocus = opener || dialog.returnFocus;
+        dialog.querySelector("[data-close]")?.focus();
+      }
+      refresh();
+      return;
+    }
     dialog.returnFocus = opener || document.activeElement;
-    if (dialog === ui["meeting-detail"]) { renderMinutes(); showResultTab(state.minutes || !ui.transcript.value.trim() ? "minutes" : "transcript"); }
     refresh();
-    dialog.showModal();
+    if (result) {
+      dialog.show();
+      ui["desk-work"].inert = true;
+    } else dialog.showModal();
     const first = dialog === ui.settings && !state.keyConfigured && !ui["api-key"].disabled ? ui["api-key"] : dialog.querySelector("[data-close]");
     first?.focus();
   }
 
   function bindDialog(dialog) {
+    const inPage = dialog === ui["meeting-detail"];
+    // 결과 화면을 닫을 때는 고치던 할 일을 잃지 않게 먼저 확인한다.
+    const closeDialog = () => { if (!inPage || !todoHolding()) dialog.close(); };
     dialog.addEventListener("click", (event) => {
-      if (event.target.closest?.("[data-close]") || event.target === dialog) dialog.close();
+      if (event.target.closest?.("[data-close]") || (!inPage && event.target === dialog)) closeDialog();
     });
     dialog.addEventListener("keydown", (event) => {
+      // 결과 화면은 팝업이 아니어서 브라우저가 Esc를 처리하지 않는다. 남은 일 패널이 열려 있으면 패널부터 닫는다.
+      if (inPage) {
+        if (event.key === "Escape" && !event.defaultPrevented && document.body.dataset.panel !== "open") closeDialog();
+        return;
+      }
       if (event.key !== "Tab") return;
       const items = focusables(dialog);
       if (!items.length) return;
@@ -2005,6 +2356,7 @@
       }
     });
     dialog.addEventListener("close", () => {
+      if (inPage) { ui["desk-work"].inert = false; refresh(); }
       const target = dialog.returnFocus;
       dialog.returnFocus = null;
       // 연 단추가 그 사이 숨었으면(예: 새 버전 표시가 설치 뒤 사라짐) 프로그램 정보는 설정 단추로, 나머지는 회의 준비로 돌아간다.
@@ -2244,6 +2596,8 @@
       return ["저장하지 않은 회의 내용이 있습니다. 회의록을 저장하거나 내려받은 뒤 설치하세요."];
     // 업데이트하면 창이 닫히므로 저장 중인 요청과 아직 저장하지 않은 입력도 지켜 준다.
     if (state.settingsBusy || state.keyBusy || state.reviewBusy || state.copyBusy || state.customBusy) return ["설정이나 평가를 저장하는 중입니다. 저장이 끝난 뒤 설치하세요."];
+    if (state.todoPending > 0) return ["할 일을 저장하는 중입니다. 저장이 끝난 뒤 설치하세요."];
+    if (state.todoEditing) return ["고치던 할 일을 저장하거나 취소한 뒤 설치하세요."];
     if (ui["settings-import"].open) return ["설정 불러오기 확인을 먼저 마치세요."];
     if (reviewChanged()) return ["평가 의견을 저장하거나 지운 뒤 설치하세요."];
     if (customChanged()) return ["내 형식 변경을 저장한 뒤 설치하세요."];
@@ -2456,6 +2810,14 @@
 
   function bind() {
     ui.prepare.addEventListener("click", prepareMeeting);
+    ui["history-search"].addEventListener("input", filterHistory);
+    ui["open-toggle"].addEventListener("click", () => toggleOpenPanel());
+    // 창 크기가 바뀌어 패널을 접지 않는 배치가 되면 열린 표시를 지운다. 남겨 두면 보이지 않는 패널이 Esc를 가로챈다.
+    window.matchMedia?.("(min-width: 761px) and (max-width: 1180px)").addEventListener?.("change", (event) => { if (!event.matches) toggleOpenPanel(false); });
+    document.addEventListener?.("keydown", (event) => {
+      if (event.ctrlKey && event.key?.toLowerCase() === "k") { event.preventDefault(); ui["history-search"].focus(); }
+      else if (event.key === "Escape" && document.body.dataset.panel === "open") { toggleOpenPanel(false); ui["open-toggle"].focus(); }
+    });
     ui["retry-analysis"].addEventListener("click", finishMeeting);
     ui["save-archive"].addEventListener("click", () => archiveResult().catch(error => workflow(error.message)));
     ui["microphone-volume"].addEventListener("click", setMicrophoneVolume);
@@ -2463,8 +2825,8 @@
     ui["cancel-permission"].addEventListener("click", cancelPermission);
     ui.stop.addEventListener("click", finishMeeting);
     ui["audio-file"].addEventListener("change", importAudio);
-    ui.transcribe.addEventListener("click", transcribe);
-    ui.summarize.addEventListener("click", () => summarize(true));
+    ui.transcribe.addEventListener("click", () => { if (!todoHolding()) transcribe(); });
+    ui.summarize.addEventListener("click", () => { if (!todoHolding()) summarize(true); });
     document.getElementById("save-transcript").addEventListener("click", () => {
       if (!ui.transcript.value.trim()) return announce("저장할 전사 원문이 없습니다.");
       download(new Blob([ui.transcript.value], { type: "text/plain;charset=utf-8" }), `${baseName()}-전사원문.txt`);
@@ -2552,6 +2914,8 @@
       const id = ui["result-versions"].value;
       await openMeeting(state.location, id, ui["result-versions"]);
       renderVersions();
+      // 불러오는 동안 select가 잠겨 초점을 잃으므로 되돌린다.
+      ui["result-versions"].focus();
       if (state.resultId === id) announce("고른 결과 버전을 열었습니다. 이 결과의 평가와 사본 저장은 이 결과에 적용됩니다.");
     });
     ui["settings-import"].addEventListener("close", () => { state.pendingSettings = null; });
@@ -2564,7 +2928,14 @@
     ui["update-page"].hidden = !webview;
     ui["update-page"].addEventListener("click", () => webview?.postMessage("open-update-page"));
     webview?.addEventListener("message", (event) => onHostMessage(event.data));
-    ui.clear.addEventListener("click", () => { if (clearLocal()) resetMeetingForm(); });
+    ui.clear.addEventListener("click", () => {
+      if (!clearLocal()) return;
+      // 결과가 열려 있었으면 닫고 빈 새 회의 입력으로 돌아간다.
+      closeResultForNewMeeting();
+      resetMeetingForm();
+      state.setupOpen = true;
+      refresh();
+    });
     ui.shutdown.addEventListener("click", shutdown);
     for (const format of ["md", "txt", "json"])
       ui[`download-${format}`].addEventListener("click", () => saveMinutes(format));
@@ -2595,9 +2966,10 @@
       state.customFormat = (await api("/api/custom-format")).customFormat;
       updateCustomOption();
       resetMeetingForm();
+      state.setupOpen = true;
       await loadHistory();
       refresh();
-      announce(canAnalyze() ? "‘회의 시작’을 누르면 바로 녹음합니다." : state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요." : "처음이면 상단 ‘설정’에서 API 키를 등록하세요.");
+      announce(canAnalyze() ? "‘회의 시작’을 누르면 바로 녹음합니다." : state.access.accessMode === "exhausted" ? "새로운 API키를 등록하세요." : "처음이면 아래 ‘설정’에서 API 키를 등록하세요.");
       // 새 버전 확인은 회의 준비를 기다리게 하지 않도록 맨 마지막에 따로 시작한다.
       loadUpdate();
     } catch (error) {
