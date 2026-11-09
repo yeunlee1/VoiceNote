@@ -33,7 +33,7 @@ public final class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView web,WebResourceRequest request){return true;}
             @Override public WebResourceResponse shouldInterceptRequest(WebView web,WebResourceRequest request){
                 Uri uri=request.getUrl();String file=uri.getPath();
-                if("app.meeting.local".equals(uri.getHost())&&("/index.html".equals(file)||"/app.js".equals(file)||"/flow.js".equals(file)||"/formats.js".equals(file)||"/release-notes.js".equals(file)||"/app.css".equals(file))){try{return new WebResourceResponse(file.endsWith(".css")?"text/css":file.endsWith(".js")?"application/javascript":"text/html","UTF-8",getAssets().open(file.substring(1)));}catch(IOException ignored){}}
+                if("app.meeting.local".equals(uri.getHost())&&("/index.html".equals(file)||"/app.js".equals(file)||"/flow.js".equals(file)||"/formats.js".equals(file)||"/todos.js".equals(file)||"/release-notes.js".equals(file)||"/app.css".equals(file))){try{return new WebResourceResponse(file.endsWith(".css")?"text/css":file.endsWith(".js")?"application/javascript":"text/html","UTF-8",getAssets().open(file.substring(1)));}catch(IOException ignored){}}
                 return new WebResourceResponse("text/plain","UTF-8",403,"Forbidden",Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));
             }});view.loadUrl("https://app.meeting.local/index.html");
     }
@@ -65,6 +65,12 @@ public final class MainActivity extends Activity {
             case "deleteCustomFormat": settingsIdle();store.deleteCustomFormat();answer(id,JSONObject.NULL,null);break;
             case "status": answer(id,new JSONObject().put("active",MeetingService.active).put("meeting",new JSONObject(MeetingService.snapshot)).put("connection",connection()).put("update",Updates.snapshot(this)),null);break;
             case "history": answer(id,store.history(),null);break;
+            case "openTodos": answer(id,store.openTodos(),null);break;
+            case "saveTodos": fileIdle();answer(id,store.saveTodos(location,data.getString("id"),nullableString(data,"resultId"),data.getJSONObject("todos")),null);break;
+            case "todoDone":{
+                Object done=data.opt("done");if(!(done instanceof Boolean))throw new IOException("할 일 내용을 확인하세요.");
+                fileIdle();answer(id,store.setTodoDone(location,data.getString("id"),nullableString(data,"resultId"),data.getInt("index"),(Boolean)done),null);break;
+            }
             case "results": answer(id,store.results(location,data.getString("id")),null);break;
             case "review":{
                 settingsIdle();fileIdle();Object value=data.opt("stars");Integer stars=null;
@@ -139,6 +145,8 @@ public final class MainActivity extends Activity {
                 answer(id,new JSONObject().put("record",record).put("minutes",record.optJSONObject("minutes")==null?JSONObject.NULL:record.getJSONObject("minutes"))
                     .put("transcript",transcript.exists()?Store.read(transcript):"").put("resultId",resultId==null?JSONObject.NULL:resultId)
                     .put("versions",store.results(location,meetingId)).put("review",resultId==null?JSONObject.NULL:store.loadReview(location,meetingId,resultId))
+                    .put("todos",resultId==null||record.optJSONObject("minutes")==null||store.loadTodos(location,meetingId,resultId)==null?JSONObject.NULL:store.loadTodos(location,meetingId,resultId))
+                    .put("todosUnreadable",resultId!=null&&record.optJSONObject("minutes")!=null&&store.todosUnreadable(location,meetingId,resultId))
                     .put("copies",resultId==null?JSONObject.NULL:Copies.status(this,store,location,meetingId,resultId)),null);break;
             }
             case "share":share(id,location,data.getString("id"),nullableString(data,"resultId"),data.optString("kind","summary"));break;
@@ -245,7 +253,7 @@ public final class MainActivity extends Activity {
         if("all".equals(kind)){
             output=new File(cache,prefix+".zip");try(ZipOutputStream zip=new ZipOutputStream(new FileOutputStream(output))){
                 File transcript=new File(dir,"전사.txt");if(transcript.exists())zipText(zip,"전사.txt",Store.read(transcript));
-                if(record.optJSONObject("minutes")!=null){zipText(zip,document,MeetingDocument.text(record,record.getJSONObject("minutes")));zipText(zip,"요약.json",record.getJSONObject("minutes").toString(2));}
+                if(record.optJSONObject("minutes")!=null){zipText(zip,document,MeetingDocument.text(record,store.appliedMinutes(location,id,record)));zipText(zip,"요약.json",store.appliedMinutes(location,id,record).toString(2));}
                 JSONArray audio=record.getJSONArray("audio");for(int i=0;i<audio.length();i++){String name=audio.getString(i);File file=new File(dir,name);if(!file.exists())continue;
                     zip.putNextEntry(new ZipEntry(name));try(InputStream in=new FileInputStream(file)){byte[] b=new byte[8192];for(int n;(n=in.read(b))!=-1;)zip.write(b,0,n);}zip.closeEntry();}
             }
@@ -260,7 +268,7 @@ public final class MainActivity extends Activity {
     private String resultText(String location,String id,String resultId,String kind)throws Exception {
         if("transcript".equals(kind)){File file=new File(store.directory(location,id),"전사.txt");if(!file.exists())throw new IOException("아직 저장된 전사문이 없습니다.");return Store.read(file);}
         JSONObject record=store.result(location,id,resultId);if(record.optJSONObject("minutes")==null)throw new IOException("아직 정리된 결과가 없습니다. 분석이 끝난 뒤 다시 시도하세요.");
-        return MeetingDocument.text(record,record.getJSONObject("minutes"));
+        return MeetingDocument.text(record,store.appliedMinutes(location,id,record));
     }
     @Override public void onBackPressed(){view.evaluateJavascript("!!(window.handleBack&&window.handleBack())",handled->{if(!"true".equals(handled)&&!isFinishing())super.onBackPressed();});}
     @Override public void onDestroy(){view.removeJavascriptInterface("Native");view.destroy();worker.shutdown();super.onDestroy();}

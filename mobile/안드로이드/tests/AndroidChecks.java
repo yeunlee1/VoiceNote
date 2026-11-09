@@ -642,6 +642,65 @@ public final class AndroidChecks extends Instrumentation {
         }
         throw new AssertionError("3분 안에 업데이트되지 않았습니다.");
     }
+    static JSONObject todoAction(String task,String owner)throws Exception{return new JSONObject().put("task",task).put("owner",owner==null?JSONObject.NULL:owner).put("due",JSONObject.NULL);}
+    static JSONObject todoItem(String task,String owner,boolean done)throws Exception{return todoAction(task,owner).put("done",done);}
+    static void todoChecks(Store store)throws Exception{
+        // 사람이 고친 할 일이 결과 파일과 따로 저장되고 공유 문서·남은 일 목록·의견 반영에 맞게 이어지는지 확인한다.
+        JSONObject record=store.create(new JSONObject().put("date","2099-04-01").put("title","할 일 회의").put("participants","김민수, 박서연"));String id=record.getString("id");
+        store.finish(record,minutes().put("actions",new JSONArray().put(todoAction("일정 공유",null)).put(todoAction("발주 변경","김민수"))),null);
+        String first=record.getString("resultId");File dir=store.directory("main",id),resultFile=new File(dir,"결과-"+first+".json");String before=Store.read(resultFile);
+        expect(store.loadTodos("main",id,first)==null,"수정본이 없으면 null");
+        store.saveTodos("main",id,first,new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("일정 공유","최유진",true)).put(todoItem("발주 변경","김민수",false))));
+        expect(Store.read(resultFile).equals(before),"수정본 저장은 결과 파일을 바꾸지 않는다");
+        JSONObject loaded=store.loadTodos("main",id,first);expect(loaded.getJSONArray("items").getJSONObject(0).getString("owner").equals("최유진")&&loaded.getInt("version")==1,"저장한 수정본을 읽는다");
+        JSONObject record2=store.result("main",id,first),applied=store.appliedMinutes("main",id,record2);JSONObject head=applied.getJSONArray("actions").getJSONObject(0);
+        expect(head.getString("task").equals("발주 변경")&&!head.has("done"),"담당자를 맞춘 회의록은 이름순으로 합치고 체크는 넣지 않는다");
+        String text=MeetingDocument.text(record2,applied);expect(text.indexOf("발주 변경")<text.indexOf("일정 공유")&&text.contains("담당 최유진"),"공유 문서에 맞춘 담당자가 이름순으로 들어간다");
+        expect(store.result("main",id,first).getJSONObject("minutes").getJSONArray("actions").getJSONObject(0).getString("task").equals("일정 공유"),"보관된 AI 결과는 그대로다");
+        List<Integer> open=new ArrayList<>();JSONArray items=store.openTodos().getJSONArray("items");for(int i=0;i<items.length();i++)if(items.getJSONObject(i).getString("id").equals(id))open.add(items.getJSONObject(i).getInt("index"));
+        expect(open.equals(Collections.singletonList(1)),"아직 안 끝난 일에는 끝나지 않은 일만 모은다");
+        store.setTodoDone("main",id,first,1,true);items=store.openTodos().getJSONArray("items");boolean left=false;for(int i=0;i<items.length();i++)left|=items.getJSONObject(i).getString("id").equals(id);expect(!left,"목록에서 체크하면 빠진다");
+        for(JSONObject bad:new JSONObject[]{new JSONObject(),new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("하나",null,false))),new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem(" ",null,false)).put(todoItem("둘",null,false))),new JSONObject().put("finalized","no").put("items",new JSONArray().put(todoItem("하나",null,false)).put(todoItem("둘",null,false)))}){
+            try{store.saveTodos("main",id,first,bad);throw new AssertionError("잘못된 수정본을 저장했습니다: "+bad);}catch(IOException expected){expect(expected.getMessage().contains("할 일"),"잘못된 수정본을 거절한다");}
+        }
+        store.finish(record,minutes().put("actions",new JSONArray().put(todoAction("일정 공유",null)).put(todoAction("새로 생긴 일",null))),"다시 정리");
+        String next=record.getString("resultId");expect(!next.equals(first),"의견 반영은 새 결과를 만든다");
+        JSONObject carried=store.loadTodos("main",id,next);JSONObject one=carried.getJSONArray("items").getJSONObject(0),two=carried.getJSONArray("items").getJSONObject(1);
+        expect(one.getString("owner").equals("최유진")&&one.getBoolean("done")&&two.isNull("owner")&&!two.getBoolean("done"),"문장이 같은 일의 사람 수정과 체크를 잇는다");
+        expect(store.loadTodos("main",id,first)!=null&&store.results("main",id).length()==2,"할일 파일이 결과 버전에 잡히지 않는다");
+        Store.write(new File(dir,"할일-"+next+".json"),"{깨짐");
+        expect(store.loadTodos("main",id,next)==null&&store.todosUnreadable("main",id,next),"읽지 못한 수정본은 알릴 수 있다");
+        store.saveTodos("main",id,next,new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("일정 공유",null,false)).put(todoItem("새로 생긴 일",null,false))));
+        boolean kept=false;File[] files=dir.listFiles();if(files!=null)for(File file:files)kept|=file.getName().startsWith("할일-"+next+"-읽기실패-")&&Store.read(file).equals("{깨짐");
+        expect(kept,"읽지 못한 수정본은 덮지 않고 남긴다");
+        expect(store.results("main",id).length()==2,"읽기 실패 사본도 결과 버전에 잡히지 않는다");
+        Store.write(new File(dir,"할일-"+first+".json"),new JSONObject().put("version",1).put("finalized",false).put("items",new JSONArray().put(todoItem("한 줄만 남은 수정본",null,true))).toString());
+        expect(store.loadTodos("main",id,first)==null&&store.todosUnreadable("main",id,first),"항목 수가 결과와 다른 수정본은 읽기 실패로 알린다");
+        store.saveTodos("main",id,first,new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("일정 공유","첫째 담당",false)).put(todoItem("발주 변경","김민수",false))));
+        kept=false;files=dir.listFiles();if(files!=null)for(File file:files)kept|=file.getName().startsWith("할일-"+first+"-읽기실패-")&&Store.read(file).contains("한 줄만 남은 수정본");
+        expect(kept,"항목 수가 다른 수정본도 덮지 않고 남긴다");
+        JSONObject older=store.result("main",id,first);older.remove("minutes");
+        store.finish(older,minutes().put("actions",new JSONArray().put(todoAction("일정 공유",null))),"옛 결과에서 다시 정리");
+        expect(store.loadTodos("main",id,older.getString("resultId")).getJSONArray("items").getJSONObject(0).getString("owner").equals("첫째 담당"),"옛 결과에서 의견 반영하면 그 결과의 수정본을 잇는다");
+        JSONObject blank=store.create(new JSONObject().put("date","2099-04-02").put("title","빈 문장 회의"));store.finish(blank,minutes().put("actions",new JSONArray().put(todoAction("",null)).put(todoAction("발주",null))),null);
+        store.setTodoDone("main",blank.getString("id"),blank.getString("resultId"),1,true);
+        expect(store.loadTodos("main",blank.getString("id"),blank.getString("resultId")).getJSONArray("items").getJSONObject(1).getBoolean("done"),"AI 결과에 빈 문장이 있어도 다른 줄을 체크할 수 있다");
+        File target=new File(store.context.getCacheDir(),"할일 사본 "+UUID.randomUUID());target.mkdir();Map<String,String> folders=new HashMap<>();folders.put("audio","");folders.put("transcript","");folders.put("summary",target.toURI().toString());
+        JSONObject copied=store.create(new JSONObject().put("date","2099-04-03").put("title","사본 할 일").put("participants","김민수"));String copiedId=copied.getString("id");store.finish(copied,minutes(),null);String copiedResult=copied.getString("resultId");
+        Copies writer=new Copies(store,folders,new Copies.FileSink());expect(writer.copyResult("main",copiedId,copiedResult).getJSONArray("written").length()==2,"처음 사본을 쓴다");
+        store.saveTodos("main",copiedId,copiedResult,new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("화면 기획",null,true))));
+        expect(writer.copyResult("main",copiedId,copiedResult).getJSONArray("written").length()==0&&target.listFiles().length==2,"체크만 바꾸면 사본을 새로 쓰지 않는다");
+        store.saveTodos("main",copiedId,copiedResult,new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("화면 기획","김민수",true))));
+        expect(writer.copyResult("main",copiedId,copiedResult).getJSONArray("written").length()==2&&target.listFiles().length==4,"담당자를 고치면 기존 사본을 두고 새 파일로 쓴다");
+        expect(writer.copyResult("main",copiedId,copiedResult).getJSONArray("written").length()==0,"바뀐 내용이 없으면 또 쓰지 않는다");
+        JSONObject legacyCopy=store.create(new JSONObject().put("date","2099-04-04").put("title","옛 사본 기록").put("participants","김민수"));String legacyId=legacyCopy.getString("id");store.finish(legacyCopy,minutes(),null);String legacyResult=legacyCopy.getString("resultId");
+        File legacyTarget=new File(store.context.getCacheDir(),"옛 사본 "+UUID.randomUUID());legacyTarget.mkdir();Map<String,String> legacyFolders=new HashMap<>();legacyFolders.put("audio","");legacyFolders.put("transcript","");legacyFolders.put("summary",legacyTarget.toURI().toString());
+        Copies legacyWriter=new Copies(store,legacyFolders,new Copies.FileSink());legacyWriter.copyResult("main",legacyId,legacyResult);
+        File legacyLog=new File(store.directory("main",legacyId),"사본기록-"+legacyResult+".json");JSONObject logged=new JSONObject(Store.read(legacyLog));JSONArray legacyItems=logged.getJSONArray("items");for(int i=0;i<legacyItems.length();i++)legacyItems.getJSONObject(i).remove("digest");Store.write(legacyLog,logged.toString());
+        expect(legacyWriter.copyResult("main",legacyId,legacyResult).getJSONArray("written").length()==0&&legacyTarget.listFiles().length==2,"지문 없는 옛 사본 기록은 내용이 같으면 새로 쓰지 않는다");
+        store.saveTodos("main",legacyId,legacyResult,new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("화면 기획","김민수",false))));
+        expect(legacyWriter.copyResult("main",legacyId,legacyResult).getJSONArray("written").length()==2&&legacyTarget.listFiles().length==4,"지문 없는 옛 사본도 할 일을 고치면 새 파일로 쓴다");
+    }
     @Override public void onStart(){Bundle result=new Bundle();try{
         // 기기 시험 중에는 업데이트 확인이 실제 깃허브나 아래 AI 모의 응답에 닿지 않게 한다.
         Updates.opener=url->{throw new IOException("기기 시험 중에는 업데이트를 확인하지 않습니다.");};
@@ -651,6 +710,7 @@ public final class AndroidChecks extends Instrumentation {
         archiveChecks(new Store(testContext()));
         settingsChecks(new Store(testContext()));
         draftFailureCheck();
+        todoChecks(new Store(testContext()));
         updateChecks();
         URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){protected URLConnection openConnection(URL url){return new HttpURLConnection(url){
             final ByteArrayOutputStream sent=new ByteArrayOutputStream();

@@ -1,11 +1,13 @@
 // 네이티브 녹음 상태와 보관함별 지난 회의 및 AI 설정을 연결한다.
 (() => {
-  const $ = id => document.getElementById(id), pending = new Map(), Flow = window.VoiceFlow;
+  const $ = id => document.getElementById(id), pending = new Map(), Flow = window.VoiceFlow, Todos = window.MeetingTodos, OPEN_TODO_LIMIT = 30;
   const state = { settings: {}, connection: { keyConfigured: false, keySource: 'none', models: [], summaryModel: '' }, active: false, recording: false, busy: false, opened: null, lastState: '', lastHistory: '', lastMeetingState: '', removeArmed: false, deleteArmed: false, opener: null,
     // 앱 업데이트 상태(네이티브가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 실행 중 여부와 마지막 오류다.
     update: null, updateIntent: false, updateRunning: false, updateError: '',
     // 업데이트로 앱이 닫히면 사라질 입력이다. 평가 의견·별점, 내 형식 편집, 회의 준비 저장 실패를 따로 기억한다.
-    reviewDirty: false, customDirty: false, draftSaving: null, draftFailed: false };
+    reviewDirty: false, customDirty: false, draftSaving: null, draftFailed: false,
+    // 지금 보는 탭과, 사람이 고친 할 일 수정본·고치는 중인 줄·저장 중인 요청 수다.
+    view: 'new', todos: null, todoConfirmed: null, todoEditing: null, todoPending: 0, todoSerial: 0, todoQueue: Promise.resolve() };
   let serial = 0, draftTimer = 0;
   window.receive = (id, payload) => { const task = pending.get(id); if (!task) return; pending.delete(id); payload.error ? task.reject(new Error(payload.error)) : task.resolve(payload.value); };
   function call(method, data = {}) {
@@ -36,7 +38,7 @@
   function renderBlockers() {
     const reasons = Flow.startBlockers(snapshot()), list = $('blocker-list');
     $('blockers').hidden = state.active;
-    list.replaceChildren(...(reasons.length ? reasons.map(reason => node('li', reason.text)) : [node('li', '하단의 회의 시작을 누르면 바로 녹음합니다.')]));
+    list.replaceChildren(...(reasons.length ? reasons.map(reason => node('li', reason.text)) : [node('li', '위쪽의 회의 시작을 누르면 바로 녹음합니다.')]));
     $('blockers').classList.toggle('ready', reasons.length === 0);
     $('blockers').querySelector('.needs-title').textContent = reasons.length ? '시작 전 필요' : '준비 완료';
     $('blocker-settings').hidden = !reasons.some(reason => reason.id === 'key');
@@ -56,7 +58,12 @@
   function lock() {
     const idle = !state.busy && !state.active && !state.refining;
     $('prepare').disabled = !idle;
-    $('start').hidden = state.recording; $('finish').hidden = !state.recording;
+    // 회의가 진행 중이면 준비 칸을 접고 회의 전에 적은 내용을 읽기로 보여 준다.
+    setPrep(!state.active && !state.refining);
+    $('start').hidden = state.recording || state.view !== 'new'; $('finish').hidden = !state.recording;
+    $('console-heading').textContent = state.recording ? '녹음 중' : state.view === 'records' ? '회의 기록' : '새 회의';
+    renderPeople($('people-preview'), Todos.people($('participants').value));
+    for (const item of document.querySelectorAll('#open-todos button,#open-todos input')) item.disabled = !idle;
     // 업데이트 설치 확인 화면을 기다리는 동안에는 네이티브도 새 회의를 거절하므로 시작 단추를 잠근다.
     $('start').disabled = !Flow.canStart(snapshot()) || state.update?.status === 'confirming';
     $('start-label').textContent = state.active && !state.recording ? '분석 중' : '회의 시작';
@@ -92,6 +99,13 @@
   // 체험 횟수를 다 쓴 뒤 분석을 시도하면 안내 문구를 보이고 AI 설정을 연다.
   async function task(work) { if (state.busy) return; state.busy = true; lock(); let exhausted = false; try { await work(); } catch (error) { message(error.message); exhausted = error.message === Flow.EXHAUSTED_MESSAGE; } finally { state.busy = false; lock(); } if (exhausted && !$('settings').open) openSettings(); }
 
+  function showView(view) {
+    state.view = view; $('view-new').hidden = view !== 'new'; $('view-records').hidden = view !== 'records';
+    for (const [id, name] of [['tab-new', 'new'], ['tab-records', 'records']]) { if (name === view) $(id).setAttribute('aria-current', 'page'); else $(id).removeAttribute('aria-current'); }
+    window.scrollTo(0, 0); lock();
+  }
+  function renderPeople(host, names) { host.replaceChildren(...names.map((name, index) => { const row = node('li'); row.append(node('b', index + 1), node('span', name)); return row; })); }
+  function filterHistory() { const query = $('history-search').value.trim().toLowerCase(); for (const button of $('history').querySelectorAll('button')) button.hidden = Boolean(query) && !button.dataset.search.includes(query); }
   function setPrep(open) {
     $('prep').hidden = !open; $('prepare').setAttribute('aria-expanded', String(open));
   }
@@ -162,14 +176,107 @@
     if (data.skipped) $('history').append(node('p', '읽지 못한 기록 ' + data.skipped + '개', 'hint'));
     if (!entries.length) $('history').append(node('p', '보관된 회의가 없습니다.', 'empty'));
     for (const entry of entries) {
-      const button = node('button'); button.type = 'button'; button.dataset.location = entry.location; button.dataset.id = entry.id;
+      const button = node('button'); button.type = 'button'; button.dataset.location = entry.location; button.dataset.id = entry.id; button.dataset.search = `${entry.title || '제목 미정 회의'} ${entry.date || ''} ${entry.projectName || ''}`.toLowerCase();
       const label = entry.state !== 'complete' ? stateLabels[entry.state] : Flow.outputFormat(entry.outputFormat) === 'custom' && entry.customFormat?.name ? entry.customFormat.name : Flow.FORMAT_LABELS[Flow.outputFormat(entry.outputFormat)];
       button.append(node('small', entry.date + ' · ' + entry.dailySequence + '차'), node('strong', entry.title || '제목 미정 회의'), node('span', label || '보관', 'state ' + (entry.state === 'failed' || entry.state === 'interrupted' ? 'failed' : '')));
       if (entry.projectName) button.append(node('small', '이전 프로젝트: ' + entry.projectName));
       if (entry.stars) button.append(node('small', '★ ' + entry.stars));
-      button.onclick = () => task(() => open(entry.location, entry.id, button, entry.resultId));
+      button.onclick = () => openRow(entry.location, entry.id, button, entry.resultId);
       $('history').append(button);
     }
+    filterHistory(); await loadOpenTodos();
+  }
+  function currentTodos() { return Todos.effective(state.result.data, state.todos); }
+  function renderMinutes() {
+    const r = state.result; $('minutes').replaceChildren();
+    if (!r?.data) return;
+    renderSections($('minutes'), Flow.minutesSections(r.format, Todos.apply(r.data, state.todos), r.custom), renderTodos);
+  }
+  function renderTodosAgain(focusKey) { renderMinutes(); if (focusKey) $('minutes').querySelector(`[data-todo-focus="${focusKey}"]`)?.focus(); }
+  function renderTodos(host, title, undecided) {
+    // 저장된 결과에서만 고칠 수 있다. 참석자를 안 적은 회의는 번호 없이 체크만 된다.
+    const section = node('section', null, 'todo-section'), people = Todos.people(state.result.participants), finalized = !!state.todos?.finalized, editable = !!state.opened?.resultId, assigning = editable && people.length > 0 && !finalized;
+    section.append(node('h3', title));
+    if (assigning) { section.append(node('p', '번호를 누르면 담당자 이름이 들어가고 복사·공유에도 반영됩니다.', 'todo-hint')); const legend = node('ol', null, 'people'); renderPeople(legend, people); section.append(legend); }
+    const items = currentTodos().map((item, index) => ({ ...item, index })), rows = node('ol', null, 'todo-list');
+    // 번호를 누르는 동안에는 줄이 움직이지 않게 맞추기를 끝낸 뒤에만 이름순으로 보여 준다.
+    for (const item of finalized ? Todos.sorted(items) : items) rows.append(todoRow(item, people, assigning, editable, undecided));
+    section.append(rows);
+    if (editable && people.length) {
+      const finish = node('button', finalized ? '담당자 다시 맞추기' : '맞추기 완료', 'button todo-finish'); finish.type = 'button'; finish.dataset.todoFocus = 'finish';
+      finish.onclick = () => commitTodos({ finalized: !finalized, items: currentTodos() }, 'finish'); section.append(finish);
+    }
+    host.append(section);
+  }
+  function todoRow(item, people, assigning, editable, undecided) {
+    const row = node('li', null, `todo-row${item.done ? ' is-done' : ''}`), check = node('input'), box = node('label', null, 'todo-check');
+    check.type = 'checkbox'; check.checked = item.done; check.disabled = !editable; check.setAttribute('aria-label', `${item.task} 완료`); check.dataset.todoFocus = `${item.index}:check`;
+    check.onchange = () => updateTodo(item.index, { done: check.checked }, check.dataset.todoFocus); box.append(check); row.append(box);
+    if (state.todoEditing?.index === item.index) { row.append(todoEditor()); return row; }
+    row.append(node('span', item.task, 'todo-task'));
+    const meta = node('span', null, 'todo-meta'); meta.append(node('span', item.owner || (undecided ? '담당 미정' : ''), 'todo-owner'), node('span', item.due || (undecided ? '기한 미정' : ''), 'todo-due')); row.append(meta);
+    if (editable && people.length) {
+      const tools = node('div', null, 'todo-tools');
+      if (assigning) people.forEach((name, position) => {
+        const button = node('button', position + 1, 'todo-num'); button.type = 'button'; button.setAttribute('aria-pressed', String(item.owner === name)); button.setAttribute('aria-label', `${position + 1}번 ${name}`); button.dataset.todoFocus = `${item.index}:n${position + 1}`;
+        button.onclick = () => updateTodo(item.index, { owner: currentTodos()[item.index].owner === name ? null : name }, button.dataset.todoFocus); tools.append(button);
+      });
+      const edit = node('button', '수정', 'todo-edit'); edit.type = 'button'; edit.setAttribute('aria-label', `${item.task} 수정`); edit.dataset.todoFocus = `${item.index}:edit`;
+      edit.onclick = () => { state.todoEditing = { index: item.index, task: item.task, due: item.due || '' }; renderTodosAgain(`${item.index}:task`); lock(); }; tools.append(edit); row.append(tools);
+    }
+    return row;
+  }
+  function todoEditor() {
+    const box = node('div', null, 'todo-editor'), editing = state.todoEditing;
+    const field = (name, label, max, placeholder) => { const input = node('input'); input.value = editing[name]; input.maxLength = max; input.placeholder = placeholder; input.setAttribute('aria-label', label); input.dataset.todoFocus = `${editing.index}:${name}`; input.oninput = () => { editing[name] = input.value; }; return input; };
+    const actions = node('div', null, 'row'), save = node('button', '저장', 'button primary'), cancel = node('button', '취소', 'button'); save.type = 'button'; cancel.type = 'button';
+    save.onclick = saveTodoEdit; cancel.onclick = () => { const index = editing.index; state.todoEditing = null; clearTodoNotice(); renderTodosAgain(`${index}:edit`); lock(); }; actions.append(save, cancel);
+    box.append(field('task', '할 일 문장', Todos.LIMITS.task, '할 일'), field('due', '기한', Todos.LIMITS.field, '기한 (선택)'), actions); return box;
+  }
+  async function saveTodoEdit() {
+    const editing = state.todoEditing; if (!editing) return;
+    if (!editing.task.trim()) { message('할 일 문장을 적어 주세요.'); return; }
+    const items = currentTodos().map(item => ({ ...item })); Object.assign(items[editing.index], { task: editing.task.trim(), due: editing.due.trim() || null });
+    // 저장에 실패하면 고치던 칸을 그대로 두어 입력을 잃지 않게 한다.
+    if (await commitTodos({ finalized: !!state.todos?.finalized, items }, `${editing.index}:task`)) { state.todoEditing = null; clearTodoNotice(); renderTodosAgain(`${editing.index}:edit`); lock(); }
+  }
+  function updateTodo(index, patch, focusKey) { const items = currentTodos().map(item => ({ ...item })); Object.assign(items[index], patch); return commitTodos({ finalized: !!state.todos?.finalized, items }, focusKey); }
+  function commitTodos(next, focusKey) {
+    // 저장 대상을 지금 결과로 고정한다. 저장 도중 화면이 바뀌어도 원래 결과에만 저장한다.
+    const target = { ...state.opened }, serial = ++state.todoSerial; state.todos = next; state.todoPending++; renderTodosAgain(focusKey); lock();
+    state.todoQueue = state.todoQueue.then(async () => {
+      try { await call('saveTodos', { ...target, todos: { finalized: next.finalized, items: next.items.map(({ task, owner, due, done }) => ({ task, owner, due, done })) } }); if (state.opened?.resultId === target.resultId) state.todoConfirmed = next; await loadOpenTodos(); return true; }
+      // 뒤에 더 누른 저장이 남아 있으면 그 저장이 목록 전체를 다시 쓰므로 되돌리지 않는다. 마지막 저장이 실패했을 때만 저장이 확인된 값으로 돌아간다.
+      catch (error) { if (state.opened?.resultId === target.resultId && serial === state.todoSerial) { state.todos = state.todoConfirmed; renderTodosAgain(focusKey); } message(`할 일을 저장하지 못했습니다. ${error.message}`); return false; }
+      finally { state.todoPending--; clearTodoNotice(); lock(); }
+    });
+    return state.todoQueue;
+  }
+  const TODO_NOTICES = { editing: '고치던 할 일을 저장하거나 취소해 주세요.', saving: '할 일을 저장하는 중입니다. 잠시 뒤 다시 눌러 주세요.' };
+  function todoHolding() { if (!state.todoEditing && !state.todoPending) return false; message(state.todoEditing ? TODO_NOTICES.editing : TODO_NOTICES.saving); return true; }
+  // 막을 이유가 없어졌으면 안내를 남겨 두지 않는다. 저장 실패처럼 다른 안내는 그대로 둔다.
+  function clearTodoNotice() { if (state.todoEditing || state.todoPending || !Object.values(TODO_NOTICES).includes($('message').textContent)) return; clearTimeout(message.timer); $('message').hidden = true; }
+  async function loadOpenTodos() {
+    try {
+      const { items = [] } = await call('openTodos');
+      $('open-status').textContent = !items.length ? '남은 일이 없습니다.' : items.length > OPEN_TODO_LIMIT ? `최근 ${OPEN_TODO_LIMIT}건 · 전체 ${items.length}건` : `${items.length}건`;
+      $('open-todos').replaceChildren(...items.slice(0, OPEN_TODO_LIMIT).map(openTodoRow));
+    } catch (error) { $('open-status').textContent = `확인 실패. ${error.message}`; }
+  }
+  function openTodoRow(item) {
+    const row = node('li'), box = node('label'), check = node('input'), button = node('button', item.task, 'open-todo-open');
+    check.type = 'checkbox'; check.setAttribute('aria-label', `${item.task} 완료`); button.type = 'button'; button.append(node('small', [item.owner, item.due, item.title].filter(Boolean).join(' · ')));
+    // 회의록 저장과 같은 줄로 보내고, 저장이 끝날 때까지 업데이트 설치를 막는다.
+    check.onchange = () => {
+      state.todoPending++; lock();
+      state.todoQueue = state.todoQueue.then(async () => {
+        try { await call('todoDone', { location: item.location, id: item.id, resultId: item.resultId, index: item.index, done: true }); await loadOpenTodos(); return true; }
+        catch (error) { check.checked = false; message(error.message); return false; }
+        finally { state.todoPending--; clearTodoNotice(); lock(); }
+      });
+    };
+    button.onclick = () => openRow(item.location, item.id, button, item.resultId);
+    box.append(check); row.append(box, button); return row;
   }
   function list(title, items, host = $('minutes')) { if (!items?.length) return; host.append(node('h3', title)); const ul = node('ul'); for (const item of items) ul.append(node('li', item)); host.append(ul); }
   function renderUsage(record) {
@@ -181,20 +288,25 @@
     for (const row of rows) { const tr = node('tr'), th = node('th'); th.scope = 'row'; th.append(node('span', `${row.kind} · ${row.model}`), node('small', [`${row.requests}회`, row.note].filter(Boolean).join(' · '))); tr.append(th, node('td', row.input), node('td', row.output), node('td', row.total)); body.append(tr); }
     table.append(head, body); host.append(table);
   }
+  // 저장이 끝나기 전에 회의를 다시 읽으면 저장 전 할 일이 화면에 올라와 저장본과 어긋난다.
+  function openRow(location, id, opener, resultId) { if (state.todoPending) { message(TODO_NOTICES.saving); return; } task(() => open(location, id, opener, resultId)); }
   async function open(location, id, opener, resultId = null) {
     const data = await call('open', { location, id, ...(resultId == null ? {} : { resultId }) });
     const { record, minutes, transcript } = data;
+    // 목록의 회의를 열면 닫았을 때 그 목록으로 돌아오게 회의 기록 탭으로 옮겨 둔다.
+    if (opener?.closest?.('#view-records') && state.view !== 'records') showView('records');
     const selected = data.resultId || record.resultId || resultId; state.opened = { location, id, ...(selected == null ? {} : { resultId: selected }) }; state.opener = opener || state.opener;
     $('meeting-date').textContent = `${record.date} · ${record.dailySequence}차 회의`;
     $('meeting-title').textContent = record.title || '회의';
     $('meeting-status').textContent = record.message || '녹음 파일을 보관했습니다.';
     $('meeting-notes').textContent = record.notes || ''; $('meeting-notes-wrap').hidden = !record.notes;
-    $('transcript').textContent = transcript; $('minutes').replaceChildren();
+    $('transcript').textContent = transcript;
     const format = Flow.outputFormat(record.outputFormat), custom = format === 'custom' ? record.customFormat || null : null, label = custom ? custom.name : Flow.FORMAT_LABELS[format === 'custom' ? 'meeting' : format];
-    if (minutes) renderSections($('minutes'), Flow.minutesSections(format, minutes, custom));
-    else $('minutes').append(node('p', `아직 ${label}${format === 'tasks' ? '가' : '이'} 없습니다. 아래 재분석으로 다시 만들 수 있습니다.`, 'hint'));
+    state.todos = data.todos || null; state.todoConfirmed = state.todos; state.todoEditing = null; if (data.todosUnreadable) message('저장된 할 일 수정본을 읽지 못해 AI 결과를 보여 줍니다. 원본 파일은 보존합니다.');
+    state.result = { label, minutes: !!minutes, transcript: !!transcript, data: minutes || null, format, custom, participants: record.participants || '' };
+    renderMinutes();
+    if (!minutes) $('minutes').append(node('p', `아직 ${label}${format === 'tasks' ? '가' : '이'} 없습니다. 아래 재분석으로 다시 만들 수 있습니다.`, 'hint'));
     renderUsage(record);
-    state.result = { label, minutes: !!minutes, transcript: !!transcript };
     const versions = data.versions || []; $('result-version').replaceChildren(...versions.map((version,index) => {
       const option = node('option', [`${index + 1}번째 결과`, savedLabel(version.savedAt), Flow.FORMAT_LABELS[Flow.outputFormat(version.outputFormat)], version.refined && '의견 반영본', version.stars && `별 ${version.stars}개`].filter(Boolean).join(' · ')); option.value = version.id; return option;
     })); $('result-version').value = selected || ''; $('version-wrap').hidden = versions.length < 2;
@@ -207,7 +319,7 @@
     $('result').hidden = false; document.body.style.overflow = 'hidden'; $('main').inert = true; document.querySelector('.topbar').inert = true; document.querySelector('.dock').inert = true; $('result').scrollTop = 0; $('result').focus();
     lock();
   }
-  function renderSections(host, sections) {
+  function renderSections(host, sections, renderActions = null) {
     // 출력 형식마다 같은 요약 자료를 다른 순서와 제목으로 보여 준다.
     for (const section of sections) {
       if (section.type === 'overview') {
@@ -217,7 +329,8 @@
       } else if (section.type === 'topics') {
         if (section.title && section.topics.length) host.append(node('h3', section.title));
         for (const topic of section.topics) { host.append(node(section.title ? 'h4' : 'h3', topic.title)); for (const text of topic.points || []) host.append(node('p', text)); }
-      } else if (section.items.length) list(section.title, section.items, host);
+      } else if (section.key === 'actions' && section.items.length && renderActions) renderActions(host, section.title, section.empty != null);
+      else if (section.items.length) list(section.title, section.items, host);
       else if (section.empty) host.append(node('h3', section.title), node('p', section.empty, 'hint'));
     }
   }
@@ -316,13 +429,14 @@
     const review = await call('review', {...target,stars:state.stars || null,comment:$('review-comment').value.trim()});
     state.reviewDirty = false; $('review-state').textContent = '평가를 저장했습니다. 요금은 들지 않습니다.'; await history(); return review;
   }
-  $('result-version').onchange = () => { const target = {...state.opened}, resultId = $('result-version').value; task(() => open(target.location,target.id,state.opener,resultId)); };
+  $('result-version').onchange = () => { if (todoHolding()) { $('result-version').value = state.opened.resultId || ''; return; } const target = {...state.opened}, resultId = $('result-version').value; task(() => open(target.location,target.id,state.opener,resultId)); };
   for (const button of document.querySelectorAll('[data-stars]')) button.onclick = () => {
     const stars = Number(button.dataset.stars); state.stars = state.stars === stars ? null : stars; state.reviewDirty = true; renderStars(); lock();
   };
   $('review-comment').oninput = () => { state.reviewDirty = true; lock(); };
   $('save-review').onclick = () => { const target = {...state.opened}; task(() => saveReview(target)); };
   $('refine').onclick = () => {
+    if (todoHolding()) return;
     const target = {...state.opened}, feedback = $('review-comment').value.trim();
     task(async () => {
       if (!feedback || $('review-comment').value.length > 1000) throw new Error('의견은 1,000자 이하로 입력하세요.');
@@ -361,7 +475,7 @@
   $('settings-preview').addEventListener('cancel', event => { if (state.busy) event.preventDefault(); });
   $('settings-preview').addEventListener('close', () => { if (state.importToken) { state.importToken = null; call('cancelSettings').catch(() => {}); } });
   function closeResult() {
-    if ($('result').hidden || state.busy) return; const target = state.opened; state.reviewDirty = false; $('result').hidden = true; document.body.style.overflow = ''; $('main').inert = false; document.querySelector('.topbar').inert = false; document.querySelector('.dock').inert = false; state.opened = null;
+    if ($('result').hidden || state.busy || todoHolding()) return; const target = state.opened; state.reviewDirty = false; $('result').hidden = true; document.body.style.overflow = ''; $('main').inert = false; document.querySelector('.topbar').inert = false; document.querySelector('.dock').inert = false; state.opened = null;
     const opener = document.contains(state.opener) ? state.opener : [...$('history').querySelectorAll('button')].find(button => button.dataset.location === target?.location && button.dataset.id === target?.id);
     state.opener = null; if (opener) opener.focus(); lock();
   }
@@ -376,6 +490,9 @@
       // 받는 동안 녹음·분석이 시작되면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 다시 눌러야 설치한다.
       if (state.active || state.refining) state.updateIntent = false;
       document.body.classList.toggle('recording', state.recording);
+      // 녹음 중에는 준비 칸이 접히므로 회의 전에 적은 참석자와 내용을 읽기로 보여 준다.
+      const recordingInfo = state.recording ? [meeting.participants && `참석자 ${meeting.participants}`, meeting.notes].filter(Boolean).join('\n') : '';
+      $('recording-info').textContent = recordingInfo; $('recording-info').hidden = !recordingInfo;
       if (state.active) {
         state.lastMeetingState = '';
         $('record-state').textContent = state.recording ? '녹음 중' : '분석 중';
@@ -437,10 +554,13 @@
     state.formatChosen = false; $('output-format').value = newMeetingFormat(); setPrep(false); await poll(true);
   });
   $('finish').onclick = () => task(async () => { await call('finish'); $('workflow').textContent = '녹음을 저장하고 분석합니다.'; });
-  $('retry').onclick = () => task(async () => {
+  $('retry').onclick = () => { if (!todoHolding()) task(async () => {
     if (!Flow.canAnalyze(state.connection)) { openSettings(null, 'ai'); throw new Error(state.connection.accessMode === 'exhausted' ? Flow.EXHAUSTED_MESSAGE : '설정의 AI 연결에서 API 키를 먼저 등록하세요.'); }
-    await call('analyze', { ...state.opened }); await poll(true); });
+    await call('analyze', { ...state.opened }); await poll(true); }); };
   $('refresh').onclick = () => task(history);
+  $('tab-new').onclick = () => showView('new');
+  $('tab-records').onclick = () => showView('records');
+  $('history-search').oninput = filterHistory;
   $('close-result').onclick = closeResult;
   $('share-all').onclick = () => task(() => call('share', { ...state.opened, kind: 'all' }));
   // 결과 화면: 보고 있는 탭의 내용을 바로 복사하거나 다른 앱으로 공유한다.
@@ -490,7 +610,7 @@
   window.handleBack = () => {
     for (const dialog of [...document.querySelectorAll('dialog')].reverse()) if (dialog.open) { if (dialog.id !== 'settings-preview' || !state.busy) dialog.close(); return true; }
     if (!$('result').hidden) { closeResult(); return true; }
-    if (!$('prep').hidden) { setPrep(false); return true; }
+    if (state.view === 'records') { showView('new'); return true; }
     return false;
   };
 
@@ -504,6 +624,8 @@
     else if (state.busy) reasons.push('진행 중인 작업이 끝난 뒤 설치하세요.');
     // 별점과 의견을 모두 비운 것은 저장할 수 없는 상태(저장 단추가 잠김)라 지켜야 할 입력으로 보지 않는다.
     if (state.reviewDirty && (state.stars || $('review-comment').value.trim())) reasons.push('평가 의견을 저장하거나 지운 뒤 설치하세요.');
+    if (state.todoPending) reasons.push('할 일을 저장하는 중입니다. 저장이 끝난 뒤 설치하세요.');
+    if (state.todoEditing) reasons.push('고치던 할 일을 저장하거나 취소한 뒤 설치하세요.');
     if (state.customDirty) reasons.push('내 형식 변경을 저장한 뒤 설치하세요.');
     if (state.importToken) reasons.push('설정 불러오기 확인을 먼저 마치세요.');
     if ($('api-key').value.trim()) reasons.push('입력한 API 키를 등록하거나 지운 뒤 설치하세요.');

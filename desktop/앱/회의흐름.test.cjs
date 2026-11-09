@@ -9,9 +9,9 @@ function fixture(summaryResponse, responses = {}) {
   const element = () => ({ value: '', checked: true, hidden: false, disabled: false, open: false, textContent: '', dataset: {}, style: {}, children: [],
     classList: { add() {}, remove() {} }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
     addEventListener() {}, setAttribute() {}, removeAttribute() {}, querySelectorAll() { return []; }, querySelector() { return null; },
-    focus() {}, showModal() { this.open = true; }, close() { this.open = false; } });
+    focus() {}, show() { this.open = true; }, showModal() { this.open = true; }, close() { this.open = false; } });
   const nodes = new Map(), calls = [], summaryBodies = [], posts = [], requests = [];
-  const sandbox = { crypto, Blob, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: { MeetingFormats: require('./출력형식.js') },
+  const sandbox = { crypto, Blob, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: { MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
     document: { getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element },
     async fetch(url, options = {}) {
@@ -51,7 +51,7 @@ test('지난 회의 목록에 이전 프로젝트 꼬리표·별 개수·읽지 
   const [old, fresh] = historyItems(ui);
   assert.match(old, /이전 프로젝트: 홈페이지 개편/);
   assert.match(old, /별 4개/);
-  assert.match(fresh, /업무 정리 완료/);
+  assert.match(fresh, /업무 정리/);
   assert.doesNotMatch(fresh, /이전 프로젝트|별 \d개/);
 });
 
@@ -60,7 +60,7 @@ test('분석 전 녹음은 목록에 제목 미정 회의로 보인다', async (
     { location: 'main', id: crypto.randomUUID(), title: '', date: '2026-10-23', dailySequence: 2, outputFormat: 'meeting', analyzed: false, audioCount: 2, expectedParts: 2, refined: false }] } });
   await loadHistory();
   const [item] = historyItems(ui);
-  assert.match(item, /2026-10-23 · 2차 · 제목 미정 회의/);
+  assert.match(item, /제목 미정 회의 \| 2026-10-23 · 2차/);
   assert.match(item, /분석 대기/);
   assert.doesNotMatch(ui['history-status'].textContent, /읽지 못한/);
 });

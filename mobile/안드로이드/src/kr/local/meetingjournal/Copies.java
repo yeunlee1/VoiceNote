@@ -120,14 +120,17 @@ final class Copies {
     static boolean match(JSONObject entry,String key,Object value,String folder){return entry!=null&&String.valueOf(value).equals(String.valueOf(entry.opt(key)))&&folder.equals(entry.optString("folder"));}
     static Source text(String value){return ()->new ByteArrayInputStream(value.getBytes(StandardCharsets.UTF_8));}
     static Source file(File file){return ()->new FileInputStream(file);}
-    JSONArray attempt(JSONObject report,JSONArray items,File log,String kind,String key,Object value,String folder,String name,String mime,Source source)throws Exception{
+    static String digest(String value)throws Exception{StringBuilder out=new StringBuilder();for(byte part:java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)))out.append(String.format(Locale.ROOT,"%02x",part));return out.toString();}
+    JSONArray attempt(JSONObject report,JSONArray items,File log,String kind,String key,Object value,String folder,String name,String mime,Source source)throws Exception{return attempt(report,items,log,kind,key,value,folder,name,mime,source,null,null);}
+    // digest를 주면 내용이 달라졌을 때 기존 사본을 그대로 두고 새 파일로 쓴다. 옛 기록에는 지문이 없어 고치기 전 내용의 지문과 비교한다.
+    JSONArray attempt(JSONObject report,JSONArray items,File log,String kind,String key,Object value,String folder,String name,String mime,Source source,String digest,String originalDigest)throws Exception{
         if(folder==null||folder.isEmpty()){report.getJSONArray("skipped").put(new JSONObject().put("kind",kind).put("reason","설정에서 저장 위치를 고르지 않았습니다."));return items;}
         JSONObject previousSuccess=null;
         for(int i=0;i<items.length();i++){JSONObject item=items.optJSONObject(i);if(match(item,key,value,folder)&&item.optBoolean("ok")){
             previousSuccess=item;
-            try{if(sink.exists(item.optString("uri"))){report.getJSONArray("skipped").put(new JSONObject().put("kind",kind).put("reason","이미 이 폴더에 저장했습니다."));return items;}}catch(Exception inaccessible){}
+            try{if(sink.exists(item.optString("uri"))&&(digest==null||digest.equals(item.optString("digest",originalDigest)))){report.getJSONArray("skipped").put(new JSONObject().put("kind",kind).put("reason","이미 이 폴더에 저장했습니다."));return items;}}catch(Exception inaccessible){}
         }}
-        JSONObject entry=new JSONObject().put(key,value).put("folder",folder).put("uri","").put("name",name).put("ok",false);
+        JSONObject entry=new JSONObject().put(key,value).put("folder",folder).put("uri","").put("name",name).put("ok",false);if(digest!=null)entry.put("digest",digest);
         try{Created saved=sink.write(folder,name,mime,source);entry.put("uri",saved.uri).put("name",saved.name).put("ok",true);report.getJSONArray("written").put(new JSONObject().put("kind",kind).put("uri",saved.uri).put("name",saved.name));}
         catch(Exception ex){String message=error(ex);entry.put("message",message);report.getJSONArray("failed").put(new JSONObject().put("kind",kind).put("message",message));}
         if(!entry.optBoolean("ok")&&previousSuccess!=null)entry=previousSuccess;
@@ -137,10 +140,11 @@ final class Copies {
     }
     JSONObject copyResult(String location,String id,String resultId)throws Exception{
         synchronized(Store.class){
-            JSONObject record=store.result(location,id,resultId),minutes=record.optJSONObject("minutes");if(minutes==null)throw new IOException("정리된 결과에만 사본을 저장할 수 있습니다.");String selected=record.getString("resultId");File dir=store.directory(location,id),resultLog=new File(dir,"사본기록-"+selected+".json");JSONArray items=log(resultLog);JSONObject report=report();String prefix=prefix(record,selected);
+            JSONObject record=store.result(location,id,resultId),minutes=record.optJSONObject("minutes");if(minutes==null)throw new IOException("정리된 결과에만 사본을 저장할 수 있습니다.");JSONObject original=minutes;minutes=store.appliedMinutes(location,id,record);String selected=record.getString("resultId");File dir=store.directory(location,id),resultLog=new File(dir,"사본기록-"+selected+".json");JSONArray items=log(resultLog);JSONObject report=report();String prefix=prefix(record,selected);
             items=attempt(report,items,resultLog,"transcript","kind","transcript",folders.get("transcript"),prefix+"-전사.txt","text/plain",file(new File(dir,"전사.txt")));
-            items=attempt(report,items,resultLog,"summaryMd","kind","summaryMd",folders.get("summary"),prefix+"-요약.md","text/markdown",text(MeetingDocument.markdown(record,minutes)));
-            items=attempt(report,items,resultLog,"summaryTxt","kind","summaryTxt",folders.get("summary"),prefix+"-요약.txt","text/plain",text(MeetingDocument.text(record,minutes)));
+            String markdown=MeetingDocument.markdown(record,minutes),plain=MeetingDocument.text(record,minutes);
+            items=attempt(report,items,resultLog,"summaryMd","kind","summaryMd",folders.get("summary"),prefix+"-요약.md","text/markdown",text(markdown),digest(markdown),digest(MeetingDocument.markdown(record,original)));
+            items=attempt(report,items,resultLog,"summaryTxt","kind","summaryTxt",folders.get("summary"),prefix+"-요약.txt","text/plain",text(plain),digest(plain),digest(MeetingDocument.text(record,original)));
             File audioLog=new File(dir,"사본기록-원음.json");JSONArray audioItems=log(audioLog),audio=record.optJSONArray("audio");
             if(audio!=null)for(int i=0;i<audio.length();i++){
                 File source=new File(dir,audio.getString(i));if(!dir.getCanonicalFile().equals(source.getCanonicalFile().getParentFile())){report.getJSONArray("failed").put(new JSONObject().put("kind","audio").put("message","원음 파일 위치를 확인하세요."));continue;}

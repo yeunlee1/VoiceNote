@@ -15,13 +15,13 @@ function fixture({ routes = {}, confirmAnswer = true, webview = false } = {}) {
       classList: { add() {}, remove() {} }, removeAttribute(name) { delete this.attributes[name]; }, setAttribute(name, value) { this.attributes[name] = value; },
       addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }, dispatch(type, event = {}) { for (const fn of listeners[type] || []) fn({ target: node, ...event }); },
       querySelectorAll() { return []; }, querySelector() { return null; }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
-      remove() {}, focus() {}, click() { this.clicked = (this.clicked || 0) + 1; this.dispatch('click'); }, showModal() { this.open = true; }, close() { this.open = false; this.dispatch('close'); } };
+      remove() {}, focus() {}, click() { this.clicked = (this.clicked || 0) + 1; this.dispatch('click'); }, show() { this.open = true; }, showModal() { this.open = true; }, close() { this.open = false; this.dispatch('close'); } };
     return node;
   };
   const nodes = new Map(), calls = [], downloads = [], messages = [], anchors = [], webviewListeners = [];
   const json = (body, status = 200) => Response.json(body, { status });
   const sandbox = { crypto, Blob, AbortController, DOMException, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval,
-    confirm: () => confirmAnswer, window: { addEventListener() {}, MeetingFormats: require('./출력형식.js'),
+    confirm: () => confirmAnswer, window: { addEventListener() {}, MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js'),
       // 웹뷰(Windows 창) 안에서는 화면과 창이 메시지를 주고받는다. 시험은 보낸 메시지를 모으고 받은 메시지를 직접 넣는다.
       ...(webview ? { chrome: { webview: { postMessage(message) { messages.push(message); }, addEventListener(type, fn) { if (type === 'message') webviewListeners.push(fn); } } } } : {}) },
     URL: { createObjectURL: (blob) => { downloads.push(blob); return 'blob:test'; }, revokeObjectURL() {} },
@@ -73,7 +73,7 @@ test('선택한 출력 형식을 요청·저장·내보내기·화면에 쓰고 
   assert.equal(review.exportDocument().outputFormat, 'tasks');
   const headings = texts(review.ui.minutes).filter((value) => ['업무 요약', '할 일', '미확정 항목', '상세 회의 내용', '합의된 방향'].includes(value));
   assert.deepEqual(headings, ['업무 요약', '할 일', '미확정 항목']);
-  assert.ok(texts(review.ui.minutes).includes('초안 작성 · 담당 미정 · 기한 미정'));
+  for (const piece of ['초안 작성', '담당 미정', '기한 미정']) assert.ok(texts(review.ui.minutes).includes(piece), piece);
   assert.match(review.lines().join('\n'), /## 할 일\n- 초안 작성 · 담당 미정 · 기한 미정/);
   review.ui['output-format'].value = 'summary';
   assert.equal(review.stale(), true);

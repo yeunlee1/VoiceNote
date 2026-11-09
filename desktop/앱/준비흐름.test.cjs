@@ -12,12 +12,12 @@ function fixture({ summary, meeting, shared } = {}) {
       classList: { add() {}, remove() {} }, addEventListener() {}, removeAttribute(name) { delete this.attributes[name]; },
       setAttribute(name, value) { this.attributes[name] = value; }, querySelectorAll() { return []; }, querySelector() { return null; },
       append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
-      focus() { focused = this; }, showModal() { this.open = true; }, close() { this.open = false; } };
+      focus() { focused = this; }, show() { this.open = true; }, showModal() { this.open = true; }, close() { this.open = false; } };
     return node;
   };
   let focused = null;
   const nodes = new Map(), calls = [], summaryBodies = [], meetingBodies = [];
-  const sandbox = { crypto, Blob, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: shared ? { MeetingAiUsage: require('./AI사용량.js'), MeetingFormats: require('./출력형식.js') } : { MeetingFormats: require('./출력형식.js') },
+  const sandbox = { crypto, Blob, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: shared ? { MeetingAiUsage: require('./AI사용량.js'), MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') } : { MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
     document: { getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element },
     async fetch(url, options = {}) {

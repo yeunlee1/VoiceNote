@@ -278,3 +278,30 @@ test('금지 문자·이모지·줄바꿈·300자 제목도 유효한 이름이�
   }
   assert.equal(files(target).length, 7);
 });
+
+test('담당자를 고친 뒤 다시 저장하면 기존 사본을 덮지 않고 새 파일로 쓰고 체크만 바꾸면 쓰지 않는다', async t => {
+  const { store, request } = await start(t);
+  const [audio, transcript, summary] = [folder(t), folder(t), folder(t)];
+  await request('/api/settings', { storage: { audio, transcript, summary } });
+  const record = result();
+  await request('/api/meetings/main', record);
+  const [first] = files(summary).filter(name => name.endsWith('.txt'));
+  const before = fs.readFileSync(path.join(summary, first), 'utf8');
+  const todo = (owner, done) => ({ finalized: false, items: [{ task: '상세 화면 만들기', owner, due: '10월 30일', done }] });
+  const copies = route => request(route, {});
+  const route = `/api/meetings/main/${record.id}/copies`;
+  await request(`/api/meetings/main/${record.id}/todos`, todo('이대리', true));
+  const onlyChecked = await copies(route);
+  assert.deepEqual(onlyChecked.body.copies.written, [], '체크는 회의록 내용이 아니므로 새로 쓰지 않는다');
+  assert.equal(files(summary).length, 2);
+  await request(`/api/meetings/main/${record.id}/todos`, todo('김과장', true));
+  const changed = await copies(route);
+  assert.deepEqual(changed.body.copies.written.map(item => item.kind).sort(), ['summaryMd', 'summaryTxt']);
+  assert.equal(files(summary).length, 4);
+  assert.equal(fs.readFileSync(path.join(summary, first), 'utf8'), before, '기존 사본은 그대로 둔다');
+  const added = changed.body.copies.written.find(item => item.kind === 'summaryTxt').path;
+  assert.match(fs.readFileSync(added, 'utf8'), /김과장/);
+  assert.deepEqual(log(store, `사본기록-${record.id}.json`).items.filter(item => item.kind === 'summaryTxt').map(item => path.basename(item.name)), [path.basename(added)]);
+  const again = await copies(route);
+  assert.deepEqual(again.body.copies.written, [], '바뀐 내용이 없으면 또 쓰지 않는다');
+});
