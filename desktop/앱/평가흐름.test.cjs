@@ -13,13 +13,13 @@ function fixture({ routes = {}, confirmAnswer = true } = {}) {
       classList: { add() {}, remove() {} }, removeAttribute(name) { delete this.attributes[name]; }, setAttribute(name, value) { this.attributes[name] = value; },
       addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }, dispatch(type, event = {}) { for (const fn of listeners[type] || []) fn({ target: node, ...event }); },
       querySelectorAll() { return []; }, querySelector() { return null; }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
-      remove() {}, focus() {}, click() { this.dispatch('click'); }, showModal() { this.open = true; }, close() { this.open = false; this.dispatch('close'); } };
+      remove() {}, focus() {}, click() { this.dispatch('click'); }, show() { this.open = true; }, showModal() { this.open = true; }, close() { this.open = false; this.dispatch('close'); } };
     return node;
   };
   const nodes = new Map(), calls = [];
   const json = (body, status = 200) => Response.json(body, { status });
   const sandbox = { crypto, Blob, AbortController, DOMException, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval,
-    confirm: () => confirmAnswer, window: { addEventListener() {}, MeetingFormats: require('./출력형식.js') },
+    confirm: () => confirmAnswer, window: { addEventListener() {}, MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
     document: { body: element('body'), getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element },
     async fetch(url, options = {}) {

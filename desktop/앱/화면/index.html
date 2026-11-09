@@ -10,6 +10,7 @@
 <script src="./ai-usage.js" defer></script>
 <script src="./formats.js" defer></script>
 <script src="./release-notes.js" defer></script>
+<script src="./todos.js" defer></script>
 <script src="./app.js" defer></script>
 </head>
 <body>
@@ -27,47 +28,56 @@
   <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3.5v8M7.2 6.5a7 7 0 1 0 9.6 0"/></symbol>
   <symbol id="i-cancel" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9 9l6 6M15 9l-6 6"/></symbol>
   <symbol id="i-update" viewBox="0 0 24 24"><path d="M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5 15.5v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.3-4.3"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.75v.5"/></symbol>
 </svg>
 <a class="skip-link" href="#main">본문으로 이동</a>
-<header class="topbar">
-  <div class="wordmark"><svg class="app-symbol" aria-hidden="true" focusable="false"><use href="#app-symbol"/></svg><strong>VoiceNote</strong></div>
-  <button id="open-settings" class="ai-chip" type="button" aria-haspopup="dialog" aria-controls="settings"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-sliders"/></svg><span>설정</span><span id="ai-status-label" class="ai-chip-state">확인 중</span></button>
-  <button id="update-chip" class="update-chip" type="button" aria-haspopup="dialog" aria-controls="about" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-update"/></svg><span id="update-chip-label">새 버전</span></button>
-</header>
-
-<div class="workbench">
+<div class="app-shell">
 <nav class="rail" aria-label="지난 회의">
+  <div class="rail-brand"><svg class="app-symbol" aria-hidden="true" focusable="false"><use href="#app-symbol"/></svg><strong>VoiceNote</strong></div>
+  <label class="rail-search"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-search"/></svg><input id="history-search" type="search" placeholder="회의 검색" aria-label="회의 검색" autocomplete="off" /><kbd>Ctrl K</kbd></label>
+  <button id="prepare" class="button button-primary rail-new" type="button" aria-expanded="false" aria-controls="meeting-setup"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg>새 회의</button>
   <section class="rail-section rail-history" aria-labelledby="history-title">
     <h2 id="history-title" class="rail-heading">지난 회의</h2>
     <p id="history-status" class="rail-meta">보관된 회의를 불러오는 중입니다.</p>
     <div id="meeting-history" class="history-list"></div>
   </section>
-  <section class="rail-section rail-tools" aria-label="작업 도구">
-    <button id="clear" class="tool-button" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-eraser"/></svg>현재 화면 비우기</button>
-    <button id="shutdown" class="tool-button" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-power"/></svg>도구 종료</button>
-    <p class="rail-meta">화면을 비워도 보관된 회의와 원음은 지워지지 않습니다.</p>
-  </section>
 </nav>
 
 <main id="main" class="desk" tabindex="-1">
-  <div class="desk-head">
-    <a class="mobile-jump" href="#history-title">지난 회의 목록으로 이동</a>
-    <h1 id="meeting-heading" class="desk-title">새 회의</h1>
-    <ol id="stage" class="stage" aria-label="회의 진행 단계">
-      <li data-stage="prepare"><span class="stage-mark" aria-hidden="true"></span>준비</li>
-      <li data-stage="record"><span class="stage-mark" aria-hidden="true"></span>녹음</li>
-      <li data-stage="analyze"><span class="stage-mark" aria-hidden="true"></span>분석</li>
-      <li data-stage="done"><span class="stage-mark" aria-hidden="true"></span>완료</li>
-    </ol>
-  </div>
-
-  <section class="sheet" aria-labelledby="prepare-heading">
-    <h2 id="prepare-heading" class="visually-hidden">회의 준비</h2>
-    <div class="sheet-prepare">
-    <button id="prepare" class="button button-outline prepare-button" type="button" aria-expanded="false" aria-controls="meeting-setup"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-prepare"/></svg>회의 준비</button>
-
-    <div id="meeting-setup" class="setup" hidden>
+  <div id="desk-work" class="desk-work">
+    <header class="desk-bar">
+      <h1 id="meeting-heading" class="desk-title">새 회의</h1>
+      <ol id="stage" class="stage" aria-label="회의 진행 단계">
+        <li data-stage="prepare"><span class="stage-mark" aria-hidden="true"></span>준비</li>
+        <li data-stage="record"><span class="stage-mark" aria-hidden="true"></span>녹음</li>
+        <li data-stage="analyze"><span class="stage-mark" aria-hidden="true"></span>분석</li>
+        <li data-stage="done"><span class="stage-mark" aria-hidden="true"></span>완료</li>
+      </ol>
+      <div class="console-actions">
+        <button id="start" class="button button-record" type="button" disabled aria-describedby="start-hint"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-mic"/></svg>회의 시작</button>
+        <button id="stop" class="button button-stop" type="button" disabled hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-stop"/></svg>회의 종료</button>
+        <button id="cancel-permission" class="button button-quiet" type="button" hidden>허가 요청 취소</button>
+      </div>
+    </header>
+    <div class="desk-scroll">
+      <p id="consent-notice" class="fine-print">녹음 전에 참석자에게 녹음과 AI 분석(OpenAI 전송)을 알려 주세요.</p>
+      <div id="start-hint" class="start-hint" aria-live="polite"></div>
+      <section class="sheet" aria-labelledby="record-title">
+        <h2 id="record-title" class="visually-hidden">회의 준비와 녹음</h2>
+        <div class="console">
+          <div class="console-body">
+            <span id="timer" class="timer" role="timer" aria-label="녹음 시간">00:00</span>
+            <div class="meter-wrap">
+              <div class="meter-track" role="meter" aria-label="마이크 음량" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="level-meter"><span id="level-fill"></span></div>
+              <span id="audio-size" class="size-label">0 MB / 22 MB</span>
+            </div>
+            <span id="record-state" class="state-pill">대기</span>
+          </div>
+          <p id="recording-info" class="recording-info" hidden></p>
+        </div>
+        <div id="meeting-setup" class="setup" hidden>
       <div class="field-grid">
         <label class="field field-wide">회의명 <span class="field-note">선택 · 비워 두면 AI가 회의 내용을 보고 정합니다</span><input id="title" maxlength="160" autocomplete="off" /></label>
         <label class="field">회의 날짜<input id="date" type="date" /></label>
@@ -87,79 +97,51 @@
           <p id="format-example-text" class="fine-print"></p>
           <div id="format-example-body" class="minutes-content format-example-body" aria-label="예시 결과"></div>
         </section>
-        <label class="field field-wide">참석자<input id="participants" maxlength="1000" placeholder="이름 또는 팀" autocomplete="off" /></label>
+        <label class="field field-wide">참석자<input id="participants" maxlength="1000" placeholder="이름을 쉼표로 구분해 적으세요" autocomplete="off" /></label>
+        <ol id="people-preview" class="people field-wide" aria-label="참석자 번호"></ol>
         <label class="field field-wide">상세 회의내용 <span class="field-note">이번 회의의 안건·배경 메모</span><textarea id="meeting-notes" rows="5" maxlength="4000" aria-describedby="notes-help" placeholder="예. 1) 표준 양식 확정 범위 2) 개발 순서 3) 담당자 정하기"></textarea></label>
       </div>
       <p id="notes-help" class="fine-print">상세 회의내용은 이 회의에만 저장되고, 요약할 때 사전 참고 자료로만 전달됩니다. 회의에서 확정된 사실로 취급하지 않습니다.</p>
       <div class="button-row">
         <button id="microphone-volume" class="button button-quiet" type="button">마이크 음량 100% 설정</button>
-        <button id="setup-close" class="button button-quiet" type="button">준비 내용 접기</button>
+        <button id="setup-close" class="button button-quiet" type="button" hidden>준비 내용 접기</button>
       </div>
       <p id="microphone-status" class="fine-print" role="status">Windows 기본 마이크를 100%로 설정하고 음소거를 해제합니다.</p>
     </div>
-    </div>
-
-    <div class="sheet-run">
-    <div class="console" aria-labelledby="record-title">
-      <div class="console-head">
-        <h2 id="record-title" class="console-title">녹음</h2>
-        <span id="record-state" class="state-pill">대기</span>
-      </div>
-      <div class="console-body">
-        <span id="timer" class="timer" role="timer" aria-label="녹음 시간">00:00</span>
-        <div class="meter-wrap">
-          <div class="meter-track" role="meter" aria-label="마이크 음량" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="level-meter"><span id="level-fill"></span></div>
-          <span id="audio-size" class="size-label">0 MB / 22 MB</span>
+        <div class="progress-block">
+          <p id="workflow-status" class="workflow-status" role="status" aria-live="polite">‘회의 시작’을 누르면 바로 녹음합니다.</p>
+          <div class="button-row">
+            <button id="retry-analysis" class="button button-outline" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-retry"/></svg>저장·분석 다시 시도</button>
+            <button id="cancel-ai" class="button button-quiet" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-cancel"/></svg>분석 취소</button>
+            <button id="open-result" class="button button-primary" type="button" aria-haspopup="dialog" aria-controls="meeting-detail" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-document"/></svg><span id="open-result-label">회의록 보기</span></button>
+          </div>
         </div>
-      </div>
-      <div class="console-actions">
-        <button id="start" class="button button-record" type="button" disabled aria-describedby="start-hint"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-mic"/></svg>회의 시작</button>
-        <button id="stop" class="button button-stop" type="button" disabled hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-stop"/></svg>회의 종료</button>
-        <button id="cancel-permission" class="button button-quiet" type="button" hidden>허가 요청 취소</button>
-      </div>
-      <p id="consent-notice" class="fine-print">녹음 전에 참석자에게 녹음과 AI 분석(OpenAI 전송)을 알려 주세요.</p>
-      <div id="start-hint" class="start-hint" aria-live="polite"></div>
+        <ol id="audio-parts" class="audio-parts" aria-label="녹음 파일 목록"></ol>
+        <p class="fine-print">긴 회의는 파일당 약 59분 또는 22MB에서 나눠 녹음합니다. 회의 종료 후 모든 파일을 저장한 다음 분석합니다. 녹음 중에는 창을 닫지 마세요.</p>
+        <details class="import-details"><summary>기존 음성 파일로 회의록 만들기</summary><label class="file-pick">원음 불러오기<input id="audio-file" type="file" multiple accept="audio/webm,audio/mp4,audio/wav,.webm,.m4a,.mp4,.wav" /></label></details>
+      </section>
     </div>
-
-    <div class="progress-block">
-      <p id="workflow-status" class="workflow-status" role="status" aria-live="polite">‘회의 시작’을 누르면 바로 녹음합니다.</p>
-      <div class="button-row">
-        <button id="retry-analysis" class="button button-outline" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-retry"/></svg>저장·분석 다시 시도</button>
-        <button id="cancel-ai" class="button button-quiet" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-cancel"/></svg>분석 취소</button>
-        <button id="open-result" class="button button-primary" type="button" aria-haspopup="dialog" aria-controls="meeting-detail" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-document"/></svg><span id="open-result-label">회의록 보기</span></button>
-      </div>
+  </div>
+  <dialog id="meeting-detail" class="result-view" aria-labelledby="detail-title">
+  <div class="result-bar">
+    <div class="result-tabs" role="tablist" aria-label="회의 결과">
+      <button id="tab-minutes" class="result-tab" type="button" role="tab" aria-selected="true" aria-controls="panel-minutes">정리본</button>
+      <button id="tab-transcript" class="result-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-transcript" tabindex="-1">전사문</button>
     </div>
-
-    <ol id="audio-parts" class="audio-parts" aria-label="녹음 파일 목록"></ol>
-    <p class="fine-print">긴 회의는 파일당 약 59분 또는 22MB에서 나눠 녹음합니다. 회의 종료 후 모든 파일을 저장한 다음 분석합니다. 녹음 중에는 창을 닫지 마세요.</p>
-    <details class="import-details"><summary>기존 음성 파일로 회의록 만들기</summary><label class="file-pick">원음 불러오기<input id="audio-file" type="file" multiple accept="audio/webm,audio/mp4,audio/wav,.webm,.m4a,.mp4,.wav" /></label></details>
+    <div class="result-actions">
+      <button id="save-result" class="button button-outline" type="button">텍스트 파일로 저장</button>
+      <button id="share-result" class="button button-outline" type="button" hidden>공유</button>
+      <button id="copy-result" class="button button-primary" type="button">회의록 복사</button>
+      <button class="icon-button" type="button" data-close aria-label="회의 기록 닫기"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
     </div>
-  </section>
-</main>
-</div>
-
-<dialog id="meeting-detail" class="modal modal-wide modal-page" aria-labelledby="detail-title">
-  <div class="modal-head">
+  </div>
+  <div class="modal-body result-page">
     <div class="detail-heading">
-      <p id="detail-meta" class="modal-meta"></p>
       <h2 id="detail-title" class="modal-title">회의 기록</h2>
+      <p id="detail-meta" class="modal-meta"></p>
       <div class="version-row">
         <span id="refined-badge" class="refined-badge" hidden>의견 반영본</span>
         <label id="result-version-field" class="version-field" hidden>결과 버전<select id="result-versions"></select></label>
-      </div>
-    </div>
-    <button class="icon-button" type="button" data-close aria-label="회의 기록 닫기"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
-  </div>
-  <div class="modal-body result-page">
-    <div class="result-bar">
-      <div class="result-tabs" role="tablist" aria-label="회의 결과">
-        <button id="tab-minutes" class="result-tab" type="button" role="tab" aria-selected="true" aria-controls="panel-minutes">정리본</button>
-        <button id="tab-transcript" class="result-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-transcript" tabindex="-1">전사문</button>
-      </div>
-      <div class="result-actions">
-        <button id="copy-result" class="button button-primary" type="button">회의록 복사</button>
-        <button id="share-result" class="button button-outline" type="button" hidden>공유</button>
-        <button id="save-result" class="button button-outline" type="button">텍스트 파일로 저장</button>
       </div>
     </div>
     <p id="result-status" class="fine-print" role="status"></p>
@@ -216,6 +198,23 @@
     </section>
   </div>
 </dialog>
+</main>
+
+<aside id="open-panel" class="inspector" aria-labelledby="open-title" tabindex="-1">
+  <h2 id="open-title" class="rail-heading">아직 안 끝난 일</h2>
+  <p id="open-status" class="rail-meta">확인 중입니다.</p>
+  <ul id="open-todos" class="open-todos"></ul>
+</aside>
+</div>
+
+<footer class="statusbar">
+  <button id="open-settings" class="ai-chip" type="button" aria-haspopup="dialog" aria-controls="settings"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-sliders"/></svg><span>설정</span><span id="ai-status-label" class="ai-chip-state">확인 중</span></button>
+  <button id="update-chip" class="update-chip" type="button" aria-haspopup="dialog" aria-controls="about" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-update"/></svg><span id="update-chip-label">새 버전</span></button>
+  <button id="open-toggle" class="tool-button open-toggle" type="button" aria-expanded="false" aria-controls="open-panel">아직 안 끝난 일</button>
+  <span class="grow"></span>
+  <button id="clear" class="tool-button" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-eraser"/></svg>현재 화면 비우기</button>
+  <button id="shutdown" class="tool-button" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-power"/></svg>도구 종료</button>
+</footer>
 
 <dialog id="settings" class="modal modal-settings" aria-labelledby="settings-title">
   <div class="modal-head">

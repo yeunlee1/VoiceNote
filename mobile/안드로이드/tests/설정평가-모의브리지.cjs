@@ -8,7 +8,7 @@ module.exports = '(' + function () {
   window.Native.request = function (id, method, json) {
     const d = JSON.parse(json);
     const reply = (value, error) => setTimeout(() => window.receive(id,{value,error}), m.delay || 0);
-    const handled = ['saveSettings','pickFolder','clearFolder','exportSettings','importSettings','cancelSettings','review','refine','copies','open','applySettings'];
+    const handled = ['saveSettings','pickFolder','clearFolder','exportSettings','importSettings','cancelSettings','review','refine','copies','open','applySettings','openTodos','saveTodos','todoDone'];
     if (!handled.includes(method)) {
       if (method === 'init') {
         const receive = window.receive;
@@ -35,7 +35,8 @@ module.exports = '(' + function () {
         const minutes=record.state==='complete'?{overview:selected==='1233'?'앞선 결과입니다.':'전체 방향 | 회의 내용을 보존합니다.',topics:[{title:'보관함',points:['원래 보관함에서 기록을 엽니다.']}],decisions:[],actions:[],openQuestions:[]}:null;
         const versions=selected?[{id:'1233',savedAt:2,outputFormat:'summary',refined:true},{id:selected==='legacy'?'legacy':'1234',savedAt:3,outputFormat:'tasks',refined:false}]:[];
         if(original.resultId==='1235')versions.push({id:'1235',savedAt:4,outputFormat:'summary',refined:true});
-        reply({record,minutes,transcript:m.noTranscript?'':'저장된 전사',resultId:selected||null,versions:m.versions||versions,review:m.reviews[selected]||null,copies:m.copyReport});
+        if(minutes&&m.todoActions){minutes.actions=m.todoActions;record.participants=m.todoParticipants||'';}
+        reply({record,minutes,transcript:m.noTranscript?'':'저장된 전사',resultId:selected||null,versions:m.versions||versions,review:m.reviews[selected]||null,copies:m.copyReport,todos:(m.savedTodos||{})[selected]||null});
       } else if (method==='review') {if(m.failReview)throw Error('평가 저장 실패');const r={stars:d.stars,comment:d.comment,savedAt:'2026-10-23T00:00:00Z'};m.reviews[d.resultId]=r;reply(r);}
       else if (method==='refine') {
         if(m.failRefine)throw Error('요약 요청에 실패했습니다.');
@@ -44,6 +45,9 @@ module.exports = '(' + function () {
         if(['failure','success'].includes(m.refineOutcome))terminal();
         reply({id:d.id,attemptId:d.attemptId});
       }
+      else if (method==='openTodos') reply({items:m.openTodos||[],skipped:0});
+      else if (method==='saveTodos') {if(m.todoFail||(m.todoFailNext>0&&m.todoFailNext--))throw Error('디스크 오류');m.savedTodos={...(m.savedTodos||{}),[d.resultId]:d.todos};reply({version:1,...d.todos});}
+      else if (method==='todoDone') {m.openTodos=(m.openTodos||[]).filter(t=>!(t.id===d.id&&t.index===d.index));reply({version:1,finalized:false,items:[]});}
       else if (method==='copies') {if(m.failCopies)throw Error('사본 저장 실패');m.copyReport=m.copiesResult||{ok:true,written:[{kind:'summaryMd',name:'회의.md'}],skipped:[],failed:[]};reply(m.copyReport);}
     } catch(error) {reply(null,error.message);}
   };

@@ -83,7 +83,7 @@
     return custom.sections.map(({ key, title }) => {
       if (key === 'overview') return { type: 'overview', title, text: String(m.overview || '') };
       if (key === 'topics') return { type: 'topics', title, topics: m.topics || [] };
-      return { type: 'list', title, items: key === 'actions' ? (m.actions || []).map(actionLine) : (m[key] || []) };
+      return { type: 'list', key, title, items: key === 'actions' ? (m.actions || []).map(actionLine) : (m[key] || []) };
     });
   }
 

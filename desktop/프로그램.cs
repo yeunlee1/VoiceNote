@@ -14,8 +14,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: AssemblyTitle("VoiceNote")]
 [assembly: AssemblyProduct("VoiceNote")]
-[assembly: AssemblyVersion("1.5.0.0")]
-[assembly: AssemblyFileVersion("1.5.0.0")]
+[assembly: AssemblyVersion("1.6.0.0")]
+[assembly: AssemblyFileVersion("1.6.0.0")]
 
 internal static class Program
 {
@@ -95,8 +95,7 @@ internal sealed class MeetingWindow : Form
         selfTest = test;
         appUpdates = updates;
         Text = "VoiceNote";
-        ClientSize = new Size(1280, 820);
-        MinimumSize = new Size(960, 680);
+        ApplyWindowSize();
         StartPosition = FormStartPosition.CenterScreen;
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         view.Dock = DockStyle.Fill;
@@ -108,6 +107,16 @@ internal sealed class MeetingWindow : Form
         Shown += async delegate { await Initialize(); };
         FormClosing += OnClosing;
         FormClosed += delegate { closing = true; StopServer(); };
+    }
+
+    // 화면 배율이 커도 웹 화면의 폭이 좁아지지 않게 창 크기를 배율에 맞추고, 화면보다 커지지 않게 작업 영역 안으로 줄인다.
+    private void ApplyWindowSize()
+    {
+        float scale;
+        using (var graphics = Graphics.FromHwnd(IntPtr.Zero)) scale = graphics.DpiX / 96f;
+        var area = Screen.FromPoint(Cursor.Position).WorkingArea;
+        MinimumSize = new Size(Math.Min((int)(960 * scale), area.Width), Math.Min((int)(680 * scale), area.Height));
+        ClientSize = new Size(Math.Min((int)(1280 * scale), area.Width - 32), Math.Min((int)(820 * scale), area.Height - 48));
     }
 
     public async Task Initialize()

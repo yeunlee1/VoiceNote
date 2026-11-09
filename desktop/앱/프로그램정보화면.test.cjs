@@ -24,7 +24,7 @@ function fixture({ updates = [snapshot('latest')], webview = true, confirmAnswer
       removeAttribute(name) { delete this.attributes[name]; }, setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
       addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }, dispatch(type, event = {}) { for (const fn of listeners[type] || []) fn({ target: node, ...event }); },
       querySelectorAll() { return []; }, querySelector() { return null; }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
-      remove() {}, focus() { focused.push(node); }, scrollIntoView() {}, click() { this.dispatch('click'); }, showModal() { this.open = true; }, close() { this.open = false; this.dispatch('close'); } };
+      remove() {}, focus() { focused.push(node); }, scrollIntoView() {}, click() { this.dispatch('click'); }, show() { this.open = true; }, showModal() { this.open = true; }, close() { this.open = false; this.dispatch('close'); } };
     return node;
   };
   const nodes = new Map(), calls = [], messages = [], toasts = [], focused = [];
@@ -34,7 +34,7 @@ function fixture({ updates = [snapshot('latest')], webview = true, confirmAnswer
   const sandbox = { crypto, Blob, AbortController, DOMException, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval,
     confirm: () => confirmAnswer,
     window: { addEventListener() {}, removeEventListener(type) { if (type === 'beforeunload') removedGuard++; }, close() { closed++; },
-      MeetingFormats: require('./출력형식.js'), VoiceNoteReleaseNotes: notes,
+      MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js'), VoiceNoteReleaseNotes: notes,
       ...(webview ? { chrome: { webview: { postMessage(message) { messages.push(message); }, addEventListener() {} } } } : {}) },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
     document: { body: element('body'), getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: (tag) => element(tag) },

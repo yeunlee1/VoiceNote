@@ -18,7 +18,7 @@ module.exports = async ({ viewport, load, click, evaluate, until, wait, shot, ch
     check(width + 'px 설정 머리의 프로그램 정보 단추가 누르기 쉬운 크기로 화면 안에 있다', await evaluate("(()=>{const r=document.getElementById('open-about').getBoundingClientRect(),c=document.getElementById('close-settings').getBoundingClientRect();return r.width>=44&&r.height>=44&&r.left>=0&&c.right<=document.documentElement.clientWidth&&r.right<=c.left+0.5})()"));
     await click('#open-about');
     check(width + 'px 프로그램 정보가 설정 위에 열린다', await evaluate("document.getElementById('about').open&&document.getElementById('settings').open"));
-    check(width + 'px 지금 버전과 최신 안내를 보인다', (await text('about-version')) === '1.5.0' && /1\.5\.0 버전이 최신/.test(await text('update-state')));
+    check(width + 'px 지금 버전과 최신 안내를 보인다', (await text('about-version')) === '1.6.0' && /1\.6\.0 버전이 최신/.test(await text('update-state')));
     check(width + 'px 버전별 바뀐 점을 최신부터 보이고 지금 버전에 표시를 붙인다', await evaluate("(()=>{const items=[...document.querySelectorAll('#release-list > li')];return items.length===window.VoiceNoteReleaseNotes.NOTES.length&&items[0].dataset.current==='true'&&items[0].textContent.includes('지금 버전')&&items.slice(1).every(i=>i.dataset.current==='false')&&items.every(i=>i.querySelectorAll('.release-items li').length>0)})()"));
     check(width + 'px 최신이면 업데이트 단추 없이 다시 확인만 보인다', !(await shown('update-action')) && (await shown('update-check')) && await evaluate("!document.getElementById('update-check').disabled"));
     check(width + 'px 업데이트 상태 문장은 상태 알림 영역이다', await evaluate("document.getElementById('update-state').getAttribute('role')==='status'"));
@@ -33,13 +33,13 @@ module.exports = async ({ viewport, load, click, evaluate, until, wait, shot, ch
 
     // 새 버전이 있으면 첫 화면 본문 흐름 안에 안내 줄을 보이고, 누르면 프로그램 정보가 열린다.
     await load('?update=available');
-    check(width + 'px 새 버전이 있으면 첫 화면에 안내 줄을 보인다', (await shown('update-note')) && (await text('update-note-label')) === '새 버전 1.5.1');
+    check(width + 'px 새 버전이 있으면 첫 화면에 안내 줄을 보인다', (await shown('update-note')) && (await text('update-note-label')) === '새 버전 1.6.1');
     check(width + 'px 안내 줄은 조작부 위 본문 흐름 안에 있고 가로로 넘치지 않는다', await evaluate("(()=>{const e=document.getElementById('update-note'),n=e.getBoundingClientRect(),c=document.querySelector('.console').getBoundingClientRect(),w=document.documentElement.clientWidth;return n.bottom<=c.top+0.5&&n.left>=0&&n.right<=w&&n.height>=44&&document.documentElement.scrollWidth<=w&&getComputedStyle(e).position==='static'})()"));
-    check(width + 'px 안내 줄은 읽기 프로그램에 무엇을 여는지 알린다', await evaluate("document.getElementById('update-note').getAttribute('aria-label')==='새 버전 1.5.1, 프로그램 정보 열기'"));
+    check(width + 'px 안내 줄은 읽기 프로그램에 무엇을 여는지 알린다', await evaluate("document.getElementById('update-note').getAttribute('aria-label')==='새 버전 1.6.1, 프로그램 정보 열기'"));
     await shot('업데이트-' + width + '-새버전안내.png');
     await click('#update-note');
     check(width + 'px 안내 줄을 누르면 프로그램 정보가 열린다', await evaluate("document.getElementById('about').open"));
-    check(width + 'px 새 버전 안내 문장과 지금 업데이트 단추', /1\.5\.1 버전이 나왔습니다/.test(await text('update-state')) && (await text('update-action')) === '지금 업데이트' && await evaluate("!document.getElementById('update-action').disabled") && (await shown('update-fine')) && !(await shown('update-lock')));
+    check(width + 'px 새 버전 안내 문장과 지금 업데이트 단추', /1\.6\.1 버전이 나왔습니다/.test(await text('update-state')) && (await text('update-action')) === '지금 업데이트' && await evaluate("!document.getElementById('update-action').disabled") && (await shown('update-fine')) && !(await shown('update-lock')));
     check(width + 'px 새 버전 화면 가로 넘침 없음', await evaluate(fits));
     check(width + 'px 지금 업데이트와 다시 확인 단추 글자가 한 줄에 들어간다', (await oneLine('update-action')) && (await oneLine('update-check')));
     await shot('업데이트-' + width + '-정보새버전.png');
