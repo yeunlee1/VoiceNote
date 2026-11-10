@@ -54,7 +54,7 @@
       "export-settings", "import-settings", "settings-file-input", "settings-file-status", "settings-import", "settings-preview", "confirm-import", "open-data-folder",
       "review", "review-comment", "save-review", "refine", "refine-cost", "review-status", "result-versions", "result-version-field", "refined-badge",
       "copy-block", "copy-status", "copy-again", ...[1, 2, 3, 4, 5].map((stars) => `review-star-${stars}`),
-      "tab-minutes", "tab-transcript", "panel-minutes", "panel-transcript", "transcript-view", "transcript-meta", "copy-result", "share-result", "save-result", "result-status",
+      "tab-mine", "tab-minutes", "tab-transcript", "panel-mine", "panel-minutes", "panel-transcript", "transcript-view", "transcript-meta", "copy-result", "share-result", "save-result", "result-status",
       "update-chip", "update-chip-label", "open-about", "about", "about-version", "about-version-meta", "about-update", "update-state", "update-progress-row", "update-progress",
       "update-progress-text", "update-detail", "update-lock", "update-install", "update-check", "update-page", "update-note", "release-list",
       "desk-work", "recording-info", "people-preview", "history-search",
@@ -71,6 +71,8 @@
     // 사람이 고친 할 일 수정본이다. 없으면 AI 결과를 그대로 쓴다. todoEditing은 문장·기한을 고치는 중인 줄이다.
     // todoConfirmed는 파일에 저장된 것이 확인된 수정본, todoSerial은 가장 늦게 누른 저장의 번호, todoSource는 의견 반영의 출발 결과다.
     todos: null, todoConfirmed: null, todoEditing: null, todoQueue: Promise.resolve(), todoPending: 0, todoSerial: 0, todoSource: null,
+    // me는 이 회의에 저장된 나의 선택(없으면 null), mePicking은 나 고르기 상자를 펼쳤는지, meBusy는 나를 저장하는 중인지다.
+    me: null, mePicking: false, meBusy: false,
     // 열린 회의가 든 보관함(main, p1~p3)과 그 녹음 id다. 새 녹음은 언제나 main에 만든다.
     // 녹음이 서버에 있을 때만 recordingStored가 참이고, 녹음 없이 전사로 만든 회의는 meetingId(처음 결과 id)로 다음 결과를 잇는다.
     location: "main", projectName: "", recordingId: null, recordingStored: false, meetingId: null, resultId: null, recordingMetadata: null, audioStored: false, resultStored: false,
@@ -709,6 +711,8 @@
     setSavedTodos(null);
     state.todoEditing = null;
     state.todoSource = null;
+    state.me = null;
+    state.mePicking = false;
     ui.transcript.value = "";
     state.minutes = null;
     state.minutesFormat = null;
@@ -1312,6 +1316,7 @@
 
   function renderMinutes() {
     renderUsage();
+    renderMine();
     ui.minutes.replaceChildren();
     const minutes = state.minutes;
     if (!minutes) {
@@ -1473,7 +1478,164 @@
 
   function renderTodosAgain(focusKey) {
     renderMinutes();
-    if (focusKey) ui.minutes.querySelector(`[data-todo-focus="${focusKey}"]`)?.focus();
+    if (focusKey) (state.resultTab === "mine" ? ui["panel-mine"] : ui.minutes).querySelector(`[data-todo-focus="${focusKey}"]`)?.focus();
+    // 초점은 보고 있는 탭의 패널에서 되찾는다. 내 할 일 탭의 체크 상자는 mine:<번호> 열쇠를 쓴다.
+  }
+
+  function currentMe() {
+    // 이 회의에서 나로 정해진 사람이다. 이 회의에 저장된 선택, 설정의 내 이름 순서로 정하고 모르면 null이다.
+    return Todos.resolveMe(Todos.candidates(ui.participants.value, currentTodos()), state.me, state.settings?.myName || "");
+  }
+
+  function focusMine(key) {
+    const node = ui["panel-mine"].querySelector(`[data-todo-focus="${key}"]`);
+    node?.focus();
+    return Boolean(node);
+  }
+
+  function restLine(items, meName) {
+    // 내 일이 아닌 일의 수다. 담당 미정은 내 일일 수도 있는데 아직 아무에게도 가지 않은 일이라 눈에 띄게 쓴다.
+    const { unassigned, others } = Todos.rest(items, meName), line = element("div", "", "mine-rest"), text = element("span");
+    if (unassigned) text.append(element("b", `담당 미정 ${unassigned}건`));
+    if (unassigned && others) text.append(element("span", " · "));
+    if (others) text.append(element("span", `다른 사람 일 ${others}건`));
+    const all = element("button", "정리본에서 전체 보기", "button button-quiet button-small mine-all");
+    all.type = "button";
+    all.addEventListener("click", () => { showResultTab("minutes"); ui["tab-minutes"].focus(); });
+    line.append(text, all);
+    return line;
+  }
+
+  function whoBox(list, me) {
+    // 이 회의에서 나를 고르는 상자다. 참석자 번호와 이름(참석자를 안 적은 회의는 담당자 이름)이 후보다.
+    const box = element("div", "", "who-box"), group = element("div", "", "who-list"), tools = element("div", "", "button-row");
+    const locked = !todoEditable() || state.meBusy;
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", "이 회의의 사람 중에서 나 고르기");
+    list.forEach((entry, index) => {
+      const pressed = me?.name === entry.name, pick = element("button", "", "who-button");
+      pick.type = "button";
+      pick.disabled = locked;
+      pick.setAttribute("aria-pressed", String(pressed));
+      pick.dataset.todoFocus = pressed ? "who:pressed" : `who:${index}`;
+      if (entry.number) pick.append(element("b", entry.number, "num"));
+      pick.append(element("span", entry.name));
+      pick.addEventListener("click", () => {
+        // 눌린 이름을 다시 누르면 바꾸지 않고 상자만 닫는다.
+        if (!pressed) return saveMe(entry.name);
+        state.mePicking = false;
+        renderMine();
+        focusMine("me-change");
+      });
+      group.append(pick);
+    });
+    box.append(element("p", "이 회의에서 나는 누구인가요?", "who-lead"), group,
+      element("p", "한 번 고르면 이 회의에 기억합니다. 설정에 적어 둔 내 이름과 같은 사람이 있으면 앱이 미리 골라 둡니다.", "fine-print"));
+    if (state.me !== null) {
+      // 이 회의에 저장된 선택이 있으면 지울 수 있다. 지금 결과의 후보에 없어 적용되지 않는 옛 선택도 지울 수 있어야 한다.
+      const clear = element("button", "선택 지우기", "button button-quiet button-small who-clear");
+      clear.type = "button";
+      clear.disabled = locked;
+      clear.addEventListener("click", () => saveMe(null));
+      tools.append(clear);
+    }
+    if (!state.settings?.myName) {
+      const settings = element("button", "설정에 내 이름 적어 두기", "button button-quiet button-small who-settings");
+      settings.type = "button";
+      tools.append(settings);
+    }
+    if (tools.children.length) box.append(tools);
+    return box;
+  }
+
+  function renderMine() {
+    // 내 할 일 탭을 다시 그린다. 판정하지 못한 회의가 내 일이 없는 회의처럼 보이지 않게 상태마다 다른 말로 보여 준다.
+    const panel = ui["panel-mine"];
+    if (!state.minutes) return panel.replaceChildren();
+    const items = currentTodos();
+    if (!items.length) return panel.replaceChildren(element("p", "이 회의에는 정리된 할 일이 없습니다.", "mine-empty"));
+    const list = Todos.candidates(ui.participants.value, items);
+    if (!list.length) return panel.replaceChildren(element("p", "참석자를 적지 않은 회의라 누가 맡았는지 알 수 없습니다.", "mine-empty"), restLine(items, null));
+    const me = currentMe();
+    if (!me) return panel.replaceChildren(whoBox(list, null));
+    const mine = Todos.mine(items, me.name), left = mine.filter((item) => !item.done).length, editable = todoEditable();
+    const head = element("div", "", "mine-head"), title = element("div", "", "mine-title"), row = element("div", "", "me-row");
+    title.append(element("h3", "내가 맡은 일"));
+    if (mine.length) title.append(element("span", left ? `${left}건 남음` : "모두 끝냄", "mine-left"));
+    const change = element("button", "바꾸기", "button button-quiet button-small me-change");
+    change.type = "button";
+    change.dataset.todoFocus = "me-change";
+    change.setAttribute("aria-expanded", String(state.mePicking));
+    change.addEventListener("click", () => {
+      state.mePicking = !state.mePicking;
+      renderMine();
+      if (!state.mePicking || !(focusMine("who:pressed") || focusMine("who:0"))) focusMine("me-change");
+    });
+    row.append(element("span", "나", "me-chip"), element("span", me.name, "me-name"), change);
+    head.append(title, row);
+    const parts = [head];
+    if (state.mePicking) parts.push(whoBox(list, me));
+    if (!mine.length) parts.push(element("p", "이 회의에서 내가 맡은 일은 없습니다.", "mine-empty"));
+    else {
+      const rows = element("ul", "", "mine-list");
+      for (const item of mine) {
+        const line = element("li", "", `mine-row${item.done ? " is-done" : ""}`), label = element("label"), check = document.createElement("input");
+        check.type = "checkbox";
+        check.checked = item.done;
+        check.disabled = !editable;
+        check.dataset.todoFocus = `mine:${item.index}`;
+        check.addEventListener("change", () => updateTodo(item.index, { done: check.checked }, check.dataset.todoFocus));
+        label.append(check, element("span", item.task, "mine-task"));
+        line.append(label, element("span", item.due || "", "mine-due"));
+        // 기한은 저장된 글자 그대로 쓰고, 없으면 비워 둔다.
+        rows.append(line);
+      }
+      parts.push(rows);
+    }
+    parts.push(restLine(items, me.name));
+    panel.replaceChildren(...parts);
+  }
+
+  async function saveMe(name) {
+    // 이 회의에서 나를 고르거나(이름) 고른 것을 지운다(null). 먼저 화면에 반영하고, 실패하면 앞선 선택으로 되돌린다.
+    if (state.meBusy || !todoEditable()) return false;
+    const resultId = state.resultId, route = `/api/meetings/${state.location}/${resultId}/me`, before = state.me;
+    // 저장할 결과를 지금 결과로 고정한다. 저장 도중 새 회의로 넘어가도 원래 회의에만 저장되고 새 화면은 바꾸지 않는다.
+    state.me = name;
+    state.mePicking = false;
+    state.meBusy = true;
+    state.todoPending++;
+    // 할 일 저장과 같은 대기 수를 올려 저장이 끝날 때까지 결과 닫기·다른 회의 열기·업데이트 설치를 같은 규칙으로 막는다.
+    renderMine();
+    focusMine("me-change");
+    refresh();
+    try {
+      const { me = null } = await api(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+      if (state.resultId === resultId) {
+        state.me = me;
+        ui["result-status"].textContent = "";
+        announce(me ? `이 회의에서 나는 ${me}입니다.` : "고른 나를 지웠습니다.");
+      }
+      await loadHistory();
+      return true;
+    } catch (error) {
+      if (state.resultId === resultId) {
+        state.me = before;
+        ui["result-status"].textContent = `나를 저장하지 못했습니다. ${error.message}`;
+      } else announce(`이전 회의의 나를 저장하지 못했습니다. ${error.message}`);
+      return false;
+    } finally {
+      state.meBusy = false;
+      state.todoPending--;
+      clearTodoNotice();
+      if (state.resultId === resultId) {
+        const inside = ui["panel-mine"].contains?.(document.activeElement);
+        renderMine();
+        // 다시 그리면 초점이 있던 단추가 사라지므로 같은 자리의 새 단추로 돌려준다.
+        if (inside && !focusMine("me-change")) focusMine("who:0");
+      }
+      refresh();
+    }
   }
 
   function assignTodo(index, name, focusKey) {
@@ -1611,27 +1773,47 @@
     return format === "custom" && currentCustom() ? currentCustom().name : formatLabels[format === "custom" ? "meeting" : format];
   }
 
+  const RESULT_TABS = ["mine", "minutes", "transcript"];
+
+  function availableTab(wanted) {
+    // 내 할 일 탭은 정리본이 있는 결과에만 있다. 바라는 탭을 열 수 없으면 지금처럼 정리본을, 정리본 없이 전사만 있으면 전사문을 연다.
+    const transcript = Boolean(ui.transcript.value.trim());
+    if (wanted === "mine" && state.minutes) return "mine";
+    if (wanted === "transcript" && transcript) return "transcript";
+    return state.minutes || !transcript ? "minutes" : "transcript";
+  }
+
   function showResultTab(tab) {
-    // 결과 창은 정리본과 전사문을 탭으로 나누고, 위쪽 버튼은 보고 있는 탭의 내용을 다룬다.
+    // 결과 창은 내 할 일·정리본·전사문을 탭으로 나누고, 위쪽 버튼은 보고 있는 탭의 내용을 다룬다.
     state.resultTab = tab;
-    const minutes = tab === "minutes";
-    ui["tab-minutes"].setAttribute("aria-selected", String(minutes));
-    ui["tab-transcript"].setAttribute("aria-selected", String(!minutes));
-    ui["tab-minutes"].tabIndex = minutes ? 0 : -1;
-    ui["tab-transcript"].tabIndex = minutes ? -1 : 0;
-    ui["panel-minutes"].hidden = !minutes;
-    ui["panel-transcript"].hidden = minutes;
+    for (const name of RESULT_TABS) {
+      const selected = name === tab;
+      ui[`tab-${name}`].setAttribute("aria-selected", String(selected));
+      ui[`tab-${name}`].tabIndex = selected ? 0 : -1;
+      ui[`panel-${name}`].hidden = !selected;
+    }
     ui["result-status"].textContent = "";
+    if (state.mePicking) {
+      // 탭을 옮기면 펼쳐 둔 나 고르기 상자를 접는다.
+      state.mePicking = false;
+      renderMine();
+    }
     renderResultActions();
   }
 
   function renderResultActions() {
-    const minutes = state.resultTab === "minutes", name = minutes ? resultLabel() : "전사문";
+    // 정리본이 없어지면 내 할 일 탭을 볼 수 없으므로 열 수 있는 탭으로 옮긴다.
+    if (state.resultTab === "mine" && !state.minutes) return showResultTab(availableTab());
+    const mine = state.resultTab === "mine", minutes = state.resultTab === "minutes", name = minutes ? resultLabel() : "전사문";
     const ready = minutes ? Boolean(state.minutes) && !stale() : Boolean(ui.transcript.value.trim());
+    ui["tab-mine"].hidden = !state.minutes;
     ui["copy-result"].textContent = `${name} 복사`;
     ui["save-result"].textContent = `${name} 텍스트 파일로 저장`;
     ui["share-result"].textContent = `${name} 공유`;
-    ui["share-result"].hidden = typeof navigator === "undefined" || typeof navigator.share !== "function";
+    // 내 할 일 탭에서는 정리본·전사문을 다루는 단추를 감춘다.
+    ui["copy-result"].hidden = mine;
+    ui["save-result"].hidden = mine;
+    ui["share-result"].hidden = mine || typeof navigator === "undefined" || typeof navigator.share !== "function";
     for (const id of ["copy-result", "save-result", "share-result"]) ui[id].disabled = !ready;
     if (state.transcriptShown !== ui.transcript.value) {
       // 전사문이 바뀐 경우에만 다시 그린다. 긴 전사를 매번 다시 그리지 않는다.
@@ -2005,7 +2187,7 @@
     for (const button of ui["meeting-history"].querySelectorAll("button")) button.hidden = Boolean(query) && !button.dataset.search.includes(query);
   }
 
-  async function openMeeting(location, id, opener) {
+  async function openMeeting(location, id, opener, tab = "mine") {
     if (state.historyBusy || state.flowBusy || state.recorders.size || state.aiController || state.reviewBusy || state.copyBusy) return;
     // 저장이 끝나기 전에 회의를 다시 읽으면 저장 전 할 일이 화면에 올라와 저장본과 어긋난다.
     if (state.todoPending) { announce(TODO_NOTICES.saving); return; }
@@ -2013,7 +2195,7 @@
     state.historyBusy = true;
     refresh();
     try {
-      const { meeting, versions, review, todos, todosUnreadable } = await api(`/api/meetings/${location}/${id}`);
+      const { meeting, versions, review, todos, todosUnreadable, me = null } = await api(`/api/meetings/${location}/${id}`);
       const parts = [];
       for (const audio of meeting.audio || []) {
         const response = await fetch(`/api/recordings/${location}/${meeting.recordingId || id}/audio/${audio.index}`, { headers: { "X-Meeting-Token": state.token } });
@@ -2045,7 +2227,8 @@
       setSavedTodos(todos);
       state.todoEditing = null;
       state.todoSource = null;
-      ui["result-status"].textContent = todosUnreadable ? "저장된 할 일 수정본을 읽지 못해 AI 결과를 보여 줍니다. 원본 파일은 보존합니다." : "";
+      state.me = me;
+      state.mePicking = false;
       state.summarySource = summaryInput();
       state.notesSaved = true;
       state.usage = usageTools().normalize(meeting.analysis?.usage);
@@ -2062,7 +2245,9 @@
       ui["retry-analysis"].hidden = Boolean(meeting.minutes) || !state.audioStored;
       ui["archive-status"].textContent = meeting.minutes ? "보관된 회의록입니다." : meeting.transcript ? "음성과 전사 원문은 보관되어 있습니다. 다시 분석하면 전사를 재사용합니다." : "음성은 보관되어 있고 분석은 완료되지 않았습니다.";
       if (meeting.transcript && !meeting.minutes) document.getElementById("transcript-details").open = true;
-      openDialog(ui["meeting-detail"], opener);
+      openDialog(ui["meeting-detail"], opener, tab);
+      ui["result-status"].textContent = todosUnreadable ? "저장된 할 일 수정본을 읽지 못해 AI 결과를 보여 줍니다. 원본 파일은 보존합니다." : "";
+      // 창을 열면서 안내 칸을 비우므로, 수정본을 읽지 못했다는 안내는 창을 연 뒤에 적는다.
       workflow(meeting.minutes ? "지난 회의를 불러왔습니다. ‘회의록 보기’에서 결과·내보내기·재분석을 할 수 있습니다." : state.audioStored ? "음성 저장 완료. AI 연결을 확인한 뒤 다시 분석하세요." : "일부 음성 저장이 끝나지 않은 회의입니다. 원래 녹음 창에서 저장을 완료하세요.");
       return true;
     } catch (error) { workflow(error.message); }
@@ -2261,11 +2446,11 @@
       .filter((node) => !node.disabled && !node.hidden && node.offsetParent !== null);
   }
 
-  function openDialog(dialog, opener) {
+  function openDialog(dialog, opener, tab) {
     if (!dialog) return;
     const result = dialog === ui["meeting-detail"];
     // 회의 결과는 가운데 영역에 열려 있어 다른 회의를 고르면 내용만 바꾼다.
-    if (result) { renderMinutes(); showResultTab(state.minutes || !ui.transcript.value.trim() ? "minutes" : "transcript"); }
+    if (result) { renderMinutes(); showResultTab(availableTab(tab)); }
     if (dialog.open) {
       // 목록이나 패널에서 고르면 초점이 결과 밖에 남아 Esc가 닿지 않는다. 안으로 옮기고 닫을 때 돌아갈 곳도 새로 누른 항목으로 바꾼다.
       // 결과 안의 버전 선택에서 온 요청은 불러오는 동안 초점이 잠시 빠질 뿐이므로 돌아갈 곳을 바꾸지 않는다.
@@ -2810,14 +2995,18 @@
     ui["open-settings"].addEventListener("click", () => openSettings());
     ui["open-format-settings"].addEventListener("click", () => openSettings("settings-format", ui["open-format-settings"]));
     ui["open-result"].addEventListener("click", () => openDialog(ui["meeting-detail"], ui["open-result"]));
-    ui["tab-minutes"].addEventListener("click", () => showResultTab("minutes"));
-    ui["tab-transcript"].addEventListener("click", () => showResultTab("transcript"));
-    for (const id of ["tab-minutes", "tab-transcript"]) ui[id].addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      const next = state.resultTab === "minutes" ? "transcript" : "minutes";
-      showResultTab(next);
-      ui[next === "minutes" ? "tab-minutes" : "tab-transcript"].focus();
-    });
+    for (const name of RESULT_TABS) {
+      ui[`tab-${name}`].addEventListener("click", () => showResultTab(name));
+      ui[`tab-${name}`].addEventListener("keydown", (event) => {
+        const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+        if (!step) return;
+        // 좌우 화살표는 보이는 탭만 돈다.
+        const order = RESULT_TABS.filter((item) => !ui[`tab-${item}`].hidden);
+        const next = order[(order.indexOf(state.resultTab) + step + order.length) % order.length];
+        showResultTab(next);
+        ui[`tab-${next}`].focus();
+      });
+    }
     ui["copy-result"].addEventListener("click", () => copyResult().catch((error) => { ui["result-status"].textContent = error.message; }));
     ui["save-result"].addEventListener("click", saveResult);
     ui["share-result"].addEventListener("click", shareResult);
@@ -2866,7 +3055,7 @@
     ui["copy-again"].addEventListener("click", copyAgain);
     ui["result-versions"].addEventListener("change", async () => {
       const id = ui["result-versions"].value;
-      await openMeeting(state.location, id, ui["result-versions"]);
+      await openMeeting(state.location, id, ui["result-versions"], state.resultTab);
       renderVersions();
       // 불러오는 동안 select가 잠겨 초점을 잃으므로 되돌린다.
       ui["result-versions"].focus();

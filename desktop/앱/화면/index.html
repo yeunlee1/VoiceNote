@@ -125,6 +125,7 @@
   <dialog id="meeting-detail" class="result-view" aria-labelledby="detail-title">
   <div class="result-bar">
     <div class="result-tabs" role="tablist" aria-label="회의 결과">
+      <button id="tab-mine" class="result-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-mine" tabindex="-1" hidden>내 할 일</button>
       <button id="tab-minutes" class="result-tab" type="button" role="tab" aria-selected="true" aria-controls="panel-minutes">정리본</button>
       <button id="tab-transcript" class="result-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-transcript" tabindex="-1">전사문</button>
     </div>
@@ -145,6 +146,7 @@
       </div>
     </div>
     <p id="result-status" class="fine-print" role="status"></p>
+    <section id="panel-mine" class="result-panel mine" role="tabpanel" aria-labelledby="tab-mine" hidden></section>
     <section id="panel-minutes" class="result-panel" role="tabpanel" aria-labelledby="tab-minutes">
       <p id="archive-status" class="fine-print" role="status">분석이 끝나면 지난 회의에 자동 저장됩니다.</p>
       <button id="save-archive" class="button button-outline" type="button" disabled>저장 다시 시도</button>
