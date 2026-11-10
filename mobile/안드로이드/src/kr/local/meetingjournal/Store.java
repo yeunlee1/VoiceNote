@@ -260,16 +260,6 @@ final class Store {
             writeTodos(location,id,target.getString("resultId"),checked);return checked;
         }
     }
-    JSONObject setTodoDone(String location,String id,String resultId,int index,boolean done)throws Exception {
-        synchronized(Store.class){
-            JSONObject target=analyzedResult(location,id,resultId);String selected=target.getString("resultId");JSONArray actions=target.getJSONObject("minutes").getJSONArray("actions");JSONObject edits=loadTodos(location,id,selected);
-            JSONArray source=edits!=null&&edits.getJSONArray("items").length()==actions.length()?edits.getJSONArray("items"):actions,items=new JSONArray();
-            if(index<0||index>=source.length())throw invalidTodos();
-            for(int i=0;i<source.length();i++){JSONObject item=new JSONObject(source.getJSONObject(i).toString());item.put("done",i==index?done:item.optBoolean("done"));items.put(item);}
-            JSONObject checked=checkedTodos(new JSONObject().put("finalized",edits!=null&&edits.getBoolean("finalized")).put("items",items),actions);
-            writeTodos(location,id,selected,checked);return checked;
-        }
-    }
     // 복사·공유·고른 폴더 사본에는 사람이 고친 할 일을 합친 회의록을 쓴다. 보관된 AI 결과는 그대로 둔다.
     JSONObject appliedMinutes(String location,String id,JSONObject record)throws Exception {
         JSONObject minutes=record.getJSONObject("minutes");if(!record.has("resultId"))return minutes;
@@ -278,24 +268,6 @@ final class Store {
         List<Todos.Item> items=todoItems(edits.getJSONArray("items"));JSONArray merged=new JSONArray();
         for(int index:Todos.outputOrder(edits.getBoolean("finalized"),items,todoItems(actions)))merged.put(todoJson(items.get(index),false));
         return new JSONObject(minutes.toString()).put("actions",merged);
-    }
-    // 회의마다 최신 결과에서 아직 끝나지 않은 일만 최신 날짜순으로 모은다.
-    JSONObject openTodos()throws Exception {
-        List<JSONObject> found=new ArrayList<>();int skipped=0;
-        for(String location:LOCATIONS){
-            File[] dirs=locationDirectory(location).listFiles(File::isDirectory);if(dirs==null)continue;
-            for(File dir:dirs){if(!new File(dir,"회의정보.json").exists())continue;
-                try{JSONObject record=load(location,dir.getName());String id=record.getString("id"),resultId=latestResultId(location,record);if(resultId==null)continue;
-                    JSONObject result=result(location,id,resultId),minutes=result.optJSONObject("minutes");if(minutes==null)continue;
-                    JSONArray actions=minutes.getJSONArray("actions");JSONObject edits=loadTodos(location,id,resultId);
-                    JSONArray items=edits!=null&&edits.getJSONArray("items").length()==actions.length()?edits.getJSONArray("items"):actions;
-                    for(int i=0;i<items.length();i++){JSONObject item=items.getJSONObject(i);if(item.optBoolean("done"))continue;
-                        found.add(new JSONObject().put("location",location).put("id",id).put("resultId",resultId).put("title",result.optString("title")).put("date",record.optString("date")).put("createdAt",record.optLong("createdAt")).put("index",i).put("task",item.getString("task")).put("owner",item.opt("owner")).put("due",item.opt("due")));}
-                }catch(Exception ex){skipped++;}
-            }
-        }
-        found.sort((a,b)->{int order=b.optString("date").compareTo(a.optString("date"));return order!=0?order:Long.compare(b.optLong("createdAt"),a.optLong("createdAt"));});
-        JSONArray all=new JSONArray();for(JSONObject item:found)all.put(item);return new JSONObject().put("items",all).put("skipped",skipped);
     }
     private void carryTodos(String location,String id,String previousId,JSONObject minutes,String resultId)throws Exception {
         JSONObject edits=loadTodos(location,id,previousId);if(edits==null)return;

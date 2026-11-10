@@ -65,12 +65,7 @@ public final class MainActivity extends Activity {
             case "deleteCustomFormat": settingsIdle();store.deleteCustomFormat();answer(id,JSONObject.NULL,null);break;
             case "status": answer(id,new JSONObject().put("active",MeetingService.active).put("meeting",new JSONObject(MeetingService.snapshot)).put("connection",connection()).put("update",Updates.snapshot(this)),null);break;
             case "history": answer(id,store.history(),null);break;
-            case "openTodos": answer(id,store.openTodos(),null);break;
             case "saveTodos": fileIdle();answer(id,store.saveTodos(location,data.getString("id"),nullableString(data,"resultId"),data.getJSONObject("todos")),null);break;
-            case "todoDone":{
-                Object done=data.opt("done");if(!(done instanceof Boolean))throw new IOException("할 일 내용을 확인하세요.");
-                fileIdle();answer(id,store.setTodoDone(location,data.getString("id"),nullableString(data,"resultId"),data.getInt("index"),(Boolean)done),null);break;
-            }
             case "results": answer(id,store.results(location,data.getString("id")),null);break;
             case "review":{
                 settingsIdle();fileIdle();Object value=data.opt("stars");Integer stars=null;

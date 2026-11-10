@@ -1,4 +1,4 @@
-// 휴대폰 화면의 아래쪽 탭과 참석자 번호 맞추기·체크·이름순·저장 실패를 모의 브리지로 검증한다.
+// 휴대폰 화면의 아래쪽 탭과 참석자 번호 맞추기·체크·이름순·저장 실패, 목록 다시 그리기를 모의 브리지로 검증한다.
 module.exports = async ({ viewport, load, key, click, evaluate, until, wait, shot, check }) => {
   const actions = "[{task:'출시 일정표 수정본 공유',owner:'박서연',due:'11월 12일'},{task:'초도 물량 발주서 변경',owner:null,due:'11월 13일'},{task:'전파 인증 진행 상황 확인',owner:'이도현',due:'11월 14일'},{task:'온라인 행사 대행사 견적 비교',owner:null,due:'11월 20일'}]";
   const rows = () => evaluate("JSON.stringify([...document.querySelectorAll('.todo-row')].map(r=>r.querySelector('.todo-owner').textContent))");
@@ -8,15 +8,12 @@ module.exports = async ({ viewport, load, key, click, evaluate, until, wait, sho
   await evaluate("document.getElementById('participants').value='김민수 팀장, 박서연';document.getElementById('participants').dispatchEvent(new Event('input',{bubbles:true}))");
   check('참석자 칸에 적은 순서대로 번호를 보여 준다', await evaluate("[...document.querySelectorAll('#people-preview li')].map(l=>l.textContent).join('|')==='1김민수 팀장|2박서연'"));
   await shot('할일-새회의.png');
-  await evaluate("__mock.openTodos=[{location:'main',id:'a',resultId:'1',title:'주간 회의',date:'2026-11-06',index:0,task:'보고서 정리',owner:null,due:null}]");
   await click('#refresh'); await click('#tab-records'); await wait(80);
-  check('회의 기록 탭은 목록과 남은 일을 보여 주고 시작 단추를 숨긴다', await evaluate("document.getElementById('view-new').hidden&&!document.getElementById('view-records').hidden&&document.getElementById('start').hidden&&document.getElementById('console-heading').textContent==='회의 기록'&&document.getElementById('open-todos').children.length===1"));
+  check('회의 기록 탭은 지난 회의 목록을 보여 주고 남은 일 묶음이 없으며 시작 단추를 숨긴다', await evaluate("document.getElementById('view-new').hidden&&!document.getElementById('view-records').hidden&&document.getElementById('start').hidden&&document.getElementById('console-heading').textContent==='회의 기록'&&!document.querySelector('#open-todos,.open-block')&&document.querySelectorAll('#history button').length>0"));
   await shot('할일-회의기록.png');
   await evaluate("document.getElementById('history-search').value='없는 회의';document.getElementById('history-search').dispatchEvent(new Event('input'))");
   check('회의 검색은 맞지 않는 회의를 숨긴다', await evaluate("[...document.querySelectorAll('#history button')].every(b=>b.hidden)"));
   await evaluate("document.getElementById('history-search').value='';document.getElementById('history-search').dispatchEvent(new Event('input'))");
-  await evaluate("{const c=document.querySelector('#open-todos input');c.checked=true;c.dispatchEvent(new Event('change'))}"); await wait(80);
-  check('목록에서 체크하면 그 일을 끝난 것으로 저장하고 목록에서 뺀다', await evaluate("__mock.calls.some(c=>c.method==='todoDone'&&c.data.id==='a'&&c.data.index===0&&c.data.done===true)&&document.getElementById('open-todos').children.length===0"));
 
   await evaluate(`__mock.todoActions=${actions};__mock.todoParticipants='김민수, 박서연, 이도현, 최유진';__mock.savedTodos={}`);
   await click('#history button'); await wait(90);
@@ -70,15 +67,18 @@ module.exports = async ({ viewport, load, key, click, evaluate, until, wait, sho
   check('녹음 중에는 회의 전에 적은 참석자와 내용을 읽기로 보여 준다', await until("(()=>{const e=document.getElementById('recording-info');return !e.hidden&&e.textContent.includes('참석자 김민수, 박서연')&&e.textContent.includes('출시 일정 확인')})()"));
   await shot('할일-녹음중.png');
 
-  await load('?update=ready'); await key();
-  await evaluate("__mock.openTodos=[{location:'main',id:'a',resultId:'1',title:'주간 회의',date:'2026-11-06',index:0,task:'보고서 정리',owner:null,due:null}]");
-  await click('#refresh'); await wait(100); await click('#tab-records');
-  await evaluate("__mock.delay=900;{const c=document.querySelector('#open-todos input');c.checked=true;c.dispatchEvent(new Event('change'))}");
-  await evaluate("document.querySelector('#open-todos button').click()");
-  check('저장 중에는 남은 일 목록에서 회의를 열지 않고 알린다', await evaluate("document.getElementById('result').hidden&&!__mock.calls.some(c=>c.method==='open')&&document.getElementById('message').textContent.includes('저장하는 중')"), await evaluate("document.getElementById('message').textContent"));
-  await click('#update-note');
-  check('남은 일 목록의 체크가 저장되는 동안 업데이트 설치를 막는다', await until("document.getElementById('update-lock').textContent.includes('저장하는 중')&&document.getElementById('update-action').disabled"), await evaluate("document.getElementById('update-lock').textContent"));
-  check('저장이 끝나면 설치를 다시 허용한다', await until("__mock.calls.some(c=>c.method==='todoDone')&&document.getElementById('update-lock').hidden&&!document.getElementById('update-action').disabled"), await evaluate("document.getElementById('update-lock').hidden+' / '+document.getElementById('update-action').disabled"));
-  await evaluate('__mock.delay=0');
-  await click('[data-close=about]');
+  // 할 일을 저장하면 지난 회의 목록을 다시 읽는다. 목록을 가운데까지 내린 자리가 그대로인지 본다.
+  await load(); await key();
+  await evaluate("for(let i=0;i<12;i++)__mock.history.push({id:'aaaaaaaa-0000-4000-8000-'+String(i).padStart(12,'0'),location:'main',resultId:'1234',date:'2026-10-'+String(10+i),dailySequence:1,title:'목록 확인 '+i,state:'complete',outputFormat:'meeting',createdAt:1,audio:[]})");
+  await evaluate(`__mock.todoActions=${actions};__mock.todoParticipants='김민수, 박서연';__mock.savedTodos={}`);
+  await click('#refresh'); await click('#tab-records'); await wait(80);
+  const listY = await evaluate("(()=>{document.querySelectorAll('#history button')[8].scrollIntoView({block:'center'});return Math.round(scrollY)})()");
+  const reads = () => evaluate("__mock.calls.filter(c=>c.method==='history').length"), readsBefore = await reads();
+  await evaluate("document.querySelectorAll('#history button')[8].click()"); await wait(150);
+  await evaluate(`{const c=document.querySelector('[data-todo-focus="0:check"]');c.checked=true;c.dispatchEvent(new Event('change'))}`); await wait(200);
+  const readsAfter = await reads();
+  await click('#close-result'); await wait(80);
+  const listAfter = await evaluate('Math.round(scrollY)');
+  check('할 일을 저장해 목록을 다시 읽어도 목록이 보던 자리에 있다', listY > 0 && readsAfter > readsBefore && Math.abs(listAfter - listY) <= 4, JSON.stringify({ listY, listAfter, readsBefore, readsAfter }));
+  await evaluate('__mock.todoActions=null');
 };

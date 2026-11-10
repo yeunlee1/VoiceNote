@@ -1,6 +1,6 @@
 // 네이티브 녹음 상태와 보관함별 지난 회의 및 AI 설정을 연결한다.
 (() => {
-  const $ = id => document.getElementById(id), pending = new Map(), Flow = window.VoiceFlow, Todos = window.MeetingTodos, OPEN_TODO_LIMIT = 30;
+  const $ = id => document.getElementById(id), pending = new Map(), Flow = window.VoiceFlow, Todos = window.MeetingTodos;
   const state = { settings: {}, connection: { keyConfigured: false, keySource: 'none', models: [], summaryModel: '' }, active: false, recording: false, busy: false, opened: null, lastState: '', lastHistory: '', lastMeetingState: '', removeArmed: false, deleteArmed: false, opener: null,
     // 앱 업데이트 상태(네이티브가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 실행 중 여부와 마지막 오류다.
     update: null, updateIntent: false, updateRunning: false, updateError: '',
@@ -63,7 +63,6 @@
     $('start').hidden = state.recording || state.view !== 'new'; $('finish').hidden = !state.recording;
     $('console-heading').textContent = state.recording ? '녹음 중' : state.view === 'records' ? '회의 기록' : '새 회의';
     renderPeople($('people-preview'), Todos.people($('participants').value));
-    for (const item of document.querySelectorAll('#open-todos button,#open-todos input')) item.disabled = !idle;
     // 업데이트 설치 확인 화면을 기다리는 동안에는 네이티브도 새 회의를 거절하므로 시작 단추를 잠근다.
     $('start').disabled = !Flow.canStart(snapshot()) || state.update?.status === 'confirming';
     $('start-label').textContent = state.active && !state.recording ? '분석 중' : '회의 시작';
@@ -172,9 +171,9 @@
   }
   const stateLabels = { complete: '회의록', failed: '분석 실패', interrupted: '녹음 중단', saved: '음성 저장', analyzing: '분석 중', recording: '녹음 중' };
   async function history() {
-    const data = await call('history'), entries = data.meetings; $('history').replaceChildren();
-    if (data.skipped) $('history').append(node('p', '읽지 못한 기록 ' + data.skipped + '개', 'hint'));
-    if (!entries.length) $('history').append(node('p', '보관된 회의가 없습니다.', 'empty'));
+    const data = await call('history'), entries = data.meetings, rows = [];
+    if (data.skipped) rows.push(node('p', '읽지 못한 기록 ' + data.skipped + '개', 'hint'));
+    if (!entries.length) rows.push(node('p', '보관된 회의가 없습니다.', 'empty'));
     for (const entry of entries) {
       const button = node('button'); button.type = 'button'; button.dataset.location = entry.location; button.dataset.id = entry.id; button.dataset.search = `${entry.title || '제목 미정 회의'} ${entry.date || ''} ${entry.projectName || ''}`.toLowerCase();
       const label = entry.state !== 'complete' ? stateLabels[entry.state] : Flow.outputFormat(entry.outputFormat) === 'custom' && entry.customFormat?.name ? entry.customFormat.name : Flow.FORMAT_LABELS[Flow.outputFormat(entry.outputFormat)];
@@ -182,9 +181,11 @@
       if (entry.projectName) button.append(node('small', '이전 프로젝트: ' + entry.projectName));
       if (entry.stars) button.append(node('small', '★ ' + entry.stars));
       button.onclick = () => openRow(entry.location, entry.id, button, entry.resultId);
-      $('history').append(button);
+      rows.push(button);
     }
-    filterHistory(); await loadOpenTodos();
+    const y = window.scrollY; $('history').replaceChildren(...rows); window.scrollTo(0, y);
+    // 할 일을 저장할 때마다 목록을 다시 읽으므로, 한 번에 갈고 보던 자리를 되돌려 목록이 위로 튀지 않게 한다.
+    filterHistory();
   }
   function currentTodos() { return Todos.effective(state.result.data, state.todos); }
   function renderMinutes() {
@@ -245,7 +246,7 @@
     // 저장 대상을 지금 결과로 고정한다. 저장 도중 화면이 바뀌어도 원래 결과에만 저장한다.
     const target = { ...state.opened }, serial = ++state.todoSerial; state.todos = next; state.todoPending++; renderTodosAgain(focusKey); lock();
     state.todoQueue = state.todoQueue.then(async () => {
-      try { await call('saveTodos', { ...target, todos: { finalized: next.finalized, items: next.items.map(({ task, owner, due, done }) => ({ task, owner, due, done })) } }); if (state.opened?.resultId === target.resultId) state.todoConfirmed = next; await loadOpenTodos(); return true; }
+      try { await call('saveTodos', { ...target, todos: { finalized: next.finalized, items: next.items.map(({ task, owner, due, done }) => ({ task, owner, due, done })) } }); if (state.opened?.resultId === target.resultId) state.todoConfirmed = next; await history().catch(() => {}); return true; }
       // 뒤에 더 누른 저장이 남아 있으면 그 저장이 목록 전체를 다시 쓰므로 되돌리지 않는다. 마지막 저장이 실패했을 때만 저장이 확인된 값으로 돌아간다.
       catch (error) { if (state.opened?.resultId === target.resultId && serial === state.todoSerial) { state.todos = state.todoConfirmed; renderTodosAgain(focusKey); } message(`할 일을 저장하지 못했습니다. ${error.message}`); return false; }
       finally { state.todoPending--; clearTodoNotice(); lock(); }
@@ -256,28 +257,6 @@
   function todoHolding() { if (!state.todoEditing && !state.todoPending) return false; message(state.todoEditing ? TODO_NOTICES.editing : TODO_NOTICES.saving); return true; }
   // 막을 이유가 없어졌으면 안내를 남겨 두지 않는다. 저장 실패처럼 다른 안내는 그대로 둔다.
   function clearTodoNotice() { if (state.todoEditing || state.todoPending || !Object.values(TODO_NOTICES).includes($('message').textContent)) return; clearTimeout(message.timer); $('message').hidden = true; }
-  async function loadOpenTodos() {
-    try {
-      const { items = [] } = await call('openTodos');
-      $('open-status').textContent = !items.length ? '남은 일이 없습니다.' : items.length > OPEN_TODO_LIMIT ? `최근 ${OPEN_TODO_LIMIT}건 · 전체 ${items.length}건` : `${items.length}건`;
-      $('open-todos').replaceChildren(...items.slice(0, OPEN_TODO_LIMIT).map(openTodoRow));
-    } catch (error) { $('open-status').textContent = `확인 실패. ${error.message}`; }
-  }
-  function openTodoRow(item) {
-    const row = node('li'), box = node('label'), check = node('input'), button = node('button', item.task, 'open-todo-open');
-    check.type = 'checkbox'; check.setAttribute('aria-label', `${item.task} 완료`); button.type = 'button'; button.append(node('small', [item.owner, item.due, item.title].filter(Boolean).join(' · ')));
-    // 회의록 저장과 같은 줄로 보내고, 저장이 끝날 때까지 업데이트 설치를 막는다.
-    check.onchange = () => {
-      state.todoPending++; lock();
-      state.todoQueue = state.todoQueue.then(async () => {
-        try { await call('todoDone', { location: item.location, id: item.id, resultId: item.resultId, index: item.index, done: true }); await loadOpenTodos(); return true; }
-        catch (error) { check.checked = false; message(error.message); return false; }
-        finally { state.todoPending--; clearTodoNotice(); lock(); }
-      });
-    };
-    button.onclick = () => openRow(item.location, item.id, button, item.resultId);
-    box.append(check); row.append(box, button); return row;
-  }
   function list(title, items, host = $('minutes')) { if (!items?.length) return; host.append(node('h3', title)); const ul = node('ul'); for (const item of items) ul.append(node('li', item)); host.append(ul); }
   function renderUsage(record) {
     const rows = Flow.usageRows(record), host = $('usage'); host.replaceChildren();

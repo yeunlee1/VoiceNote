@@ -8,7 +8,7 @@ module.exports = '(' + function () {
   window.Native.request = function (id, method, json) {
     const d = JSON.parse(json);
     const reply = (value, error) => setTimeout(() => window.receive(id,{value,error}), m.delay || 0);
-    const handled = ['saveSettings','pickFolder','clearFolder','exportSettings','importSettings','cancelSettings','review','refine','copies','open','applySettings','openTodos','saveTodos','todoDone'];
+    const handled = ['saveSettings','pickFolder','clearFolder','exportSettings','importSettings','cancelSettings','review','refine','copies','open','applySettings','saveTodos'];
     if (!handled.includes(method)) {
       if (method === 'init') {
         const receive = window.receive;
@@ -45,9 +45,7 @@ module.exports = '(' + function () {
         if(['failure','success'].includes(m.refineOutcome))terminal();
         reply({id:d.id,attemptId:d.attemptId});
       }
-      else if (method==='openTodos') reply({items:m.openTodos||[],skipped:0});
       else if (method==='saveTodos') {if(m.todoFail||(m.todoFailNext>0&&m.todoFailNext--))throw Error('디스크 오류');m.savedTodos={...(m.savedTodos||{}),[d.resultId]:d.todos};reply({version:1,...d.todos});}
-      else if (method==='todoDone') {m.openTodos=(m.openTodos||[]).filter(t=>!(t.id===d.id&&t.index===d.index));reply({version:1,finalized:false,items:[]});}
       else if (method==='copies') {if(m.failCopies)throw Error('사본 저장 실패');m.copyReport=m.copiesResult||{ok:true,written:[{kind:'summaryMd',name:'회의.md'}],skipped:[],failed:[]};reply(m.copyReport);}
     } catch(error) {reply(null,error.message);}
   };

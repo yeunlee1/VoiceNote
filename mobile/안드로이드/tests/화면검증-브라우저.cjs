@@ -198,7 +198,7 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     await evaluate('__mock.delay=180');await click('#refine');await wait(35);
     check('평가 저장을 기다리는 동안 버전과 결과 조작을 잠근다',await evaluate("document.getElementById('result-version').disabled&&document.getElementById('copy-result').disabled&&document.getElementById('save-review').disabled"));
     await wait(430);
-    check('의견 반영은 평가 저장 뒤 다듬은 의견으로 요청한다',await evaluate("(()=>{const c=__mock.calls,r=c.findLastIndex(x=>x.method==='refine');return r>0&&c.slice(0,r).filter(x=>!['history','status','saveDraft','openTodos'].includes(x.method)).at(-1)?.method==='review'&&c[r].data.feedback==='담당자를 확인해 주세요.'&&c[r].data.resultId==='1234'&&!c.some(x=>x.method==='analyze')})()"));
+    check('의견 반영은 평가 저장 뒤 다듬은 의견으로 요청한다',await evaluate("(()=>{const c=__mock.calls,r=c.findLastIndex(x=>x.method==='refine');return r>0&&c.slice(0,r).filter(x=>!['history','status','saveDraft'].includes(x.method)).at(-1)?.method==='review'&&c[r].data.feedback==='담당자를 확인해 주세요.'&&c[r].data.resultId==='1234'&&!c.some(x=>x.method==='analyze')})()"));
 
     await load();await key();await evaluate('__mock.noTranscript=true');await click('#history button');await wait(60);
     await evaluate("document.getElementById('review-comment').value='고쳐 주세요';document.getElementById('review-comment').dispatchEvent(new Event('input'))");await click('#refine');await wait(60);

@@ -645,7 +645,7 @@ public final class AndroidChecks extends Instrumentation {
     static JSONObject todoAction(String task,String owner)throws Exception{return new JSONObject().put("task",task).put("owner",owner==null?JSONObject.NULL:owner).put("due",JSONObject.NULL);}
     static JSONObject todoItem(String task,String owner,boolean done)throws Exception{return todoAction(task,owner).put("done",done);}
     static void todoChecks(Store store)throws Exception{
-        // 사람이 고친 할 일이 결과 파일과 따로 저장되고 공유 문서·남은 일 목록·의견 반영에 맞게 이어지는지 확인한다.
+        // 사람이 고친 할 일이 결과 파일과 따로 저장되고 공유 문서·의견 반영에 맞게 이어지는지 확인한다.
         JSONObject record=store.create(new JSONObject().put("date","2099-04-01").put("title","할 일 회의").put("participants","김민수, 박서연"));String id=record.getString("id");
         store.finish(record,minutes().put("actions",new JSONArray().put(todoAction("일정 공유",null)).put(todoAction("발주 변경","김민수"))),null);
         String first=record.getString("resultId");File dir=store.directory("main",id),resultFile=new File(dir,"결과-"+first+".json");String before=Store.read(resultFile);
@@ -657,9 +657,6 @@ public final class AndroidChecks extends Instrumentation {
         expect(head.getString("task").equals("발주 변경")&&!head.has("done"),"담당자를 맞춘 회의록은 이름순으로 합치고 체크는 넣지 않는다");
         String text=MeetingDocument.text(record2,applied);expect(text.indexOf("발주 변경")<text.indexOf("일정 공유")&&text.contains("담당 최유진"),"공유 문서에 맞춘 담당자가 이름순으로 들어간다");
         expect(store.result("main",id,first).getJSONObject("minutes").getJSONArray("actions").getJSONObject(0).getString("task").equals("일정 공유"),"보관된 AI 결과는 그대로다");
-        List<Integer> open=new ArrayList<>();JSONArray items=store.openTodos().getJSONArray("items");for(int i=0;i<items.length();i++)if(items.getJSONObject(i).getString("id").equals(id))open.add(items.getJSONObject(i).getInt("index"));
-        expect(open.equals(Collections.singletonList(1)),"아직 안 끝난 일에는 끝나지 않은 일만 모은다");
-        store.setTodoDone("main",id,first,1,true);items=store.openTodos().getJSONArray("items");boolean left=false;for(int i=0;i<items.length();i++)left|=items.getJSONObject(i).getString("id").equals(id);expect(!left,"목록에서 체크하면 빠진다");
         for(JSONObject bad:new JSONObject[]{new JSONObject(),new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("하나",null,false))),new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem(" ",null,false)).put(todoItem("둘",null,false))),new JSONObject().put("finalized","no").put("items",new JSONArray().put(todoItem("하나",null,false)).put(todoItem("둘",null,false)))}){
             try{store.saveTodos("main",id,first,bad);throw new AssertionError("잘못된 수정본을 저장했습니다: "+bad);}catch(IOException expected){expect(expected.getMessage().contains("할 일"),"잘못된 수정본을 거절한다");}
         }
@@ -683,7 +680,7 @@ public final class AndroidChecks extends Instrumentation {
         store.finish(older,minutes().put("actions",new JSONArray().put(todoAction("일정 공유",null))),"옛 결과에서 다시 정리");
         expect(store.loadTodos("main",id,older.getString("resultId")).getJSONArray("items").getJSONObject(0).getString("owner").equals("첫째 담당"),"옛 결과에서 의견 반영하면 그 결과의 수정본을 잇는다");
         JSONObject blank=store.create(new JSONObject().put("date","2099-04-02").put("title","빈 문장 회의"));store.finish(blank,minutes().put("actions",new JSONArray().put(todoAction("",null)).put(todoAction("발주",null))),null);
-        store.setTodoDone("main",blank.getString("id"),blank.getString("resultId"),1,true);
+        store.saveTodos("main",blank.getString("id"),blank.getString("resultId"),new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("",null,false)).put(todoItem("발주",null,true))));
         expect(store.loadTodos("main",blank.getString("id"),blank.getString("resultId")).getJSONArray("items").getJSONObject(1).getBoolean("done"),"AI 결과에 빈 문장이 있어도 다른 줄을 체크할 수 있다");
         File target=new File(store.context.getCacheDir(),"할일 사본 "+UUID.randomUUID());target.mkdir();Map<String,String> folders=new HashMap<>();folders.put("audio","");folders.put("transcript","");folders.put("summary",target.toURI().toString());
         JSONObject copied=store.create(new JSONObject().put("date","2099-04-03").put("title","사본 할 일").put("participants","김민수"));String copiedId=copied.getString("id");store.finish(copied,minutes(),null);String copiedResult=copied.getString("resultId");
