@@ -26,7 +26,7 @@ final class Store {
     JSONObject asset(String name) throws Exception {try(InputStream in=context.getAssets().open(name)){return new JSONObject(read(in));}}
     JSONObject settings()throws Exception{
         String model=summaryModel();if(AiModels.find(model)==null)model=AiModels.DEFAULT_MODEL;
-        return new JSONObject().put("summaryModel",model).put("defaultOutputFormat",defaultOutputFormat()).put("storage",Copies.storage(context));
+        return new JSONObject().put("summaryModel",model).put("defaultOutputFormat",defaultOutputFormat()).put("storage",Copies.storage(context)).put("myName",myName());
     }
     byte[] exportSettings()throws Exception{
         JSONObject current=settings(),custom=customFormat();
@@ -72,8 +72,16 @@ final class Store {
             }
         }
     }
+    // 설정의 내 이름이다. 지난 회의에서 같은 이름의 사람을 나로 미리 고르는 데만 쓰고 설정 내보내기 파일에는 담지 않는다.
+    String myName(){return context.getSharedPreferences("connection",0).getString("myName","");}
     JSONObject saveSettings(JSONObject value)throws Exception{
         synchronized(Store.class){
+            if(value.length()==1&&value.has("myName")){
+                Object name=value.opt("myName");
+                if(!(name instanceof String)||((String)name).length()>Todos.MAX_FIELD)throw new IOException("내 이름은 200자 이하로 적어 주세요.");
+                if(!context.getSharedPreferences("connection",0).edit().putString("myName",JsonText.trim((String)name)).commit())throw new IOException("내 이름을 저장하지 못했습니다.");
+                return settings();
+            }
             if(value.length()!=1||!value.has("defaultOutputFormat"))throw new IOException("기본 출력 형식을 확인하세요.");
             Object format=value.opt("defaultOutputFormat");if(!(format instanceof String)||!SettingsFile.OUTPUT_FORMATS.contains(format))throw new IOException("기본 출력 형식을 확인하세요.");
             android.content.SharedPreferences prefs=context.getSharedPreferences("connection",0);String before=prefs.getString("defaultOutputFormat",null);
@@ -132,14 +140,16 @@ final class Store {
     }
     String defaultOutputFormat(){String value=context.getSharedPreferences("connection",0).getString("defaultOutputFormat","meeting");return SettingsFile.OUTPUT_FORMATS.contains(value)?value:"meeting";}
     JSONObject history()throws Exception {
-        List<JSONObject> records=new ArrayList<>();int skipped=0;
+        List<JSONObject> records=new ArrayList<>();int skipped=0;String myName=myName();
         for(String location:LOCATIONS){
             File[] dirs=locationDirectory(location).listFiles(File::isDirectory);if(dirs==null)continue;
             for(File dir:dirs){File file=new File(dir,"회의정보.json");if(!file.exists())continue;
                 try{JSONObject record=load(location,dir.getName());String resultId=latestResultId(location,record);
                     if(resultId!=null){record.put("resultId",resultId);JSONObject result=result(location,record.getString("id"),resultId);
                         record.put("title",result.optString("title")).put("outputFormat",meetingFormat(result)).put("refined",!result.optString("feedback").isEmpty());
-                        JSONObject review=loadReview(location,record.getString("id"),resultId);if(review!=null&&!review.isNull("stars"))record.put("stars",review.getInt("stars"));}
+                        JSONObject review=loadReview(location,record.getString("id"),resultId);if(review!=null&&!review.isNull("stars"))record.put("stars",review.getInt("stars"));
+                        // 최신 결과에서 내가 아직 안 끝낸 일의 수다. 내가 누구인지 모르거나 0이면 붙이지 않고, 세다가 오류가 나도 그 줄은 목록에 남긴다.
+                        if(result.optJSONObject("minutes")!=null)try{int open=Todos.mineOpen(result.optString("participants"),effectiveItems(location,record.getString("id"),result),loadMe(location,record.getString("id")),myName);if(open>0)record.put("mineOpen",open);}catch(Exception ignored){}}
                     records.add(record);
                 }catch(Exception ex){skipped++;}
             }
@@ -250,6 +260,34 @@ final class Store {
         if(file.exists()&&loadTodos(location,id,resultId)==null)writeBytes(new File(directory(location,id),"할일-"+checkedResultId(resultId)+"-읽기실패-"+System.currentTimeMillis()+".json"),bytes(file));
         java.text.SimpleDateFormat date=new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.ROOT);date.setTimeZone(TimeZone.getTimeZone("UTC"));
         write(file,checked.put("savedAt",date.format(new Date())).toString(2));
+    }
+    // 할 일 수정본이 결과와 맞으면 수정본을, 아니면 AI 결과를 쓴다(화면의 Todos.effective와 같다).
+    List<Todos.Item> effectiveItems(String location,String id,JSONObject result)throws Exception {
+        JSONArray actions=result.getJSONObject("minutes").getJSONArray("actions");
+        JSONObject edits=result.has("resultId")?loadTodos(location,id,result.getString("resultId")):null;
+        return todoItems(edits!=null&&edits.getJSONArray("items").length()==actions.length()?edits.getJSONArray("items"):actions);
+    }
+    // 이 회의에서 고른 나는 결과가 아니라 회의 폴더의 나.json에 둔다. 의견을 반영해 새 결과가 생겨도 다시 묻지 않는다.
+    File meFile(String location,String id){return new File(directory(location,id),"나.json");}
+    String loadMe(String location,String id){
+        // 파일이 없거나 읽지 못하면 고른 적이 없는 것으로 본다. 읽지 못한 파일은 지우지 않는다.
+        try{File file=meFile(location,id);if(!file.exists())return null;JSONObject saved=new JSONObject(read(file));Object name=saved.opt("name");
+            return saved.optInt("version")==1&&name instanceof String&&!JsonText.trim((String)name).isEmpty()&&((String)name).length()<=Todos.MAX_FIELD?(String)name:null;}
+        catch(Exception ex){return null;}
+    }
+    static final String ME_REJECTED="이 회의의 참석자나 담당자 이름 가운데서 골라 주세요.";
+    String saveMe(String location,String id,String resultId,String name)throws Exception {
+        // 이 회의에서 나를 고르거나(이름) 고른 것을 지운다(null). 보고 있는 결과의 후보에 있는 이름만 받아 후보의 표기로 저장한다.
+        synchronized(Store.class){
+            JSONObject target=analyzedResult(location,id,resultId);File file=meFile(location,id);
+            if(name==null){new AtomicFile(file).delete();if(file.exists())throw new IOException("고른 나를 지우지 못했습니다.");return null;}
+            if(name.length()>Todos.MAX_FIELD)throw new IOException(ME_REJECTED);
+            String found=null;for(String candidate:Todos.candidates(target.optString("participants"),effectiveItems(location,id,target)))if(Todos.sameName(candidate,name)){found=candidate;break;}
+            if(found==null)throw new IOException(ME_REJECTED);
+            java.text.SimpleDateFormat date=new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.ROOT);date.setTimeZone(TimeZone.getTimeZone("UTC"));
+            write(file,new JSONObject().put("version",1).put("name",found).put("savedAt",date.format(new Date())).toString(2));
+            return found;
+        }
     }
     private JSONObject analyzedResult(String location,String id,String resultId)throws Exception {
         JSONObject target=result(location,id,resultId);if(target.optJSONObject("minutes")==null||!target.has("resultId"))throw new IOException("정리된 결과에서만 할 일을 고칠 수 있습니다.");return target;
