@@ -124,7 +124,7 @@ test('storage가 없는 파일은 지금 저장 위치를 유지하고 빈 값 �
   const base = { summaryModel: FIRST, defaultOutputFormat: 'summary', customFormat: null };
   const kept = await server.request('/api/settings/import', { file: fileText(base) });
   assert.equal(kept.status, 200);
-  assert.deepEqual(kept.body.settings, { summaryModel: FIRST, defaultOutputFormat: 'summary', storage: { audio, transcript, summary } });
+  assert.deepEqual(kept.body.settings, { summaryModel: FIRST, defaultOutputFormat: 'summary', storage: { audio, transcript, summary }, myName: '' });
   assert.deepEqual(kept.body.skipped, []);
   const preview = await server.request('/api/settings/preview', { file: fileText(base) });
   assert.equal(preview.body.preview.storage, null);
@@ -215,7 +215,7 @@ test('파일에 내 형식이 없으면 지금 내 형식을 지우고, 지우�
   assert.equal(failed.body.error.code, 'SETTINGS_IMPORT_FAILED');
   assert.deepEqual(fs.readFileSync(locked.settingsFile), bytes);
   assert.deepEqual((await locked.request('/api/custom-format')).body.customFormat, custom);
-  assert.deepEqual((await locked.request('/api/settings')).body.settings, { summaryModel: SECOND, defaultOutputFormat: 'meeting', storage: emptyStorage });
+  assert.deepEqual((await locked.request('/api/settings')).body.settings, { summaryModel: SECOND, defaultOutputFormat: 'meeting', storage: emptyStorage, myName: '' });
 });
 
 test('내 형식 저장이 실패하면 다른 값도 이전으로 되돌린다', async t => {
@@ -257,7 +257,7 @@ test('POST /api/settings는 쓸 수 없는 폴더를 거절한다', async t => {
   // 쓸 수 있는 폴더는 저장하고, 확인용으로 만든 파일은 남기지 않는다.
   const saved = await server.request('/api/settings', { storage: { audio: dir }, defaultOutputFormat: 'custom' });
   assert.equal(saved.status, 200);
-  assert.deepEqual(saved.body.settings, { summaryModel: FIRST, defaultOutputFormat: 'custom', storage: { ...emptyStorage, audio: dir } });
+  assert.deepEqual(saved.body.settings, { summaryModel: FIRST, defaultOutputFormat: 'custom', storage: { ...emptyStorage, audio: dir }, myName: '' });
   assert.deepEqual(fs.readdirSync(dir), ['파일.txt']);
   assert.deepEqual(checkFolder(dir), { ok: true, message: '' });
 });
@@ -267,7 +267,7 @@ test('summaryModel만 있는 옛 AI설정.json을 읽으면 기본 형식 meetin
   const settingsFile = path.join(dir, 'AI설정.json');
   fs.writeFileSync(settingsFile, JSON.stringify({ summaryModel: SECOND }));
   const server = await start(t, { dir, settingsFile });
-  const expected = { summaryModel: SECOND, defaultOutputFormat: 'meeting', storage: emptyStorage };
+  const expected = { summaryModel: SECOND, defaultOutputFormat: 'meeting', storage: emptyStorage, myName: '' };
   assert.deepEqual((await server.request('/api/settings')).body, { settings: expected });
   assert.deepEqual((await server.request('/api/config')).body.settings, expected);
   await server.request('/api/settings', { defaultOutputFormat: 'tasks' });
