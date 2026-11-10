@@ -83,6 +83,11 @@ body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; 
 .history-button strong { display: block; overflow: hidden; font-size: 14px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .history-button span { display: block; margin-top: 1px; font-size: 12px; color: var(--ink-faint); }
 .history-button:disabled { opacity: 0.55; }
+/* 제목 줄 오른쪽에 그 회의에서 내가 아직 안 끝낸 일의 수를 붙인다 */
+.history-button .history-top { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 0; font-size: inherit; color: inherit; }
+.history-top strong { flex: 1; min-width: 0; }
+.history-button .mine-count { display: inline-block; flex: none; margin-top: 0; padding: 0 8px; border-radius: 999px; background: var(--teal-wash); color: var(--teal-deep); font-size: 12px; font-weight: 600; line-height: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.history-button[aria-current="true"] .mine-count { background: var(--sheet); }
 
 .desk { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--sheet); outline: none; }
 .desk-work { flex: 1; min-height: 0; display: flex; flex-direction: column; }

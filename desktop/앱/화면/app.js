@@ -2151,9 +2151,12 @@
         const format = outputFormat(meeting.outputFormat);
         const status = [`${meeting.date || "날짜 미입력"} · ${meeting.dailySequence || 1}차`, meeting.analyzed ? (format === "meeting" ? "회의록" : formatLabels[format]) : "분석 대기", `음성 ${meeting.audioCount}개`, meeting.stars && `별 ${meeting.stars}개`];
         const title = meeting.title || "제목 미정 회의";
-        const name = element("strong", title);
+        const name = element("strong", title), top = element("span", "", "history-top");
         name.title = title;
-        button.append(name, element("span", status.filter(Boolean).join(" · ")));
+        top.append(name);
+        if (meeting.mineOpen) top.append(element("span", `내 일 ${meeting.mineOpen}`, "mine-count"));
+        // 이 회의의 최신 결과에서 내가 아직 안 끝낸 일의 수다. 0이거나 내가 누구인지 모르면 서버가 주지 않는다.
+        button.append(top, element("span", status.filter(Boolean).join(" · ")));
         if (meeting.projectName) button.append(element("span", `이전 프로젝트: ${meeting.projectName}`));
         button.dataset.search = `${title} ${meeting.date || ""} ${meeting.projectName || ""}`.toLowerCase();
         button.dataset.meeting = meeting.id;

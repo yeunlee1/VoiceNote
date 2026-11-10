@@ -371,3 +371,28 @@ test('옛 결과 버전을 보면 그 결과의 할 일과 참석자로 내 일�
   assert.deepEqual([review.state.resultId, review.state.resultTab], [second.id, 'mine']);
   assert.deepEqual([byClass(review.ui['panel-mine'], 'who-box').length, byClass(review.ui['panel-mine'], 'mine-row').length], [1, 0]);
 });
+
+const row = (extra) => ({ location: 'main', id: crypto.randomUUID(), groupId: crypto.randomUUID(), title: '회의', date: '2026-11-09', dailySequence: 1, outputFormat: 'meeting', analyzed: true, audioCount: 0, ...extra });
+
+test('지난 회의 목록은 내가 안 끝낸 일의 수를 제목 옆에 붙이고 0이거나 모르면 붙이지 않는다', async () => {
+  const review = fixture({ routes: { '/api/meetings': () => Response.json({ meetings: [row({ mineOpen: 2 }), row({})], skipped: 0 }) } });
+  await review.loadHistory();
+  const [first, second] = review.ui['meeting-history'].children;
+  assert.deepEqual(byClass(first, 'mine-count').map((node) => node.textContent), ['내 일 2']);
+  assert.equal(byClass(second, 'mine-count').length, 0);
+});
+
+test('체크하면 다시 켜지 않아도 목록의 수가 바로 바뀐다', async () => {
+  const record = meeting({ participants: '박서연', minutes: minutes(action('가', '박서연'), action('나', '박서연')) });
+  let open = 2;
+  const listed = () => Response.json({ meetings: [row({ id: record.id, groupId: record.id, mineOpen: open })], skipped: 0 });
+  const review = await openWith(record, { '/api/meetings': listed, [SAVE]: () => { open = 1; return ok(); } }, { myName: '박서연' });
+  await review.loadHistory();
+  const count = () => byClass(review.ui['meeting-history'].children[0], 'mine-count')[0].textContent;
+  assert.equal(count(), '내 일 2');
+  const [first] = checks(review.ui['panel-mine']);
+  first.checked = true;
+  first.dispatch('change');
+  await settle();
+  assert.equal(count(), '내 일 1');
+});
