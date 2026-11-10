@@ -54,7 +54,8 @@
       "export-settings", "import-settings", "settings-file-input", "settings-file-status", "settings-import", "settings-preview", "confirm-import", "open-data-folder",
       "review", "review-comment", "save-review", "refine", "refine-cost", "review-status", "result-versions", "result-version-field", "refined-badge",
       "copy-block", "copy-status", "copy-again", ...[1, 2, 3, 4, 5].map((stars) => `review-star-${stars}`),
-      "tab-mine", "tab-minutes", "tab-transcript", "panel-mine", "panel-minutes", "panel-transcript", "transcript-view", "transcript-meta", "copy-result", "share-result", "save-result", "result-status",
+      "tab-mine", "tab-minutes", "tab-transcript", "panel-mine", "panel-minutes", "panel-transcript",
+      "share-open", "share-dialog", "share-list", "share-unassigned", "share-status", "share-preview-title", "share-preview", "transcript-view", "transcript-meta", "copy-result", "share-result", "save-result", "result-status",
       "update-chip", "update-chip-label", "open-about", "about", "about-version", "about-version-meta", "about-update", "update-state", "update-progress-row", "update-progress",
       "update-progress-text", "update-detail", "update-lock", "update-install", "update-check", "update-page", "update-note", "release-list",
       "desk-work", "recording-info", "people-preview", "history-search",
@@ -73,6 +74,8 @@
     todos: null, todoConfirmed: null, todoEditing: null, todoQueue: Promise.resolve(), todoPending: 0, todoSerial: 0, todoSource: null,
     // me는 이 회의에 저장된 나의 선택(없으면 null), mePicking은 나 고르기 상자를 펼쳤는지, meBusy는 나를 저장하는 중인지다.
     me: null, mePicking: false, meBusy: false,
+    // 사람별 할 일 복사 창에서 이번에 복사한 사람과 미리보기로 가리키는 사람이다. 창을 열 때마다 비운다.
+    shareCopied: new Set(), shareCurrent: null,
     // 열린 회의가 든 보관함(main, p1~p3)과 그 녹음 id다. 새 녹음은 언제나 main에 만든다.
     // 녹음이 서버에 있을 때만 recordingStored가 참이고, 녹음 없이 전사로 만든 회의는 meetingId(처음 결과 id)로 다음 결과를 잇는다.
     location: "main", projectName: "", recordingId: null, recordingStored: false, meetingId: null, resultId: null, recordingMetadata: null, audioStored: false, resultStored: false,
@@ -1362,13 +1365,24 @@
     // 번호를 누르는 동안에는 줄이 움직이지 않게 맞추기를 끝낸 뒤에만 이름순으로 보여 준다.
     for (const item of finalized ? Todos.sorted(items) : items) list.append(todoRow(item, people, assigning, editable, undecided));
     section.append(list);
+    const actions = element("div", "", "todo-actions");
     if (editable && people.length) {
       const finish = element("button", finalized ? "담당자 다시 맞추기" : "맞추기 완료", "button button-outline todo-finish");
       finish.type = "button";
       finish.dataset.todoFocus = "finish";
       finish.addEventListener("click", () => commitTodos({ finalized: !finalized, items: currentTodos() }, "finish"));
-      section.append(finish);
+      actions.append(finish);
     }
+    if (shareReady()) {
+      // 담당자를 맞춘 자리에서 바로 사람마다 보낼 글을 복사할 수 있게 같은 단추를 둔다.
+      const share = element("button", "사람별 할 일 복사", "button button-outline todo-share");
+      share.type = "button";
+      share.dataset.todoFocus = "share";
+      share.setAttribute("aria-haspopup", "dialog");
+      share.addEventListener("click", () => openShare(share));
+      actions.append(share);
+    }
+    if (actions.children.length) section.append(actions);
     target.append(section);
   }
 
@@ -1814,6 +1828,7 @@
     ui["copy-result"].hidden = mine;
     ui["save-result"].hidden = mine;
     ui["share-result"].hidden = mine || typeof navigator === "undefined" || typeof navigator.share !== "function";
+    ui["share-open"].hidden = !mine || !shareReady();
     for (const id of ["copy-result", "save-result", "share-result"]) ui[id].disabled = !ready;
     if (state.transcriptShown !== ui.transcript.value) {
       // 전사문이 바뀐 경우에만 다시 그린다. 긴 전사를 매번 다시 그리지 않는다.
@@ -1834,8 +1849,8 @@
     return state.resultTab === "minutes" ? plainText(lines()) : ui.transcript.value.trim();
   }
 
-  async function copyResult() {
-    const text = resultText();
+  async function writeClipboard(text) {
+    // 클립보드에 글을 넣는다. 클립보드 API를 쓸 수 없으면 숨긴 입력칸을 골라 복사하고, 그것도 안 되면 실패로 알린다.
     try { await navigator.clipboard.writeText(text); }
     catch {
       const area = document.createElement("textarea");
@@ -1843,12 +1858,83 @@
       area.setAttribute("readonly", "");
       area.style.position = "fixed";
       area.style.opacity = "0";
-      document.body.append(area);
+      (document.querySelector?.("dialog:modal") || document.body).append(area);
+      // 창이 떠 있으면 창 밖의 요소는 고를 수 없으므로 그 창 안에 잠깐 둔다.
       area.select();
       const copied = document.execCommand("copy");
       area.remove();
       if (!copied) throw new Error("복사하지 못했습니다. 텍스트 파일로 저장해 주세요.");
     }
+  }
+
+  function shareGroups() {
+    return Todos.shareGroups(ui.participants.value, currentTodos());
+  }
+
+  function shareReady() {
+    // 사람별 글은 지금 입력으로 만든 정리본에서만 만든다. 담당자가 있는 남은 일이 한 건도 없으면 보낼 글이 없다.
+    return Boolean(state.minutes) && !stale() && shareGroups().length > 0;
+  }
+
+  function renderSharePreview(groups) {
+    const group = groups.find((entry) => entry.name === state.shareCurrent);
+    ui["share-preview-title"].textContent = group ? `${group.name} 님에게 갈 글` : "";
+    ui["share-preview"].textContent = group ? Todos.shareText(ui.title.value, ui.date.value, group) : "";
+  }
+
+  function renderShare() {
+    // 남은 일이 한 건이라도 있는 사람을 한 줄씩 보여 주고, 가리키는 사람에게 갈 글을 아래에 미리 보여 준다.
+    const groups = shareGroups(), me = currentMe();
+    if (!groups.some((group) => group.name === state.shareCurrent)) state.shareCurrent = groups[0]?.name ?? null;
+    ui["share-list"].replaceChildren(...groups.map((group) => {
+      const row = element("li", "", "copy-row"), who = element("span", "", "copy-who");
+      const copied = state.shareCopied.has(group.name), copy = element("button", copied ? "복사함" : "복사", "button button-outline button-small");
+      row.dataset.current = String(group.name === state.shareCurrent);
+      if (group.number) who.append(element("b", group.number, "num"));
+      who.append(element("span", Todos.sameName(group.name, me?.name) ? `${group.name} (나)` : group.name));
+      copy.type = "button";
+      copy.dataset.copied = String(copied);
+      copy.setAttribute("aria-label", `${group.name} 님 할 일 ${copied ? "다시 복사" : "복사"}`);
+      const show = () => {
+        if (state.shareCurrent === group.name) return;
+        state.shareCurrent = group.name;
+        for (const other of ui["share-list"].children) other.dataset.current = String(other === row);
+        renderSharePreview(groups);
+      };
+      row.addEventListener("mouseenter", show);
+      copy.addEventListener("focus", show);
+      copy.addEventListener("click", async () => {
+        show();
+        try {
+          await writeClipboard(Todos.shareText(ui.title.value, ui.date.value, group));
+          state.shareCopied.add(group.name);
+          // 단추를 다시 그리지 않고 글자만 바꿔 초점이 그 단추에 남게 한다.
+          copy.textContent = "복사함";
+          copy.dataset.copied = "true";
+          copy.setAttribute("aria-label", `${group.name} 님 할 일 다시 복사`);
+          ui["share-status"].textContent = `${group.name} 님 할 일을 복사했습니다. 메신저에 붙여 넣으세요.`;
+        } catch { ui["share-status"].textContent = "복사하지 못했습니다. 아래 글을 직접 골라 복사해 주세요."; }
+      });
+      row.append(who, element("span", `${group.tasks.length}건`, "copy-count"), copy);
+      return row;
+    }));
+    const unassigned = currentTodos().filter((item) => !item.done && !String(item.owner ?? "").trim()).length;
+    ui["share-unassigned"].hidden = !unassigned;
+    ui["share-unassigned"].textContent = unassigned ? `담당 미정 ${unassigned}건은 누구에게도 가지 않습니다. 정리본에서 담당자를 먼저 맞추세요.` : "";
+    renderSharePreview(groups);
+  }
+
+  function openShare(opener) {
+    // 창을 열 때마다 복사함 표시를 지운다. 누구에게 보냈는지는 저장하지 않는다.
+    state.shareCopied = new Set();
+    state.shareCurrent = null;
+    ui["share-status"].textContent = "";
+    renderShare();
+    openDialog(ui["share-dialog"], opener);
+  }
+
+  async function copyResult() {
+    await writeClipboard(resultText());
     ui["result-status"].textContent = `‘${state.resultTab === "minutes" ? resultLabel() : "전사문"}’ 내용을 복사했습니다. 메신저나 메일에 붙여 넣으세요.`;
   }
 
@@ -3018,7 +3104,8 @@
       refresh();
       ui.prepare.focus();
     });
-    for (const dialog of [ui["meeting-detail"], ui.settings, ui["settings-import"], ui.about]) bindDialog(dialog);
+    for (const dialog of [ui["meeting-detail"], ui.settings, ui["settings-import"], ui.about, ui["share-dialog"]]) bindDialog(dialog);
+    ui["share-open"].addEventListener("click", () => openShare(ui["share-open"]));
     ui["update-chip"].addEventListener("click", () => openAbout(ui["update-chip"]));
     ui["open-about"].addEventListener("click", () => openAbout(ui["open-about"]));
     ui["update-install"].addEventListener("click", startUpdate);

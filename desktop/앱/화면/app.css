@@ -402,7 +402,7 @@ body[data-recording="true"] .timer { color: var(--rec-deep); }
 .todo-num[aria-pressed="true"] { background: var(--teal); border-color: var(--teal); color: #fff; }
 .todo-editor { grid-column: 2 / -1; display: grid; grid-template-columns: minmax(0, 1fr) 132px auto auto; gap: 6px; }
 .todo-editor input { min-width: 0; min-height: 36px; padding: 6px 10px; border: 1px solid var(--rule-strong); border-radius: var(--radius-s); background: var(--well); }
-.todo-finish { margin-top: 8px; }
+.todo-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 @media (max-width: 760px) {
   .todo-row { grid-template-columns: 44px minmax(0, 1fr) auto; }
   .todo-check { width: 44px; height: 44px; }
@@ -443,8 +443,20 @@ body[data-recording="true"] .timer { color: var(--rec-deep); }
 .who-button:hover:not(:disabled) { border-color: var(--teal); }
 .who-button[aria-pressed="true"] { border-color: var(--teal); background: var(--teal-wash); color: var(--teal-deep); }
 .who-button:disabled { opacity: 0.55; }
-.who-button .num { display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 5px; background: var(--teal-wash); color: var(--teal); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.who-button .num, .copy-who .num { display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 5px; background: var(--teal-wash); color: var(--teal); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .who-button[aria-pressed="true"] .num { background: var(--sheet); }
+/* 사람별 할 일 복사 창: 받는 사람마다 그 사람의 남은 일만 담은 글을 복사한다 */
+.modal-share { width: min(620px, calc(100vw - 32px)); }
+.copy-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.copy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px 12px; align-items: center; padding: 6px 8px 6px 12px; border: 1px solid var(--rule); border-radius: var(--radius-s); background: var(--well); }
+.copy-row[data-current="true"] { border-color: var(--teal); background: var(--teal-wash); }
+.copy-who { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.copy-count { font-size: 13px; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.copy-row .button { min-width: 84px; }
+.copy-row .button[data-copied="true"] { border-color: var(--teal); color: var(--teal-deep); }
+.copy-preview-title { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+.copy-preview-title:empty { display: none; }
+.copy-preview { margin: 0; padding: 14px 16px; border: 1px dashed var(--rule-strong); border-radius: var(--radius-s); background: #fff; font: inherit; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 760px) {
   .mine-row { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .mine-row label { grid-template-columns: 44px minmax(0, 1fr); }

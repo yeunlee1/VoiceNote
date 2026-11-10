@@ -36,7 +36,7 @@ function fixture({ routes = {}, confirm = () => true } = {}) {
       },
       // 브라우저가 내용을 갈면 스크롤이 올라가는 것을 흉내 낸다.
       append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; this.scrollTop = 0; },
-      remove() {}, focus() { focused = node; }, scrollIntoView() {}, click() { this.dispatch('click'); }, show() { this.open = true; }, showModal() { this.open = true; },
+      remove() {}, select() {}, focus() { focused = node; }, scrollIntoView() {}, click() { this.dispatch('click'); }, show() { this.open = true; }, showModal() { this.open = true; },
       // 실제 대화상자처럼 close 이벤트는 나중에 온다.
       close() { this.open = false; setTimeout(() => this.dispatch('close'), 0); } };
     return node;
@@ -58,7 +58,7 @@ function fixture({ routes = {}, confirm = () => true } = {}) {
     } };
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
   const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/,
-    '  globalThis.review = { state, ui, bind, refresh, resetMeetingForm, openMeeting, loadHistory, updateTodo, renderMine, saveMe, showResultTab, hasUnsavedWork, updateBlockers, openSettings, prepareMeeting };\n})();');
+    '  globalThis.review = { state, ui, bind, refresh, resetMeetingForm, openMeeting, loadHistory, updateTodo, renderMine, saveMe, showResultTab, hasUnsavedWork, updateBlockers, openSettings, prepareMeeting, openShare };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const review = sandbox.review;
@@ -395,4 +395,88 @@ test('체크하면 다시 켜지 않아도 목록의 수가 바로 바뀐다', a
   first.dispatch('change');
   await settle();
   assert.equal(count(), '내 일 1');
+});
+
+test('복사하면 그 사람의 글이 클립보드에 들어가고 복사함으로 바뀌며 창을 다시 열면 지워진다', async () => {
+  const record = meeting({ title: '주간 업무 회의', date: '2026-11-09', participants: '박서연, 김민수', minutes: minutes(action('일정표', '박서연'), action('서버 점검 결과 공유', '김민수', '11월 10일(화)'), action('장비 반입 절차 확인', '김민수'), action('미정인 일')) });
+  const review = await openWith(record, {}, { myName: '박서연' });
+  assert.equal(review.ui['share-open'].hidden, false);
+  review.ui['share-open'].click();
+  const rows = () => review.ui['share-list'].children;
+  assert.deepEqual(rows().map((row) => texts(row).join('|')), ['1|박서연 (나)|1건|복사', '2|김민수|2건|복사']);
+  assert.equal(review.ui['share-unassigned'].textContent, '담당 미정 1건은 누구에게도 가지 않습니다. 정리본에서 담당자를 먼저 맞추세요.');
+  assert.equal(review.ui['share-preview-title'].textContent, '박서연 님에게 갈 글');
+  const copy = rows()[1].children.at(-1);
+  copy.dispatch('focus');
+  assert.equal(review.ui['share-preview'].textContent, '[주간 업무 회의] 2026-11-09\n김민수 님이 맡은 일 2건\n- 서버 점검 결과 공유 · 기한 11월 10일(화)\n- 장비 반입 절차 확인');
+  copy.click();
+  await settle();
+  assert.deepEqual(review.clipboard.texts, [review.ui['share-preview'].textContent]);
+  assert.equal(rows()[1].children.at(-1).textContent, '복사함');
+  assert.equal(review.ui['share-status'].textContent, '김민수 님 할 일을 복사했습니다. 메신저에 붙여 넣으세요.');
+  review.ui['share-dialog'].close();
+  await settle();
+  review.ui['share-open'].click();
+  assert.equal(rows()[1].children.at(-1).textContent, '복사');
+});
+
+test('복사에 실패하면 알리고 복사함으로 바꾸지 않는다', async () => {
+  const record = meeting({ participants: '박서연, 김민수', minutes: minutes(action('가', '김민수')) });
+  const review = await openWith(record);
+  review.clipboard.fail = true;
+  review.ui['share-open'].click();
+  const copy = review.ui['share-list'].children[0].children.at(-1);
+  copy.click();
+  await settle();
+  assert.deepEqual([copy.textContent, review.clipboard.texts.length], ['복사', 0]);
+  assert.equal(review.ui['share-status'].textContent, '복사하지 못했습니다. 아래 글을 직접 골라 복사해 주세요.');
+});
+
+test('사람별 할 일 복사는 담당자가 있는 남은 일이 있을 때만 보이고 나를 몰라도 보인다', async () => {
+  const record = meeting({ participants: '박서연, 김민수', minutes: minutes(action('가', '김민수'), action('나')) });
+  const review = await openWith(record, { [SAVE]: () => ok() });
+  assert.equal(byClass(review.ui['panel-mine'], 'who-box').length, 1, '나를 아직 모른다');
+  assert.equal(review.ui['share-open'].hidden, false);
+  await review.updateTodo(0, { done: true });
+  await settle();
+  assert.equal(review.ui['share-open'].hidden, true, '담당자가 있는 일을 모두 끝내면 감춘다');
+  const nobody = await openWith(meeting({ participants: '', minutes: minutes(action('가'), action('나')) }));
+  assert.equal(nobody.ui['share-open'].hidden, true, '담당자가 한 명도 없으면 감춘다');
+});
+
+test('명단에 없는 담당자는 번호 없이 뒤에 나온다', async () => {
+  const record = meeting({ participants: '박서연', minutes: minutes(action('가', '외부 김 실장'), action('나', '박서연')) });
+  const review = await openWith(record, {}, { myName: '박서연' });
+  review.ui['share-open'].click();
+  assert.deepEqual(review.ui['share-list'].children.map((row) => texts(row).join('|')), ['1|박서연 (나)|1건|복사', '외부 김 실장|1건|복사']);
+  assert.equal(review.ui['share-unassigned'].hidden, true);
+});
+
+test('정리본의 할 일 목록 아래에도 같은 단추가 있고 내 할 일 탭 밖에서는 위쪽 단추를 감춘다', async () => {
+  const record = meeting({ participants: '박서연, 김민수', minutes: minutes(action('가', '김민수')) });
+  const review = await openWith(record);
+  review.showResultTab('minutes');
+  assert.equal(review.ui['share-open'].hidden, true);
+  const [inline] = byClass(review.ui.minutes, 'todo-share');
+  inline.click();
+  assert.deepEqual([review.ui['share-dialog'].open, review.ui['share-list'].children.length], [true, 1]);
+});
+
+test('아주 긴 이름과 문장도 잘라 내지 않고 글에 넣는다', async () => {
+  const name = '가'.repeat(200), task = '나'.repeat(2000);
+  const review = await openWith(meeting({ participants: name, minutes: minutes(action(task, name)) }));
+  review.ui['share-open'].click();
+  const expected = `[출시 회의] 2026-11-09\n${name} 님이 맡은 일 1건\n- ${task}`;
+  assert.equal(review.ui['share-preview'].textContent, expected);
+  review.ui['share-list'].children[0].children.at(-1).click();
+  await settle();
+  assert.deepEqual(review.clipboard.texts, [expected]);
+});
+
+test('입력을 고쳐 다시 분석해야 하는 결과에서는 사람별 할 일 복사를 감춘다', async () => {
+  const review = await openWith(meeting({ participants: '박서연, 김민수', minutes: minutes(action('가', '김민수')) }));
+  assert.equal(review.ui['share-open'].hidden, false);
+  review.ui.transcript.value = '고친 전사';
+  review.refresh();
+  assert.equal(review.ui['share-open'].hidden, true);
 });
