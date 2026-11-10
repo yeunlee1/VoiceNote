@@ -88,35 +88,6 @@ test('깨진 수정본은 없는 것으로 보고 회의는 그대로 열린다'
   assert.equal((await request('/api/meetings')).body.skipped, 0);
 });
 
-test('아직 안 끝난 일은 회의마다 최신 결과에서 끝나지 않은 일만 최신 날짜순으로 모은다', async t => {
-  const request = await start(t, folder(t));
-  const recordingId = randomUUID();
-  await request(`/api/recordings/main/${recordingId}`, { title: '옛 결과', date: '2026-11-01', participants: '', expectedParts: 1 });
-  await request('/api/meetings/main', result({ recordingId, date: '2026-11-01', minutes: minutes(action('옛 결과의 일')) }));
-  await pause();
-  const newest = result({ recordingId, date: '2026-11-01', minutes: minutes(action('최신 결과의 일', '박서연', '11월 3일')) });
-  await request('/api/meetings/main', newest);
-  const today = result({ date: '2026-11-09' });
-  await request('/api/meetings/main', today);
-  await request(`/api/meetings/main/${today.id}/todos`, { finalized: false, items: [item('일정 공유', null, null, true), item('발주 변경', '김민수')] });
-  const open = await request('/api/meetings/open-todos');
-  assert.equal(open.status, 200);
-  assert.deepEqual(open.body.items.map(entry => [entry.id, entry.index, entry.task, entry.owner, entry.title]), [[today.id, 1, '발주 변경', '김민수', today.title], [newest.id, 0, '최신 결과의 일', '박서연', newest.title]]);
-});
-
-test('목록에서 체크하면 수정본이 없어도 그 일만 끝난 것으로 저장한다', async t => {
-  const request = await start(t, folder(t));
-  const record = result();
-  await request('/api/meetings/main', record);
-  const done = await request(`/api/meetings/main/${record.id}/todos/1`, { done: true });
-  assert.equal(done.status, 200);
-  assert.deepEqual(done.body.todos.items.map(entry => [entry.task, entry.done]), [['일정 공유', false], ['발주 변경', true]]);
-  assert.equal(done.body.todos.finalized, false);
-  assert.deepEqual((await request('/api/meetings/open-todos')).body.items.map(entry => entry.index), [0]);
-  assert.equal((await request(`/api/meetings/main/${record.id}/todos/5`, { done: true })).status, 400);
-  assert.equal((await request(`/api/meetings/main/${record.id}/todos/0`, { done: 'yes' })).status, 400);
-});
-
 test('의견 반영으로 새 결과를 저장하면 문장이 같은 일의 담당자와 체크를 잇는다', async t => {
   const request = await start(t, folder(t));
   const recordingId = randomUUID();
@@ -182,7 +153,7 @@ test('AI 결과에 빈 문장이 있어도 체크와 저장이 막히지 않는�
   const request = await start(t, folder(t));
   const record = result({ minutes: minutes(action(''), action('발주 변경')) });
   await request('/api/meetings/main', record);
-  assert.equal((await request(`/api/meetings/main/${record.id}/todos/1`, { done: true })).status, 200);
+  assert.equal((await request(`/api/meetings/main/${record.id}/todos`, { finalized: false, items: [item(''), item('발주 변경', null, null, true)] })).status, 200);
   assert.equal((await request(`/api/meetings/main/${record.id}/todos`, { finalized: false, items: [item('', null, null, true), item('발주 변경', '김민수')] })).status, 200);
 });
 
@@ -209,4 +180,28 @@ test('의견 반영은 보던 결과의 수정본을 잇고 보던 결과를 모
   await pause();
   const unknown = result({ recordingId, minutes: base, sourceResultId: randomUUID() });
   assert.equal((await request('/api/meetings/main', unknown)).body.todos.items[0].owner, '첫째 담당', '같은 회의에 없는 결과는 무시한다');
+});
+
+test('남은 일을 모으던 요청과 한 건만 끝내던 요청은 없어졌다', async t => {
+  const request = await start(t, folder(t));
+  const record = result();
+  await request('/api/meetings/main', record);
+  assert.equal((await request('/api/meetings/open-todos')).status, 404);
+  assert.equal((await request(`/api/meetings/main/${record.id}/todos/1`, { done: true })).status, 404);
+  assert.equal((await request(`/api/meetings/main/${record.id}`)).body.todos, null, '거절한 요청은 수정본을 만들지 않는다');
+});
+
+test('지난 회의 목록은 결과가 여러 개인 회의도 한 줄로 주고 회의 묶음 열쇠를 함께 준다', async t => {
+  const request = await start(t, folder(t));
+  const recordingId = randomUUID();
+  await request(`/api/recordings/main/${recordingId}`, { title: '녹음 회의', date: '2026-11-09', participants: '', expectedParts: 1 });
+  await request('/api/meetings/main', result({ recordingId }));
+  const first = result({ date: '2026-11-08' });
+  await request('/api/meetings/main', first);
+  await pause();
+  const second = result({ date: '2026-11-08', meetingId: first.id });
+  await request('/api/meetings/main', second);
+  const list = (await request('/api/meetings')).body.meetings;
+  assert.deepEqual(list.map(meeting => meeting.groupId), [recordingId, first.id]);
+  assert.equal(list[1].id, second.id, '녹음 없이 만든 회의는 최신 결과 id와 처음 결과 id(묶음 열쇠)가 다르다');
 });

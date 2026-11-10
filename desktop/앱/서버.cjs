@@ -20603,18 +20603,9 @@ function createMeetingServer(options = {}) {
               json2(response, 200, { review: meetingStore.saveReview(reviewRoute[1], reviewRoute[2], await jsonBody(request)) });
               return;
             }
-            if (path === "/api/meetings/open-todos" && request.method === "GET") {
-              json2(response, 200, meetingStore.openTodos());
-              return;
-            }
             const todosRoute = /^\/api\/meetings\/([a-z0-9]+)\/([0-9a-f-]{36})\/todos$/.exec(path);
             if (todosRoute && request.method === "POST") {
               json2(response, 200, { todos: meetingStore.saveTodos(todosRoute[1], todosRoute[2], await jsonBody(request)) });
-              return;
-            }
-            const todoDoneRoute = /^\/api\/meetings\/([a-z0-9]+)\/([0-9a-f-]{36})\/todos\/(\d{1,3})$/.exec(path);
-            if (todoDoneRoute && request.method === "POST") {
-              json2(response, 200, { todos: meetingStore.setTodoDone(todoDoneRoute[1], todoDoneRoute[2], Number(todoDoneRoute[3]), (await jsonBody(request))?.done) });
               return;
             }
             const match = /^\/api\/meetings\/([a-z0-9]+)(?:\/([0-9a-f-]{36}))?$/.exec(path);

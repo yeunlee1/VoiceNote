@@ -241,10 +241,11 @@ function createMeetingStore(root, validateMinutes, options = {}) {
       const { records: latest, skipped } = latestRecords();
       const meetings = latest.map(record => {
         const review = record.minutes ? loadReview(record.location, record.id) : null;
-        return { location: record.location, id: record.id, ...(record.recordingId ? { recordingId: record.recordingId } : {}), title: record.title, date: record.date,
+        return { location: record.location, id: record.id, groupId: groupKey(record), ...(record.recordingId ? { recordingId: record.recordingId } : {}), title: record.title, date: record.date,
           dailySequence: record.dailySequence, ...(record.projectName ? { projectName: record.projectName } : {}), savedAt: record.savedAt, outputFormat: record.outputFormat,
           analyzed: Boolean(record.minutes), audioCount: record.audio?.length || 0, ...(record.expectedParts ? { expectedParts: record.expectedParts } : {}),
           ...(review?.stars ? { stars: review.stars } : {}), refined: Boolean(record.feedback) };
+        // groupId는 한 회의의 결과들을 묶는 열쇠다. 화면이 옛 결과를 보다 닫아도 같은 줄로 돌아가는 데 쓴다.
       }).sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')) || b.dailySequence - a.dailySequence || savedAt(b).localeCompare(savedAt(a)));
       return { meetings, skipped };
     },
@@ -254,29 +255,9 @@ function createMeetingStore(root, validateMinutes, options = {}) {
       const todos = meeting.minutes ? loadTodos(location, id, meeting.minutes.actions) : null;
       return { meeting, versions: versionsOf(location, meeting), review: meeting.minutes ? loadReview(location, id) : null, todos, todosUnreadable: Boolean(meeting.minutes) && !todos && fs.existsSync(todoPath(location, id)) };
     },
-    // 회의마다 최신 결과에서 아직 끝나지 않은 일만 최신 날짜순으로 모은다.
-    openTodos() {
-      const { records, skipped } = latestRecords();
-      const items = [];
-      for (const record of records.filter(record => record.minutes).sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')))) {
-        todoRules.effective(record.minutes, loadTodos(record.location, record.id, record.minutes.actions)).forEach((item, index) => {
-          if (!item.done) items.push({ location: record.location, id: record.id, title: record.title, date: record.date, index, task: item.task, owner: item.owner, due: item.due });
-        });
-      }
-      return { items, skipped };
-    },
     saveTodos(location, id, data) {
       const record = analyzedRecord(location, id);
       return writeTodos(location, id, data, record.minutes.actions);
-    },
-    setTodoDone(location, id, index, done) {
-      const record = analyzedRecord(location, id);
-      if (typeof done !== 'boolean') throw fail(400, '할 일 내용을 확인하세요.');
-      const edits = loadTodos(location, id, record.minutes.actions);
-      const items = todoRules.effective(record.minutes, edits).map(item => ({ ...item }));
-      if (!items[index]) throw fail(400, '할 일 내용을 확인하세요.');
-      items[index].done = done;
-      return writeTodos(location, id, { finalized: Boolean(edits?.finalized), items }, record.minutes.actions);
     },
     createRecording(location, id, data) {
       if (location !== 'main') { directory(location); throw fail(400, '새 녹음은 기본 보관함에만 만들 수 있습니다.'); }
