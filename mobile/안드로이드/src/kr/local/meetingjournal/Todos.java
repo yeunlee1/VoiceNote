@@ -1,4 +1,4 @@
-// 할 일 수정본의 참석자 나누기·이름순·의견 반영 이어 주기 규칙을 데스크톱 할일정리.js와 같게 둔다. 안드로이드 라이브러리 없이 PC에서도 시험한다.
+// 할 일 수정본의 참석자 나누기·이름순·의견 반영 이어 주기와 나 판정 규칙을 데스크톱 할일정리.js와 같게 둔다. 안드로이드 라이브러리 없이 PC에서도 시험한다.
 package kr.local.meetingjournal;
 
 import java.util.*;
@@ -67,5 +67,28 @@ final class Todos {
             items.add(new Item(task,owner,due,done));
         }
         return carried?new Carried(finalized,items):null;
+    }
+    static boolean sameName(String a,String b){
+        // 이름은 앞뒤 공백을 떼고 이어진 공백을 하나로 줄인 글자가 같을 때만 같은 사람이다. 빈 이름은 누구와도 같지 않다.
+        String left=same(a);return !left.isEmpty()&&left.equals(same(b));
+    }
+    static List<String> candidates(String participants,List<Item> items){
+        // 나를 고를 후보의 표기다. 참석자가 있으면 참석자 순서 그대로, 없으면 할 일에 적힌 담당자 이름을 처음 나온 순서로 쓴다.
+        List<String> source=people(participants);
+        if(source.isEmpty())for(Item item:items)if(hasOwner(item))source.add(JsonText.trim(item.owner));
+        List<String> result=new ArrayList<>();Set<String> seen=new HashSet<>();
+        for(String name:source){if(!seen.add(same(name)))continue;result.add(name);if(result.size()==MAX_PEOPLE)break;}
+        // 공백만 다른 이름은 먼저 나온 표기 하나만 남긴다.
+        return result;
+    }
+    static String resolveMe(List<String> candidates,String savedName,String settingsName){
+        // 이 회의에 저장된 선택이 후보에 있으면 그 사람, 없으면 설정의 내 이름과 같은 후보, 둘 다 없으면 모른다(null).
+        for(String value:new String[]{savedName,settingsName})for(String name:candidates)if(sameName(name,value))return name;
+        return null;
+    }
+    static int mineOpen(String participants,List<Item> items,String savedName,String settingsName){
+        // 지난 회의 목록에 붙일 수다. 내가 누구인지 모르면 -1, 알면 내가 안 끝낸 일의 수다.
+        String me=resolveMe(candidates(participants,items),savedName,settingsName);if(me==null)return -1;
+        int count=0;for(Item item:items)if(!item.done&&sameName(item.owner,me))count++;return count;
     }
 }
