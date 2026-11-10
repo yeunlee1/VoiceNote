@@ -49,7 +49,8 @@
       "output-format", "custom-missing", "open-format-settings",
       "format-help", "format-example", "format-example-title", "format-example-text", "format-example-body", "custom-name",
       "custom-sections", "custom-section-list", "custom-instruction", "custom-save", "custom-delete", "custom-status", "custom-preview",
-      "settings-ai", "settings-format", "settings-storage", "settings-file", "settings-data", "default-format", "storage-status",
+      "settings-ai", "settings-me", "settings-format", "settings-storage", "settings-file", "settings-data", "default-format", "storage-status",
+      "my-name", "my-name-save", "my-name-status",
       ...STORAGE_KINDS.flatMap((kind) => [`storage-${kind}`, `pick-${kind}`, `clear-${kind}`]),
       "export-settings", "import-settings", "settings-file-input", "settings-file-status", "settings-import", "settings-preview", "confirm-import", "open-data-folder",
       "review", "review-comment", "save-review", "refine", "refine-cost", "review-status", "result-versions", "result-version-field", "refined-badge",
@@ -592,7 +593,7 @@
     ui["settings-lock"].hidden = !lockedSettings;
     // 설정 창의 출력 형식·저장 위치·설정 파일도 녹음·분석·저장 중이거나 설정을 저장하는 동안 잠근다.
     const settingsBusy = lockedSettings || state.settingsBusy;
-    for (const id of ["default-format", "custom-name", "custom-sections", "custom-instruction", "custom-save", "custom-delete", "export-settings", "import-settings", "settings-file-input", "confirm-import"])
+    for (const id of ["default-format", "my-name", "my-name-save", "custom-name", "custom-sections", "custom-instruction", "custom-save", "custom-delete", "export-settings", "import-settings", "settings-file-input", "confirm-import"])
       ui[id].disabled = settingsBusy;
     for (const kind of STORAGE_KINDS) {
       ui[`pick-${kind}`].disabled = settingsBusy;
@@ -1556,6 +1557,8 @@
     if (!state.settings?.myName) {
       const settings = element("button", "설정에 내 이름 적어 두기", "button button-quiet button-small who-settings");
       settings.type = "button";
+      settings.setAttribute("aria-haspopup", "dialog");
+      settings.addEventListener("click", () => openSettings("settings-me", settings));
       tools.append(settings);
     }
     if (tools.children.length) box.append(tools);
@@ -2593,6 +2596,8 @@
       // 결과를 보는 동안 목록이 다시 그려져 연 단추가 떨어져 나갔으면 같은 회의의 새 줄로 돌아간다.
       // 연 단추가 그 사이 숨었으면(예: 새 버전 표시가 설치 뒤 사라짐) 프로그램 정보는 설정 단추로, 나머지는 회의 준비로 돌아간다.
       if (target?.isConnected && !target.disabled && !target.hidden) target.focus();
+      else if (dialog !== ui.about && !inPage && ui["meeting-detail"].open) ui[`tab-${state.resultTab}`].focus();
+      // 결과 화면에서 연 창이고 연 단추가 다시 그려져 사라졌으면 보고 있던 결과 탭으로 돌아간다.
       else (dialog === ui.about ? ui["open-settings"] : ui.prepare).focus();
     });
   }
@@ -2663,11 +2668,30 @@
     if (!ui.settings.open) {
       renderSettings();
       loadEditor();
+      ui["my-name"].value = state.settings?.myName || "";
+      ui["my-name-status"].textContent = "";
+      // 내 이름 칸은 창을 새로 열 때만 채운다. 다른 설정을 저장하며 다시 그릴 때 적고 있던 글자를 지우지 않는다.
       openDialog(ui.settings, opener);
     }
     if (!section || section === "settings-ai") return;
     ui[section].scrollIntoView?.({ block: "start" });
-    $(`${section}-title`)?.focus?.();
+    (section === "settings-me" ? ui["my-name"] : $(`${section}-title`))?.focus?.();
+  }
+
+  async function saveMyName() {
+    // 설정의 내 이름을 저장한다. 저장되면 지난 회의 목록의 내 일 수와 열려 있는 내 할 일 탭을 다시 계산한다.
+    const report = (message) => { ui["my-name-status"].textContent = message; };
+    let saved = false;
+    await saveSettingsChange({ myName: ui["my-name"].value.trim() }, report, () => {
+      saved = true;
+      return state.settings?.myName ? "내 이름을 저장했습니다." : "내 이름을 지웠습니다.";
+    });
+    if (!saved) return false;
+    // 실패하면 적어 둔 글자를 그대로 둬 다시 누를 수 있게 한다.
+    ui["my-name"].value = state.settings?.myName || "";
+    renderMine();
+    await loadHistory();
+    return true;
   }
 
   function followDefaultFormat(before) {
@@ -3126,6 +3150,8 @@
     ui["custom-delete"].addEventListener("click", () => deleteCustom().catch((error) => { ui["custom-status"].textContent = error.message; }));
     ui.settings.addEventListener("close", () => { ui["api-key"].value = ""; });
     ui["default-format"].addEventListener("change", saveDefaultFormat);
+    ui["my-name-save"].addEventListener("click", saveMyName);
+    ui["my-name"].addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); saveMyName(); } });
     for (const kind of STORAGE_KINDS) {
       ui[`pick-${kind}`].addEventListener("click", () => window.chrome?.webview?.postMessage({ type: "pick-folder", kind }));
       ui[`clear-${kind}`].addEventListener("click", () => saveStorage(kind, ""));

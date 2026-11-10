@@ -58,7 +58,7 @@ function fixture({ routes = {}, confirm = () => true } = {}) {
     } };
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
   const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/,
-    '  globalThis.review = { state, ui, bind, refresh, resetMeetingForm, openMeeting, loadHistory, updateTodo, renderMine, saveMe, showResultTab, hasUnsavedWork, updateBlockers, openSettings, prepareMeeting, openShare };\n})();');
+    '  globalThis.review = { state, ui, bind, refresh, resetMeetingForm, openMeeting, loadHistory, updateTodo, renderMine, saveMe, showResultTab, hasUnsavedWork, updateBlockers, openSettings, prepareMeeting, openShare, saveMyName };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const review = sandbox.review;
@@ -479,4 +479,81 @@ test('입력을 고쳐 다시 분석해야 하는 결과에서는 사람별 할 
   review.ui.transcript.value = '고친 전사';
   review.refresh();
   assert.equal(review.ui['share-open'].hidden, true);
+});
+
+test('설정의 내 이름을 저장하면 목록의 수와 열려 있는 내 할 일을 다시 계산한다', async () => {
+  const record = meeting({ participants: '박서연, 김민수', minutes: minutes(action('가', '박서연')) });
+  const review = await openWith(record, { '/api/settings': (call) => Response.json({ settings: { summaryModel: 'gpt-6.1-sol', defaultOutputFormat: 'meeting', storage: {}, myName: call.body.myName } }) }, { myName: '' });
+  assert.equal(byClass(review.ui['panel-mine'], 'who-box').length, 1);
+  const lists = () => review.calls.filter((call) => call.url === '/api/meetings').length, before = lists();
+  byClass(review.ui['panel-mine'], 'who-settings')[0].click();
+  assert.deepEqual([review.ui.settings.open, review.focused()], [true, review.ui['my-name']]);
+  review.ui['my-name'].value = ' 박서연 ';
+  review.ui['my-name-save'].click();
+  await settle();
+  assert.deepEqual(review.calls.find((call) => call.url === '/api/settings').body, { myName: '박서연' });
+  assert.deepEqual([review.ui['my-name'].value, review.ui['my-name-status'].textContent], ['박서연', '내 이름을 저장했습니다.']);
+  assert.equal(byClass(review.ui['panel-mine'], 'me-name')[0].textContent, '박서연');
+  assert.equal(lists(), before + 1);
+});
+
+const SETTINGS = { '/api/settings': (call) => Response.json({ settings: { summaryModel: 'gpt-6.1-sol', defaultOutputFormat: 'meeting', storage: {}, myName: call.body.myName } }) };
+
+test('직접 고른 선택이 저장된 회의는 설정의 내 이름을 바꿔도 그대로다', async () => {
+  const record = meeting({ participants: '박서연, 김민수', minutes: minutes(action('가', '박서연'), action('나', '김민수')) });
+  const review = await openWith(record, SETTINGS, { me: '김민수', myName: '' });
+  review.openSettings('settings-me');
+  review.ui['my-name'].value = '박서연';
+  await review.saveMyName();
+  assert.equal(review.state.settings.myName, '박서연');
+  assert.equal(byClass(review.ui['panel-mine'], 'me-name')[0].textContent, '김민수');
+});
+
+test('내 이름을 비워 저장하면 지웠다고 알린다', async () => {
+  const review = await openWith(meeting({ participants: '박서연' }), SETTINGS, { myName: '박서연' });
+  review.openSettings('settings-me');
+  assert.equal(review.ui['my-name'].value, '박서연', '창을 열면 저장된 이름을 채운다');
+  review.ui['my-name'].value = '  ';
+  await review.saveMyName();
+  assert.deepEqual([review.ui['my-name'].value, review.ui['my-name-status'].textContent], ['', '내 이름을 지웠습니다.']);
+});
+
+test('내 이름 저장이 실패하면 적은 글자를 그대로 두고 알린다', async () => {
+  const review = await openWith(meeting(), { '/api/settings': () => Response.json({ error: { code: 'X', message: '디스크 오류' } }, { status: 500 }) }, { myName: '' });
+  review.openSettings('settings-me');
+  review.ui['my-name'].value = '이도현 ';
+  await review.saveMyName();
+  assert.equal(review.ui['my-name'].value, '이도현 ');
+  assert.match(review.ui['my-name-status'].textContent, /설정을 저장하지 못했습니다/);
+});
+
+test('녹음이나 분석 중에는 내 이름을 바꿀 수 없다', async () => {
+  const review = await openWith(meeting());
+  review.refresh();
+  assert.deepEqual([review.ui['my-name'].disabled, review.ui['my-name-save'].disabled], [false, false]);
+  review.state.flowBusy = true;
+  review.refresh();
+  assert.deepEqual([review.ui['my-name'].disabled, review.ui['my-name-save'].disabled], [true, true]);
+});
+
+test('내 이름 칸에서 Enter를 누르면 저장한다', async () => {
+  const review = await openWith(meeting({ participants: '박서연' }), SETTINGS, { myName: '' });
+  review.openSettings('settings-me');
+  review.ui['my-name'].value = '박서연';
+  review.ui['my-name'].dispatch('keydown', { key: 'Enter' });
+  await settle();
+  assert.deepEqual(review.calls.find((call) => call.url === '/api/settings').body, { myName: '박서연' });
+});
+
+test('나 고르기 상자에서 연 설정 창을 닫으면 결과 화면의 내 할 일 탭으로 초점이 돌아온다', async () => {
+  const record = meeting({ participants: '박서연, 김민수', minutes: minutes(action('가', '박서연')) });
+  const review = await openWith(record, SETTINGS, { myName: '' });
+  const [opener] = byClass(review.ui['panel-mine'], 'who-settings');
+  opener.click();
+  review.ui['my-name'].value = '박서연';
+  await review.saveMyName();
+  opener.isConnected = false;
+  review.ui.settings.close();
+  await settle();
+  assert.equal(review.focused(), review.ui['tab-mine']);
 });
