@@ -23,7 +23,7 @@ const detach = (node) => { node.isConnected = false; for (const child of node.ch
 
 function fixture({ routes = {}, confirm = () => true } = {}) {
   let focused = null;
-  const clipboard = { fail: false, texts: [] };
+  const clipboard = { fail: false, texts: [], hold: null };
   const element = (tag = 'div') => {
     const listeners = {};
     const node = { tag, value: '', checked: false, type: '', className: '', scrollTop: 0, style: {}, hidden: false, disabled: false, open: false, textContent: '', dataset: {}, children: [], attributes: {}, isConnected: true,
@@ -47,7 +47,7 @@ function fixture({ routes = {}, confirm = () => true } = {}) {
   const json = (body, status = 200) => Response.json(body, { status });
   const body = element('body');
   const sandbox = { crypto, Blob, AbortController, DOMException, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval, confirm,
-    navigator: { clipboard: { writeText: async (text) => { if (clipboard.fail) throw new Error('거절'); clipboard.texts.push(text); } } },
+    navigator: { clipboard: { writeText: async (text) => { if (clipboard.hold) await clipboard.hold; if (clipboard.fail) throw new Error('거절'); clipboard.texts.push(text); } } },
     window: { addEventListener() {}, MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
     document: { body, get activeElement() { return focused && focused.isConnected && !focused.disabled ? focused : body; }, execCommand: () => false, addEventListener() {}, getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element },
@@ -626,4 +626,81 @@ test('나를 저장하는 사이 패널 안에서 옮긴 초점은 다시 그린
     assert.notEqual(again, moved, `${name}: 응답 뒤 다시 그렸다`);
     assert.equal(review.focused(), again, name);
   }
+});
+
+test('할 일 저장이 실패하는 사이 패널 밖으로 옮긴 초점은 빼앗지 않는다', async () => {
+  // 짝 검증 3의 A-3과 같은 규칙이다. 실패한 저장을 되돌리며 다시 그릴 때, 그사이 탭으로 옮긴 초점을 체크 상자로 빼앗았다.
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const record = meeting({ participants: '박서연, 김민수', minutes: minutes(action('가', '박서연')) });
+  const review = await openWith(record, { [SAVE]: async () => { await held; return failed(); } }, { myName: '박서연' });
+  const [first] = checks(review.ui['panel-mine']);
+  first.focus();
+  first.checked = true;
+  first.dispatch('change');
+  await settle();
+  review.ui['tab-mine'].focus();
+  release();
+  await settle();
+  const [again] = checks(review.ui['panel-mine']);
+  assert.deepEqual([review.focused(), again.checked], [review.ui['tab-mine'], false]);
+});
+
+test('할 일 저장이 실패해도 패널 안에 둔 초점은 다시 그린 같은 체크 상자로 돌려준다', async () => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const record = meeting({ participants: '박서연, 김민수', minutes: minutes(action('가', '박서연'), action('나', '박서연')) });
+  const review = await openWith(record, { [SAVE]: async () => { await held; return failed(); } }, { myName: '박서연' });
+  const panel = review.ui['panel-mine'];
+  const [first] = checks(panel);
+  first.focus();
+  first.checked = true;
+  first.dispatch('change');
+  await settle();
+  const moved = walk(panel).find((node) => node.dataset?.todoFocus === 'mine:1');
+  moved.focus();
+  release();
+  await settle();
+  const again = walk(panel).find((node) => node.dataset?.todoFocus === 'mine:1');
+  assert.notEqual(again, moved, '되돌리며 다시 그렸다');
+  assert.equal(review.focused(), again);
+});
+
+test('나를 저장하는 사이 연 설정 창을 닫으면 다시 그린 같은 단추로 돌아간다', async () => {
+  // 짝 검증 3의 A-2와 같은 규칙이다. 응답으로 패널을 다시 그려 연 단추가 바뀌었어도 같은 열쇠의 새 단추가 있으면 그리로 돌아간다.
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const record = meeting({ participants: '김민수, 이도현', minutes: minutes(action('가', '김민수')) });
+  const review = await openWith(record, { [ME]: async (call) => { await held; return meSaved(call); } }, { me: '김민수', myName: '' });
+  const panel = review.ui['panel-mine'];
+  byClass(panel, 'me-change')[0].click();
+  byClass(panel, 'who-clear')[0].click();
+  await settle();
+  const [opener] = byClass(panel, 'who-settings');
+  opener.focus();
+  opener.click();
+  assert.equal(review.ui.settings.open, true);
+  release();
+  await settle();
+  assert.equal(opener.isConnected, false, '응답 뒤 패널을 다시 그렸다');
+  review.ui.settings.close();
+  await settle();
+  assert.equal(review.focused(), byClass(panel, 'who-settings')[0]);
+});
+
+test('복사 창을 닫았다 다시 열면 그 사이 끝난 이전 복사는 새 창에 표시하지 않는다', async () => {
+  // 짝 검증 3의 A-1과 같은 규칙이다. 창을 열 때마다 복사함 표시를 지우므로, 이전 창에서 누른 복사의 늦은 결과도 새 창에 남기지 않는다.
+  const record = meeting({ participants: '박서연, 김민수', minutes: minutes(action('가', '김민수')) });
+  const review = await openWith(record);
+  let release;
+  review.clipboard.hold = new Promise((resolve) => { release = resolve; });
+  review.ui['share-open'].click();
+  review.ui['share-list'].children[0].children.at(-1).click();
+  review.ui['share-dialog'].close();
+  await settle();
+  review.ui['share-open'].click();
+  release();
+  await settle();
+  const copy = review.ui['share-list'].children[0].children.at(-1);
+  assert.deepEqual([review.ui['share-status'].textContent, copy.textContent, review.clipboard.texts.length], ['', '복사', 1]);
 });

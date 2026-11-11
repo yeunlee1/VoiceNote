@@ -1497,6 +1497,21 @@
     // 초점은 보고 있는 탭의 패널에서 되찾는다. 내 할 일 탭의 체크 상자는 mine:<번호> 열쇠를 쓴다.
   }
 
+  function renderTodosKeepingFocus(fallbackKey) {
+    // 늦게 온 응답으로 다시 그릴 때 쓴다. 초점이 보고 있는 패널 안에 있었으면 같은 열쇠의 새 요소로, 잃었으면 fallbackKey로 돌려준다.
+    const panel = state.resultTab === "mine" ? ui["panel-mine"] : ui.minutes, active = document.activeElement;
+    const inside = Boolean(panel.contains?.(active)), lost = !active || active === document.body;
+    renderTodosAgain(inside ? active.dataset?.todoFocus || fallbackKey : lost ? fallbackKey : null);
+    // 사용자가 그사이 패널 밖으로 옮긴 초점은 빼앗지 않는다.
+  }
+
+  function sameControl(opener) {
+    // 결과 화면에서 연 창의 단추가 그사이 다시 그려졌으면 보고 있는 패널에서 같은 열쇠의 새 단추를 찾는다.
+    const key = opener?.dataset?.todoFocus, panel = state.resultTab === "mine" ? ui["panel-mine"] : ui.minutes;
+    const again = key ? panel.querySelector(`[data-todo-focus="${key}"]`) : null;
+    return again && !again.disabled ? again : null;
+  }
+
   function currentMe() {
     // 이 회의에서 나로 정해진 사람이다. 이 회의에 저장된 선택, 설정의 내 이름 순서로 정하고 모르면 null이다.
     return Todos.resolveMe(Todos.candidates(ui.participants.value, currentTodos()), state.me, state.settings?.myName || "");
@@ -1716,7 +1731,7 @@
       } catch (error) {
         if (state.resultId === resultId) {
           // 뒤에 더 누른 저장이 남아 있으면 그 저장이 목록 전체를 다시 쓰므로 되돌리지 않는다. 마지막 저장이 실패했을 때만 저장이 확인된 값으로 돌아간다.
-          if (serial === state.todoSerial) { state.todos = state.todoConfirmed; renderTodosAgain(focusKey); }
+          if (serial === state.todoSerial) { state.todos = state.todoConfirmed; renderTodosKeepingFocus(focusKey); }
           ui["result-status"].textContent = `할 일을 저장하지 못했습니다. ${error.message}`;
         } else announce(`이전 회의의 할 일을 저장하지 못했습니다. ${error.message}`);
         return false;
@@ -1922,16 +1937,19 @@
       row.addEventListener("mouseenter", show);
       copy.addEventListener("focus", show);
       copy.addEventListener("click", async () => {
+        const session = state.shareSession;
         show();
         try {
           await writeClipboard(Todos.shareText(ui.title.value, ui.date.value, group));
+          if (session !== state.shareSession) return;
+          // 창을 닫았다 다시 열었으면 그 사이 끝난 이전 복사는 새 창에 표시하지 않는다.
           state.shareCopied.add(group.name);
           // 단추를 다시 그리지 않고 글자만 바꿔 초점이 그 단추에 남게 한다.
           copy.textContent = "복사함";
           copy.dataset.copied = "true";
           copy.setAttribute("aria-label", `${group.name} 님 할 일 다시 복사`);
           ui["share-status"].textContent = `${group.name} 님 할 일을 복사했습니다. 메신저에 붙여 넣으세요.`;
-        } catch { ui["share-status"].textContent = "복사하지 못했습니다. 아래 글을 직접 골라 복사해 주세요."; }
+        } catch { if (session === state.shareSession) ui["share-status"].textContent = "복사하지 못했습니다. 아래 글을 직접 골라 복사해 주세요."; }
       });
       row.append(who, element("span", `${group.tasks.length}건`, "copy-count"), copy);
       return row;
@@ -1946,6 +1964,8 @@
     // 창을 열 때마다 복사함 표시를 지운다. 누구에게 보냈는지는 저장하지 않는다.
     state.shareCopied = new Set();
     state.shareCurrent = null;
+    state.shareSession = (state.shareSession || 0) + 1;
+    // 창을 열 때마다 새 차례를 매겨, 이전 창에서 누른 복사의 늦은 결과가 새 창을 바꾸지 않게 한다.
     ui["share-status"].textContent = "";
     renderShare();
     openDialog(ui["share-dialog"], opener);
@@ -2611,8 +2631,8 @@
       // 결과를 보는 동안 목록이 다시 그려져 연 단추가 떨어져 나갔으면 같은 회의의 새 줄로 돌아간다.
       // 연 단추가 그 사이 숨었으면(예: 새 버전 표시가 설치 뒤 사라짐) 프로그램 정보는 설정 단추로, 나머지는 회의 준비로 돌아간다.
       if (target?.isConnected && !target.disabled && !target.hidden) target.focus();
-      else if (dialog !== ui.about && !inPage && ui["meeting-detail"].open) ui[`tab-${state.resultTab}`].focus();
-      // 결과 화면에서 연 창이고 연 단추가 다시 그려져 사라졌으면 보고 있던 결과 탭으로 돌아간다.
+      else if (dialog !== ui.about && !inPage && ui["meeting-detail"].open) (sameControl(opener) || ui[`tab-${state.resultTab}`]).focus();
+      // 결과 화면에서 연 창이고 연 단추가 다시 그려져 바뀌었으면 같은 열쇠의 새 단추로, 그런 단추가 없으면 보고 있던 결과 탭으로 돌아간다.
       else (dialog === ui.about ? ui["open-settings"] : ui.prepare).focus();
     });
   }
