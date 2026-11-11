@@ -600,3 +600,30 @@ test('나를 저장하는 사이 다른 곳으로 옮긴 초점은 빼앗지 않
   await settle();
   assert.equal(review.focused(), review.ui['tab-minutes']);
 });
+
+test('나를 저장하는 사이 패널 안에서 옮긴 초점은 다시 그린 같은 조작 요소로 돌려준다', async () => {
+  // 짝 재확인의 W-2 보완. 응답 뒤 패널을 다시 그리면서, 저장 중에 설정 단추나 체크 상자로 옮겨 둔 초점을 바꾸기·첫 후보로 빼앗았다.
+  const cases = [
+    ['설정 이름이 없어 나를 다시 묻는 회의', { participants: '김민수, 이도현', actions: [action('가', '김민수')], myName: '' }, (panel) => byClass(panel, 'who-settings')[0]],
+    ['설정 이름으로 나를 다시 정하는 회의', { participants: '박서연, 김민수', actions: [action('가', '박서연'), action('나', '김민수')], myName: '박서연' }, (panel) => walk(panel).find((node) => node.dataset?.todoFocus === 'mine:0')],
+  ];
+  for (const [name, { participants, actions, myName }, pick] of cases) {
+    let release;
+    const held = new Promise((resolve) => { release = resolve; });
+    const review = await openWith(meeting({ participants, minutes: minutes(...actions) }), { [ME]: async (call) => { await held; return meSaved(call); } }, { me: '김민수', myName });
+    const panel = review.ui['panel-mine'];
+    byClass(panel, 'me-change')[0].click();
+    const [clear] = byClass(panel, 'who-clear');
+    clear.focus();
+    clear.click();
+    await settle();
+    const moved = pick(panel);
+    assert.ok(moved, `${name}: 저장 중에도 옮길 곳이 있다`);
+    moved.focus();
+    release();
+    await settle();
+    const again = pick(panel);
+    assert.notEqual(again, moved, `${name}: 응답 뒤 다시 그렸다`);
+    assert.equal(review.focused(), again, name);
+  }
+});

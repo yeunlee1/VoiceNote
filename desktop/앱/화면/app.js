@@ -1522,6 +1522,7 @@
     if (others) text.append(element("span", `다른 사람 일 ${others}건`));
     const all = element("button", "정리본에서 전체 보기", "button button-quiet button-small mine-all");
     all.type = "button";
+    all.dataset.todoFocus = "mine-all";
     all.addEventListener("click", () => { showResultTab("minutes"); ui["tab-minutes"].focus(); });
     line.append(text, all);
     return line;
@@ -1556,6 +1557,7 @@
       // 이 회의에 저장된 선택이 있으면 지울 수 있다. 지금 결과의 후보에 없어 적용되지 않는 옛 선택도 지울 수 있어야 한다.
       const clear = element("button", "선택 지우기", "button button-quiet button-small who-clear");
       clear.type = "button";
+      clear.dataset.todoFocus = "who-clear";
       clear.disabled = locked;
       clear.addEventListener("click", () => saveMe(null));
       tools.append(clear);
@@ -1563,6 +1565,7 @@
     if (!state.settings?.myName) {
       const settings = element("button", "설정에 내 이름 적어 두기", "button button-quiet button-small who-settings");
       settings.type = "button";
+      settings.dataset.todoFocus = "who-settings";
       settings.setAttribute("aria-haspopup", "dialog");
       settings.addEventListener("click", () => openSettings("settings-me", settings));
       tools.append(settings);
@@ -1654,11 +1657,14 @@
       state.todoPending--;
       clearTodoNotice();
       if (state.resultId === resultId) {
-        const active = document.activeElement;
-        const keep = hadFocus && (!active || active === document.body || ui["panel-mine"].contains?.(active));
-        // 저장하는 동안 잠긴 단추는 초점을 받지 못해 초점이 body로 빠질 수 있다. 사용자가 그사이 다른 곳으로 옮긴 초점은 빼앗지 않는다.
+        const active = document.activeElement, inside = Boolean(ui["panel-mine"].contains?.(active)), lost = !active || active === document.body;
+        const key = inside ? active.dataset?.todoFocus : "";
+        // 다시 그리면 패널 안의 조작 요소가 새것으로 바뀐다. 저장 중에 옮겨 둔 패널 안 초점은 같은 열쇠의 새 요소로 돌려주고, 그 요소가 없거나 잠겨 초점을 잃었으면 바꾸기·후보로 간다.
         renderMine();
-        if (keep) focusMineControl();
+        if (inside || (hadFocus && lost)) {
+          if (!key || !focusMine(key)) focusMineControl();
+        }
+        // 사용자가 그사이 패널 밖으로 옮긴 초점은 빼앗지 않는다.
       }
       refresh();
     }
