@@ -35,7 +35,7 @@ module.exports = '(' + function () {
         const minutes=record.state==='complete'?{overview:selected==='1233'?'앞선 결과입니다.':'전체 방향 | 회의 내용을 보존합니다.',topics:[{title:'보관함',points:['원래 보관함에서 기록을 엽니다.']}],decisions:[],actions:[],openQuestions:[]}:null;
         const versions=selected?[{id:'1233',savedAt:2,outputFormat:'summary',refined:true},{id:selected==='legacy'?'legacy':'1234',savedAt:3,outputFormat:'tasks',refined:false}]:[];
         if(original.resultId==='1235')versions.push({id:'1235',savedAt:4,outputFormat:'summary',refined:true});
-        if(minutes&&m.todoActions){minutes.actions=m.todoActions;record.participants=m.todoParticipants||'';}
+        if(minutes&&m.todoActions){minutes.actions=(m.todoActionsByResult||{})[selected]||m.todoActions;record.participants=m.todoParticipants||'';}
         reply({record,minutes,transcript:m.noTranscript?'':'저장된 전사',resultId:selected||null,versions:m.versions||versions,review:m.reviews[selected]||null,copies:m.copyReport,todos:(m.savedTodos||{})[selected]||null,me:(m.me||{})[d.id]??null,todosUnreadable:!!m.todosUnreadable});
       } else if (method==='review') {if(m.failReview)throw Error('평가 저장 실패');const r={stars:d.stars,comment:d.comment,savedAt:'2026-10-23T00:00:00Z'};m.reviews[d.resultId]=r;reply(r);}
       else if (method==='refine') {

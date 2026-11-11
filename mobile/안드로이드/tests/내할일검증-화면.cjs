@@ -147,6 +147,19 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
   check('결과 버전을 바꿔도 보던 탭에 머문다', mineKept && await evaluate(selected('transcript')));
   await closeResult();
 
+  // 설계의 '오류와 경계 상황'. 옛 결과 버전을 보면 그 결과의 할 일로 내 일을 센다.
+  await prepare({ extra: "__mock.todoActionsByResult={'1233':[{task:'앞선 결과의 일',owner:'박서연',due:null}]}" }); await openFirst();
+  await versionTo('1233'); const olderRows = await texts('#panel-mine .mine-task'); await versionTo('1234');
+  check('옛 결과 버전을 보면 그 결과의 할 일로 내 일을 센다', olderRows === js(['앞선 결과의 일']) && (await texts('#panel-mine .mine-task')) === js(['출시 일정표 수정본 공유', '초도 물량 발주서 변경']), olderRows);
+  await evaluate('__mock.todoActionsByResult=null'); await closeResult();
+  // 같은 표의 줄. 직접 고른 선택이 저장된 회의는 설정의 내 이름을 바꿔도 그대로다.
+  await prepare({ extra: `__mock.me={${js(MEETING)}:'김민수'}` }); await openFirst();
+  const chosen = await evaluate("document.querySelector('#panel-mine .me-name')?.textContent||''"); await closeResult();
+  await press('#open-settings'); await wait(40); await evaluate("(()=>{const i=document.getElementById('my-name');if(!i)return false;i.value='이도현';return true})()"); await press('#my-name-save');
+  await until("document.getElementById('my-name-status')?.textContent==='내 이름을 저장했습니다.'"); await press('#close-settings'); await openFirst();
+  check('직접 고른 선택이 저장된 회의는 설정의 내 이름을 바꿔도 그대로다', chosen === '김민수' && await evaluate("document.querySelector('#panel-mine .me-name')?.textContent==='김민수'&&__mock.myName==='이도현'"), chosen);
+  await closeResult();
+
   await prepare(); await openFirst(); await press('#tab-minutes');
   await evaluate("(()=>{__mock.refineOutcome='success';const c=document.getElementById('review-comment');c.value='담당자를 다시 보아 주세요.';c.dispatchEvent(new Event('input'));return true})()");
   await press('#refine'); await press('#tab-mine');
