@@ -102,7 +102,7 @@ try {
   if($entries -notcontains 'assets/summary-compact.json'){throw 'APK에 결과 줄이기 지시문(summary-compact.json)이 없습니다.'}
   '의견 반영 지시문 포함: 예'
   "공용 기본 키 포함: $(if($entries -contains 'assets/default.key'){'예'}else{'아니요'})"
-  $korean=Join-Path $OutputRoot $(if($DebugBuild){((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.6.0-안드로이드-검증용.apk')}else{((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.6.0-안드로이드-설치본.apk')})
+  $korean=Join-Path $OutputRoot $(if($DebugBuild){((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.7.0-안드로이드-검증용.apk')}else{((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.7.0-안드로이드-설치본.apk')})
   Copy-Item -LiteralPath (Join-Path $OutputRoot (Split-Path $output -Leaf)) -Destination $korean -Force
   Get-Item -LiteralPath $korean | Select-Object FullName,Length
 } finally {
