@@ -68,9 +68,7 @@ public final class MainActivity extends Activity {
             case "status": answer(id,new JSONObject().put("active",MeetingService.active).put("meeting",new JSONObject(MeetingService.snapshot)).put("connection",connection()).put("update",Updates.snapshot(this)),null);break;
             case "history": answer(id,store.history(),null);break;
             case "saveMe":{
-                fileIdle();Object name=data.opt("name");
-                if(name!=null&&name!=JSONObject.NULL&&!(name instanceof String))throw new IOException("나로 고를 이름을 확인하세요.");
-                String me=store.saveMe(location,data.getString("id"),nullableString(data,"resultId"),name instanceof String?(String)name:null);
+                fileIdle();String me=store.saveMe(location,data.getString("id"),nullableString(data,"resultId"),requestedMe(data));
                 answer(id,new JSONObject().put("me",me==null?JSONObject.NULL:me),null);break;
             }
             case "copyText":{
@@ -178,6 +176,14 @@ public final class MainActivity extends Activity {
             }
             default:throw new IOException("지원하지 않는 요청입니다.");
         }
+    }
+    static String requestedMe(JSONObject data)throws IOException{
+        // 나 저장 요청의 이름(글자)이나 선택 지우기(null)를 읽는다. 이름 칸이 아예 없는 요청은 지우기로 보지 않고 거절해 저장된 선택을 지킨다.
+        if(!data.has("name"))throw new IOException("나로 고를 이름을 확인하세요.");
+        Object name=data.opt("name");
+        if(name==JSONObject.NULL)return null;
+        if(!(name instanceof String))throw new IOException("나로 고를 이름을 확인하세요.");
+        return (String)name;
     }
     static String nullableString(JSONObject data,String key){return !data.has(key)||data.isNull(key)?null:data.optString(key,null);}
     private JSONObject connection()throws Exception {

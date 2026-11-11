@@ -662,7 +662,7 @@ public final class AndroidChecks extends Instrumentation {
         expect(historyRow(store,id).optInt("mineOpen")==1,"한 건 끝내면 수가 줄어든다");
         store.saveTodos("main",id,first,new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("가","박서연 대리",true)).put(todoItem("나","박서연 대리",true)).put(todoItem("다","김민수",false))));
         expect(!historyRow(store,id).has("mineOpen"),"내 일을 다 끝내면 수를 붙이지 않는다");
-        for(String bad:new String[]{"이도현","",new String(new char[201]).replace(' ','가')}){
+        for(String bad:new String[]{"이도현","",new String(new char[201]).replace('\0','가')}){
             try{store.saveMe("main",id,first,bad);throw new AssertionError("후보에 없는 이름을 저장했습니다: "+bad.length());}catch(IOException expected){expect(expected.getMessage().contains("골라 주세요"),"후보에 없는 이름은 거절한다");}
         }
         expect(store.saveMe("main",id,first,null)==null&&store.loadMe("main",id)==null,"고른 나를 지운다");
@@ -672,7 +672,7 @@ public final class AndroidChecks extends Instrumentation {
         expect(Store.read(new File(store.directory("main",id),"나.json")).equals("{깨짐"),"읽지 못한 나.json을 지우거나 고치지 않는다");
         expect("김민수".equals(store.saveSettings(new JSONObject().put("myName","  김민수 ")).getString("myName")),"내 이름을 앞뒤 공백 없이 저장한다");
         expect(historyRow(store,id).optInt("mineOpen")==1,"고른 선택을 읽지 못하면 설정의 내 이름으로 나를 정한다");
-        try{store.saveSettings(new JSONObject().put("myName",new String(new char[201]).replace(' ','가')));throw new AssertionError("201자 이름을 저장했습니다.");}catch(IOException expected){expect(expected.getMessage().contains("200자"),"201자 이름은 거절한다");}
+        try{store.saveSettings(new JSONObject().put("myName",new String(new char[201]).replace('\0','가')));throw new AssertionError("201자 이름을 저장했습니다.");}catch(IOException expected){expect(expected.getMessage().contains("200자"),"201자 이름은 거절한다");}
         store.saveSettings(new JSONObject().put("defaultOutputFormat","tasks"));
         expect("김민수".equals(store.settings().getString("myName")),"다른 설정을 바꿔도 내 이름이 남는다");
         byte[] exported=store.exportSettings();
@@ -685,6 +685,12 @@ public final class AndroidChecks extends Instrumentation {
         expect("박서연 대리".equals(store.saveMe("main",id,first,"박서연 대리")),"옛 결과에서는 그 결과의 후보를 고를 수 있다");
         try{store.saveMe("main",id,second,"박서연 대리");throw new AssertionError("다른 결과의 후보를 저장했습니다.");}catch(IOException expected){expect(expected.getMessage().contains("골라 주세요"),"새 결과의 후보에 없는 이름은 거절한다");}
         expect("박서연 대리".equals(store.loadMe("main",id))&&!historyRow(store,id).has("mineOpen"),"선택은 회의에 하나이고 목록의 수는 최신 결과로 센다");
+        expect("박서연 대리".equals(MainActivity.requestedMe(new JSONObject().put("name","박서연 대리"))),"나 저장 요청의 이름을 그대로 읽는다");
+        expect(MainActivity.requestedMe(new JSONObject().put("name",JSONObject.NULL))==null,"이름 칸이 null이면 선택 지우기다");
+        for(JSONObject bad:new JSONObject[]{new JSONObject(),new JSONObject().put("name",3)}){
+            try{MainActivity.requestedMe(bad);throw new AssertionError("잘못된 나 저장 요청을 받아들였습니다: "+bad);}catch(IOException expected){expect(expected.getMessage().contains("이름을 확인"),"잘못된 나 저장 요청은 거절한다");}
+        }
+        // 이름 칸이 없는 요청은 지우기로 보지 않고 거절해, 저장된 나를 지우지 않는다.
     }
     static void todoChecks(Store store)throws Exception{
         // 사람이 고친 할 일이 결과 파일과 따로 저장되고 공유 문서·의견 반영에 맞게 이어지는지 확인한다.

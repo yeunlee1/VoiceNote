@@ -54,6 +54,13 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
   check('앞 저장만 실패해도 마지막으로 누른 값이 남는다', lastSaved && await evaluate(lastWins));
   await hideMessage(); await closeResult();
 
+  // 짝 검증 3의 A-3. 체크 저장이 실패해 되돌릴 때, 그사이 패널 밖으로 옮긴 초점은 빼앗지 않는다.
+  await prepare(); await openFirst();
+  await evaluate(`(()=>{__mock.todoFail=true;__mock.delay=900;const c=document.querySelector('#panel-mine [data-todo-focus="mine:0"]');c?.focus();c?.click();document.getElementById('tab-mine').focus();__mock.delay=0;return true})()`);
+  await until("document.getElementById('message').textContent.includes('디스크 오류')"); await wait(60);
+  check('체크 저장이 실패하는 사이 패널 밖으로 옮긴 초점은 빼앗지 않는다', await evaluate(`document.activeElement===document.getElementById('tab-mine')&&document.querySelector('#panel-mine [data-todo-focus="mine:0"]')?.checked===false`), await evaluate("document.activeElement?.id||document.activeElement?.dataset?.todoFocus||document.activeElement?.tagName"));
+  await evaluate('__mock.todoFail=false'); await hideMessage(); await closeResult();
+
   // 할 일 저장이 끝나기 전에는 결과를 닫지 않고, 받아 둔 업데이트도 설치하지 않는다.
   await prepare({ query: '?update=ready' }); await openFirst();
   await evaluate(`__mock.delay=900;document.querySelector('#panel-mine [data-todo-focus="mine:0"]')?.click()`);
@@ -175,7 +182,8 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
 
   // 누르는 곳의 크기와 가로 넘침을 폭마다 본다. 긴 글자는 2,000자 할 일과 200자 이름을 넣는다.
   const fits = "(()=>{const w=document.documentElement.clientWidth,res=document.getElementById('result'),out=[...document.querySelectorAll('#panel-mine *')].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&(r.left<-0.5||r.right>w+0.5)}).length;return {over:document.documentElement.scrollWidth-w,inner:res.scrollWidth-res.clientWidth,out}})()";
-  const LONG_TASK = '출시 일정표 수정본을 공유하고 확인을 받습니다 '.repeat(40).slice(0, 1700) + 'A'.repeat(300);
+  const LONG_TASK = '출시 일정표 수정본을 공유하고 확인을 받습니다 '.repeat(80).slice(0, 1700) + 'A'.repeat(300);
+  check('긴 글자 확인의 할 일은 할 일 상한인 2,000자다', LONG_TASK.length === 2000, String(LONG_TASK.length));
   const LONG_NAME = '박서연' + 'B'.repeat(197);
   for (const width of [360, 390, 412]) {
     await viewport(width); await prepare(); await openFirst();
@@ -223,6 +231,18 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
   await evaluate('__mock.copyFail=true'); await evaluate(`${firstCopy}?.click()`);
   check('복사에 실패하면 알리고 복사함으로 바꾸지 않는다', await until("document.getElementById('share-status')?.textContent.includes('복사하지 못했습니다')") && await evaluate(`${firstCopy}?.textContent==='복사'`));
   await evaluate('__mock.copyFail=false'); await press('[data-close=share]'); await closeResult();
+  // 짝 검증 3의 A-1. 닫았다 다시 연 복사 창에 이전 창에서 누른 복사의 늦은 응답이 나타나면 안 된다.
+  await openFirst(); await press('#panel-mine .share-open');
+  await evaluate(`(()=>{__mock.delay=900;${firstCopy}?.click();__mock.delay=0;return true})()`);
+  await press('[data-close=share]'); await press('#panel-mine .share-open'); await wait(1100);
+  check('복사 창을 닫았다 다시 열면 그 사이 끝난 이전 복사는 새 창에 표시하지 않는다', await evaluate("document.getElementById('share').open&&document.getElementById('share-status').textContent===''&&[...document.querySelectorAll('#share-list .copy-button')].every(b=>b.textContent==='복사')"), await evaluate("document.getElementById('share-status').textContent"));
+  await press('[data-close=share]'); await closeResult();
+  // 짝 검증 3의 A-2. 나를 저장하는 사이 연 설정 창을 닫으면, 응답으로 다시 그린 같은 단추(설정에 내 이름 적어 두기)로 돌아간다.
+  await prepare({ name: '', extra: `__mock.me={${js(MEETING)}:'김민수'}` }); await openFirst(); await press('#panel-mine .me-change');
+  await evaluate("(()=>{__mock.delay=900;document.querySelector('#panel-mine .who-clear')?.click();window.__opener=document.querySelector('#panel-mine .who-settings');window.__opener?.focus();window.__opener?.click();__mock.delay=0;return true})()");
+  await until('!!window.__opener&&!window.__opener.isConnected'); await press('#close-settings'); await wait(60);
+  check('나를 저장하는 사이 연 설정 창을 닫으면 다시 그린 같은 단추로 돌아간다', await evaluate("!document.getElementById('settings').open&&document.activeElement?.dataset?.todoFocus==='who-settings'&&document.activeElement.isConnected"), await evaluate("document.activeElement?.dataset?.todoFocus||document.activeElement?.id||document.activeElement?.tagName"));
+  await closeResult(); await prepare();
   await evaluate(`__mock.todoActions=${js(Array.from({ length: 60 }, (_, i) => ({ task: '가'.repeat(1990) + i, owner: '박서연', due: null })))}`);
   await openFirst(); await press('#panel-mine .share-open'); await evaluate(`${firstCopy}?.click()`);
   check('10만 자를 넘는 글은 실패로 알린다', await until("document.getElementById('share-status')?.textContent.includes('입력이 너무 큽니다')") && await evaluate(`${firstCopy}?.textContent==='복사'`));

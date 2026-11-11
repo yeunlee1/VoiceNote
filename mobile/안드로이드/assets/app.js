@@ -113,8 +113,8 @@
   // 모달 위에 미리보기 모달이 겹칠 수 있으므로 돌아갈 포커스는 모달마다 따로 기억한다.
   function openDialog(id, opener) { if ($(id).open) return; $(id).returnFocus = opener || document.activeElement; $(id).showModal(); }
   // 연 단추가 그 사이 숨었으면(예: 새 버전 안내 줄이 사라짐) 프로그램 정보는 설정 단추로 초점을 돌린다.
-  for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { const opener = dialog.returnFocus; dialog.returnFocus = null; if (opener && document.contains(opener) && !opener.hidden) opener.focus(); else if (dialog.id === 'about') $('open-settings').focus(); else if (!$('result').hidden && !(state.resultTab === 'mine' && focusMineControl())) $(`tab-${state.resultTab}`).focus(); });
-  // 결과 화면에서 연 창의 단추가 그사이 다시 그려졌으면(설정에 내 이름을 적어 나를 알게 된 경우 등) 내 할 일의 바꾸기·후보나 보고 있던 탭으로 초점을 돌린다.
+  for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { const opener = dialog.returnFocus; dialog.returnFocus = null; if (opener && document.contains(opener) && !opener.hidden) opener.focus(); else if (dialog.id === 'about') $('open-settings').focus(); else if (!$('result').hidden) focusResultControl(opener?.dataset?.todoFocus); });
+  // 결과 화면에서 연 창의 단추가 그사이 다시 그려졌으면 같은 열쇠의 새 단추로 돌아가고, 그런 단추가 없으면(설정에 내 이름을 적어 나를 알게 된 경우 등) 내 할 일의 바꾸기·후보나 보고 있던 탭으로 간다.
   for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => $(button.dataset.close).close());
 
   function renderAccess() {
@@ -203,6 +203,23 @@
   }
   function renderTodosAgain(focusKey) { renderMinutes(); if (focusKey) (state.resultTab === 'mine' ? $('panel-mine') : $('minutes')).querySelector(`[data-todo-focus="${focusKey}"]`)?.focus(); }
   // 초점은 보고 있는 탭의 패널에서 되찾는다. 내 할 일 탭의 체크 상자는 mine:<번호> 열쇠를 쓴다.
+  function renderTodosKeepingFocus(fallbackKey) {
+    // 늦게 온 응답으로 다시 그릴 때 쓴다. 초점이 보고 있는 패널 안에 있었으면 같은 열쇠의 새 요소로, 잃었으면 fallbackKey로 돌려준다.
+    const panel = state.resultTab === 'mine' ? $('panel-mine') : $('minutes'), active = document.activeElement;
+    const inside = panel.contains(active), lost = !active || active === document.body;
+    renderTodosAgain(inside ? active.dataset?.todoFocus || fallbackKey : lost ? fallbackKey : null);
+    // 사용자가 그사이 패널 밖으로 옮긴 초점은 빼앗지 않는다.
+  }
+  function focusResultControl(key) {
+    // 결과 화면에서 연 창의 단추가 그사이 다시 그려졌으면 같은 열쇠의 새 단추로, 없으면 내 할 일의 바꾸기·후보나 보고 있던 탭으로 초점을 돌린다.
+    const panel = state.resultTab === 'mine' ? $('panel-mine') : $('minutes'), again = key ? panel.querySelector(`[data-todo-focus="${key}"]`) : null;
+    if (again && !again.disabled) { again.focus(); return; }
+    if (!(state.resultTab === 'mine' && focusMineControl())) $(`tab-${state.resultTab}`).focus();
+  }
+  function sameResult(target) {
+    // 늦게 온 응답이 지금 열린 회의의 같은 결과에 대한 것인지 본다. 옛 회의는 결과 표지(legacy)가 같을 수 있어 보관함과 회의까지 함께 비교한다.
+    return state.opened?.location === target.location && state.opened?.id === target.id && state.opened?.resultId === target.resultId;
+  }
   function currentMe() {
     // 이 회의에서 나로 정해진 사람이다. 이 회의에 저장된 선택, 설정의 내 이름 순서로 정하고 모르면 null이다.
     return Todos.resolveMe(Todos.candidates(state.result?.participants || '', currentTodos()), state.me, state.settings?.myName || '');
@@ -330,12 +347,14 @@
       const show = node('button', '보기', 'link copy-show'); show.type = 'button'; show.setAttribute('aria-pressed', String(group.name === state.shareCurrent)); show.setAttribute('aria-label', `${group.name} 님에게 갈 글 보기`); show.onclick = pick;
       const copy = node('button', copied ? '복사함' : '복사', 'button copy-button'); copy.type = 'button'; copy.dataset.copied = String(copied); copy.setAttribute('aria-label', `${group.name} 님 할 일 ${copied ? '다시 복사' : '복사'}`);
       copy.onclick = async () => {
-        pick();
+        const session = state.shareSession; pick();
         try {
           await call('copyText', { text: Todos.shareText(state.result.title, state.result.date, group) });
+          if (session !== state.shareSession) return;
+          // 창을 닫았다 다시 열었으면 그 사이 끝난 이전 복사는 새 창에 표시하지 않는다.
           state.shareCopied.add(group.name); copy.textContent = '복사함'; copy.dataset.copied = 'true'; copy.setAttribute('aria-label', `${group.name} 님 할 일 다시 복사`);
           setShareStatus(`${group.name} 님 할 일을 복사했습니다. 메신저에 붙여 넣으세요.`);
-        } catch (error) { setShareStatus(error.message.includes('복사') ? error.message : `복사하지 못했습니다. ${error.message}`, 'error'); }
+        } catch (error) { if (session === state.shareSession) setShareStatus(error.message.includes('복사') ? error.message : `복사하지 못했습니다. ${error.message}`, 'error'); }
         // 실패하면 복사함으로 바꾸지 않고, 아래 미리보기 글을 직접 골라 복사할 수 있게 둔다.
       };
       row.append(who, show, copy);
@@ -348,7 +367,8 @@
   }
   function openShare(opener) {
     // 창을 열 때마다 복사함 표시를 지운다. 누구에게 보냈는지는 저장하지 않는다. 떠 있는 알림은 창을 가리지 않게 치운다.
-    state.shareCopied = new Set(); state.shareCurrent = null; setShareStatus('');
+    state.shareCopied = new Set(); state.shareCurrent = null; state.shareSession = (state.shareSession || 0) + 1; setShareStatus('');
+    // 창을 열 때마다 새 차례를 매겨, 이전 창에서 누른 복사의 늦은 결과가 새 창을 바꾸지 않게 한다.
     clearTimeout(message.timer); $('message').hidden = true;
     renderShare(); openDialog('share', opener);
   }
@@ -438,9 +458,9 @@
     // 저장 대상을 지금 결과로 고정한다. 저장 도중 화면이 바뀌어도 원래 결과에만 저장한다.
     const target = { ...state.opened }, serial = ++state.todoSerial; state.todos = next; state.todoPending++; renderTodosAgain(focusKey); lock();
     state.todoQueue = state.todoQueue.then(async () => {
-      try { await call('saveTodos', { ...target, todos: { finalized: next.finalized, items: next.items.map(({ task, owner, due, done }) => ({ task, owner, due, done })) } }); if (state.opened?.resultId === target.resultId) state.todoConfirmed = next; await history().catch(() => {}); return true; }
+      try { await call('saveTodos', { ...target, todos: { finalized: next.finalized, items: next.items.map(({ task, owner, due, done }) => ({ task, owner, due, done })) } }); if (sameResult(target)) state.todoConfirmed = next; await history().catch(() => {}); return true; }
       // 뒤에 더 누른 저장이 남아 있으면 그 저장이 목록 전체를 다시 쓰므로 되돌리지 않는다. 마지막 저장이 실패했을 때만 저장이 확인된 값으로 돌아간다.
-      catch (error) { if (state.opened?.resultId === target.resultId && serial === state.todoSerial) { state.todos = state.todoConfirmed; renderTodosAgain(focusKey); } message(`할 일을 저장하지 못했습니다. ${error.message}`); return false; }
+      catch (error) { if (sameResult(target) && serial === state.todoSerial) { state.todos = state.todoConfirmed; renderTodosKeepingFocus(focusKey); } message(`할 일을 저장하지 못했습니다. ${error.message}`); return false; }
       finally { state.todoPending--; clearTodoNotice(); lock(); }
     });
     return state.todoQueue;
