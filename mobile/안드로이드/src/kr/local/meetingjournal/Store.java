@@ -79,7 +79,12 @@ final class Store {
             if(value.length()==1&&value.has("myName")){
                 Object name=value.opt("myName");
                 if(!(name instanceof String)||((String)name).length()>Todos.MAX_FIELD)throw new IOException("내 이름은 200자 이하로 적어 주세요.");
-                if(!context.getSharedPreferences("connection",0).edit().putString("myName",JsonText.trim((String)name)).commit())throw new IOException("내 이름을 저장하지 못했습니다.");
+                android.content.SharedPreferences prefs=context.getSharedPreferences("connection",0);String before=prefs.getString("myName",null);
+                if(!prefs.edit().putString("myName",JsonText.trim((String)name)).commit()){
+                    android.content.SharedPreferences.Editor previous=prefs.edit();if(before==null)previous.remove("myName");else previous.putString("myName",before);previous.commit();
+                    // commit이 false여도 메모리에는 새 이름이 먼저 들어가 있다. 이전 이름으로 되돌려 목록의 수와 화면이 같은 사람을 기준으로 남게 한다.
+                    throw new IOException("내 이름을 저장하지 못했습니다.");
+                }
                 return settings();
             }
             if(value.length()!=1||!value.has("defaultOutputFormat"))throw new IOException("기본 출력 형식을 확인하세요.");
@@ -271,8 +276,9 @@ final class Store {
     File meFile(String location,String id){return new File(directory(location,id),"나.json");}
     String loadMe(String location,String id){
         // 파일이 없거나 읽지 못하면 고른 적이 없는 것으로 본다. 읽지 못한 파일은 지우지 않는다.
-        try{File file=meFile(location,id);if(!file.exists())return null;JSONObject saved=new JSONObject(read(file));Object name=saved.opt("name");
-            return saved.optInt("version")==1&&name instanceof String&&!JsonText.trim((String)name).isEmpty()&&((String)name).length()<=Todos.MAX_FIELD?(String)name:null;}
+        // 버전은 숫자 1만 받는다. optInt처럼 1.5나 글자 "1"을 1로 바꿔 읽지 않아 Windows와 같은 파일을 같게 판정한다.
+        try{File file=meFile(location,id);if(!file.exists())return null;JSONObject saved=new JSONObject(read(file));Object name=saved.opt("name"),version=saved.opt("version");
+            return version instanceof Number&&((Number)version).doubleValue()==1&&name instanceof String&&!JsonText.trim((String)name).isEmpty()&&((String)name).length()<=Todos.MAX_FIELD?(String)name:null;}
         catch(Exception ex){return null;}
     }
     static final String ME_REJECTED="이 회의의 참석자나 담당자 이름 가운데서 골라 주세요.";

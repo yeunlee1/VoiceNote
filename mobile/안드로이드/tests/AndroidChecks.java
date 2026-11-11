@@ -186,6 +186,30 @@ public final class AndroidChecks extends Instrumentation {
         expect((new Store(store.context).draft()).length()==0,"녹음 뒤 다시 열어도 옛 메모가 되살아나지 않는다");
         expect(new File(p1,"작성중.json").exists()&&new File(p2,"작성중.json").exists()&&new File(p3,"작성중.json").exists(),"옛 메모 파일을 지우지 않는다");
     }
+    void myNameFailureCheck()throws Exception{
+        // 설정을 디스크에 쓰지 못하는 휴대폰을 흉내 낸다. commit이 메모리에는 값을 넣고(apply) false를 돌려준다.
+        Store store=new Store(testContext());
+        store.saveSettings(new JSONObject().put("myName","박서연"));
+        final android.content.Context base=store.context;
+        Store failing=new Store(new android.content.ContextWrapper(base){
+            public android.content.Context getApplicationContext(){return this;}
+            public android.content.SharedPreferences getSharedPreferences(String key,int mode){return failingCommits(base.getSharedPreferences(key,mode));}
+        });
+        try{failing.saveSettings(new JSONObject().put("myName","김민수"));throw new AssertionError("디스크에 쓰지 못한 내 이름을 저장했다고 답했습니다.");}
+        catch(IOException expected){expect(expected.getMessage().contains("내 이름을 저장하지 못했습니다"),"내 이름을 디스크에 쓰지 못하면 실패로 알린다");}
+        expect("박서연".equals(store.myName())&&"박서연".equals(failing.myName()),"디스크에 쓰지 못한 내 이름은 메모리에서도 이전 이름으로 되돌린다");
+    }
+    static android.content.SharedPreferences failingCommits(final android.content.SharedPreferences real){
+        return (android.content.SharedPreferences)java.lang.reflect.Proxy.newProxyInstance(Store.class.getClassLoader(),new Class<?>[]{android.content.SharedPreferences.class},(proxy,method,args)->{
+            if(!method.getName().equals("edit"))return method.invoke(real,args);
+            final android.content.SharedPreferences.Editor editor=real.edit();
+            return java.lang.reflect.Proxy.newProxyInstance(Store.class.getClassLoader(),new Class<?>[]{android.content.SharedPreferences.Editor.class},(chain,call,values)->{
+                if(call.getName().equals("commit")){editor.apply();return false;}
+                Object result=call.invoke(editor,values);return result==editor?chain:result;
+            });
+        });
+        // 설정 편집기의 commit만 바꾼 대리 객체다. 다른 메서드는 실제 설정으로 넘기고, 이어 쓰는 편집기는 대리 객체를 돌려준다.
+    }
     android.content.Context testContext(){
         return new android.content.ContextWrapper(getTargetContext()){
             final String name="task10-"+UUID.randomUUID();
@@ -670,6 +694,11 @@ public final class AndroidChecks extends Instrumentation {
         Store.write(new File(store.directory("main",id),"나.json"),"{깨짐");
         expect(store.loadMe("main",id)==null&&historyRow(store,id)!=null,"깨진 나.json은 고른 적이 없는 것으로 보고 회의는 목록에 남는다");
         expect(Store.read(new File(store.directory("main",id),"나.json")).equals("{깨짐"),"읽지 못한 나.json을 지우거나 고치지 않는다");
+        for(String version:new String[]{"1.5","\"1\"","2"}){
+            String saved="{\"version\":"+version+",\"name\":\"박서연 대리\",\"savedAt\":\"2099-01-01T00:00:00Z\"}";
+            Store.write(new File(store.directory("main",id),"나.json"),saved);
+            expect(store.loadMe("main",id)==null&&Store.read(new File(store.directory("main",id),"나.json")).equals(saved),"버전이 숫자 1이 아닌 나.json("+version+")은 고른 적이 없는 것으로 보고 지우거나 고치지 않는다");
+        }
         expect("김민수".equals(store.saveSettings(new JSONObject().put("myName","  김민수 ")).getString("myName")),"내 이름을 앞뒤 공백 없이 저장한다");
         expect(historyRow(store,id).optInt("mineOpen")==1,"고른 선택을 읽지 못하면 설정의 내 이름으로 나를 정한다");
         try{store.saveSettings(new JSONObject().put("myName",new String(new char[201]).replace('\0','가')));throw new AssertionError("201자 이름을 저장했습니다.");}catch(IOException expected){expect(expected.getMessage().contains("200자"),"201자 이름은 거절한다");}
@@ -757,6 +786,7 @@ public final class AndroidChecks extends Instrumentation {
         draftFailureCheck();
         todoChecks(new Store(testContext()));
         meChecks(new Store(testContext()));
+        myNameFailureCheck();
         updateChecks();
         URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){protected URLConnection openConnection(URL url){return new HttpURLConnection(url){
             final ByteArrayOutputStream sent=new ByteArrayOutputStream();
