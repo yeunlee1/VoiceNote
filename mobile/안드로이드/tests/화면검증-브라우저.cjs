@@ -172,7 +172,7 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     check('초안 읽기 실패 뒤에도 목록·상태를 불러온다',await evaluate("document.querySelectorAll('#history button').length===3&&__mock.calls.some(c=>c.method==='status')"));
 
     await load();await key();await click('#open-settings');
-    check('설정은 네 구역이며 내 형식은 회의 준비 밖에 있다',await evaluate("document.querySelectorAll('#settings .settings-section').length===4&&document.querySelector('#settings #custom-editor')&&!document.querySelector('#prep #custom-editor')&&document.getElementById('settings-title').textContent==='설정'"));
+    check('설정은 다섯 구역이며 내 형식은 회의 준비 밖에 있다',await evaluate("document.querySelectorAll('#settings .settings-section').length===5&&document.querySelector('#settings #custom-editor')&&!document.querySelector('#prep #custom-editor')&&document.getElementById('settings-title').textContent==='설정'"));
     await evaluate("document.getElementById('default-format').value='tasks';document.getElementById('default-format').dispatchEvent(new Event('change'))");await wait(60);
     check('기본 출력 형식을 저장하고 새 회의에 적용한다',await evaluate("__mock.calls.some(c=>c.method==='saveSettings'&&c.data.defaultOutputFormat==='tasks')&&document.getElementById('output-format').value==='tasks'"));
     await click('[data-pick-folder=summary]');await wait(60);

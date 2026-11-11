@@ -25,6 +25,7 @@
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.05-4.95M19 5v4h-4"/></symbol>
   <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4M5.5 13v5.5a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5V13"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h10.5v10.5H9zM15 9V4.5H4.5V15H9"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4M5.5 15v3.5A1.5 1.5 0 0 0 7 20h10a1.5 1.5 0 0 0 1.5-1.5V15"/></symbol>
   <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="m6 12.5 4 4 8-9"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.3-4.3"/></symbol>
@@ -113,6 +114,7 @@
       <button id="copy-result" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>정리본 복사</span></button>
       <button id="share-result" class="button primary" type="button"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg><span>정리본 공유</span></button>
     </div>
+    <button id="save-text" class="button save-text" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg><span>텍스트 파일로 저장</span></button>
     <section id="panel-mine" class="result-panel mine" role="tabpanel" aria-labelledby="tab-mine"></section>
     <section id="panel-minutes" class="result-panel" role="tabpanel" aria-labelledby="tab-minutes" hidden>
       <div id="minutes" class="minutes"></div>
@@ -160,7 +162,7 @@
   <div class="modal">
     <div class="modal-head"><h2 id="settings-title">설정</h2><div class="head-actions"><button id="open-about" class="link" type="button" aria-haspopup="dialog" aria-controls="about">프로그램 정보</button><button id="close-settings" class="link close-dialog" type="button" data-close="settings">닫기</button></div></div>
     <p id="settings-lock" class="notice" hidden>녹음이나 분석이 진행 중입니다. 설정은 끝난 뒤 바꿀 수 있습니다.</p>
-    <nav class="settings-nav" aria-label="설정 구역"><button class="link" data-settings-section="ai" type="button">AI 연결</button><button class="link" data-settings-section="format" type="button">출력 형식</button><button class="link" data-settings-section="storage" type="button">저장 위치</button><button class="link" data-settings-section="file" type="button">설정 파일</button></nav>
+    <nav class="settings-nav" aria-label="설정 구역"><button class="link" data-settings-section="ai" type="button">AI 연결</button><button class="link" data-settings-section="me" type="button">내 이름</button><button class="link" data-settings-section="format" type="button">출력 형식</button><button class="link" data-settings-section="storage" type="button">저장 위치</button><button class="link" data-settings-section="file" type="button">설정 파일</button></nav>
     <section id="settings-ai" class="settings-section" tabindex="-1" aria-labelledby="ai-heading"><h3 id="ai-heading">AI 연결</h3>
     <p id="key-status" class="status-line"></p>
     <label class="field">API 키<input id="api-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-로 시작하는 키"></label>
@@ -176,6 +178,12 @@
     <label class="field">요약 모델<select id="model"></select></label>
     <p id="model-limit" class="hint"></p>
     <ul id="model-list" class="model-list" aria-label="모델 설명"></ul>
+    </section>
+    <section id="settings-me" class="settings-section" tabindex="-1" aria-labelledby="me-heading"><h3 id="me-heading">내 이름</h3>
+      <p id="my-name-help" class="hint">참석자 칸에 적는 이름과 똑같이 적어 두면 지난 회의에서 내가 맡은 일을 바로 보여 줍니다.</p>
+      <label class="field">이름 <span class="field-note">선택 · 200자까지</span><input id="my-name" maxlength="200" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="my-name-help"></label>
+      <div class="row"><button id="my-name-save" class="button" type="button">내 이름 저장</button></div>
+      <p id="my-name-status" class="hint" role="status"></p>
     </section>
     <section id="settings-format" class="settings-section" tabindex="-1" aria-labelledby="format-heading"><h3 id="format-heading">출력 형식</h3>
       <label class="field">기본 출력 형식<select id="default-format"><option value="meeting">회의록</option><option value="summary">핵심 요약</option><option value="tasks">업무 정리</option><option value="custom">내 형식</option></select></label>
@@ -218,6 +226,18 @@
       <p id="update-fine" class="hint" hidden>설치하면 VoiceNote가 닫히고 새 버전으로 바뀝니다. 회의 기록과 설정은 그대로 남습니다.</p>
     </section>
     <section class="about-notes" aria-labelledby="about-notes-title"><h3 id="about-notes-title">버전별 바뀐 점</h3><ol id="release-list" class="release-list"></ol></section>
+  </div>
+</dialog>
+
+<dialog id="share" aria-labelledby="share-title">
+  <div class="modal">
+    <div class="modal-head"><h2 id="share-title">사람별 할 일 복사</h2><button class="link close-dialog" type="button" data-close="share">닫기</button></div>
+    <p class="hint">받는 사람마다 그 사람이 맡은 일 가운데 남은 일만 담은 글을 복사합니다. 끝낸 일은 빠집니다.</p>
+    <ul id="share-list" class="copy-list"></ul>
+    <p id="share-unassigned" class="notice" hidden></p>
+    <p id="share-status" class="copy-status" role="status"></p>
+    <p id="share-preview-title" class="copy-preview-title"></p>
+    <pre id="share-preview" class="copy-preview" tabindex="0" aria-labelledby="share-preview-title"></pre>
   </div>
 </dialog>
 

@@ -8,7 +8,7 @@ module.exports = '(' + function () {
   window.Native.request = function (id, method, json) {
     const d = JSON.parse(json);
     const reply = (value, error) => setTimeout(() => window.receive(id,{value,error}), m.delay || 0);
-    const handled = ['saveSettings','pickFolder','clearFolder','exportSettings','importSettings','cancelSettings','review','refine','copies','open','applySettings','saveTodos','saveMe'];
+    const handled = ['saveSettings','pickFolder','clearFolder','exportSettings','importSettings','cancelSettings','review','refine','copies','open','applySettings','saveTodos','saveMe','copyText','saveText'];
     if (!handled.includes(method)) {
       if (method === 'init') {
         const receive = window.receive;
@@ -18,7 +18,7 @@ module.exports = '(' + function () {
     }
     m.calls.push({method,data:d});
     try {
-      if (method==='saveSettings') {m.defaultOutputFormat=d.defaultOutputFormat;reply({settings:settings()});}
+      if (method==='saveSettings') {if('myName' in d){if(m.myNameFail)throw Error('디스크 오류');m.myName=d.myName;}else m.defaultOutputFormat=d.defaultOutputFormat;reply({settings:settings()});}
       else if (method==='pickFolder') {if(!m.cancelFolder)m.storage[d.kind]={uri:'content://test/tree/'+d.kind,name:'회의 기록을 오래 보관하는 폴더 '+d.kind};reply({settings:settings(),cancelled:!!m.cancelFolder});}
       else if (method==='clearFolder') {m.storage[d.kind]={uri:'',name:''};reply({settings:settings()});}
       else if (method==='exportSettings' || method==='cancelSettings') reply(true);
@@ -46,6 +46,8 @@ module.exports = '(' + function () {
         reply({id:d.id,attemptId:d.attemptId});
       }
       else if (method==='saveTodos') {if(m.todoFail||(m.todoFailNext>0&&m.todoFailNext--))throw Error('디스크 오류');m.savedTodos={...(m.savedTodos||{}),[d.resultId]:d.todos};reply({version:1,...d.todos});}
+      else if (method==='copyText') {if(JSON.stringify(d).length>100000)throw Error('입력이 너무 큽니다.');if(m.copyFail)throw Error('복사하지 못했습니다. 아래 글을 직접 골라 복사해 주세요.');m.copied=d.text;reply(true);}
+      else if (method==='saveText') {if(m.saveTextFail)throw Error('텍스트 파일을 저장하지 못했습니다. 다른 위치를 골라 다시 시도하세요.');reply(m.saveTextCancel?{cancelled:true}:{saved:true,file:'2026-10-23-옛 첫째-업무정리.txt'});}
       else if (method==='saveMe') {if(m.meFail)throw Error('디스크 오류');m.me={...(m.me||{}),[d.id]:d.name};reply({me:d.name});}
       else if (method==='copies') {if(m.failCopies)throw Error('사본 저장 실패');m.copyReport=m.copiesResult||{ok:true,written:[{kind:'summaryMd',name:'회의.md'}],skipped:[],failed:[]};reply(m.copyReport);}
     } catch(error) {reply(null,error.message);}

@@ -390,3 +390,21 @@ details.more { margin-top: 20px; border-top: 1px solid var(--rule); padding-top:
 .who-button:disabled { opacity: .55; }
 .num { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 5px; background: var(--teal-wash); color: var(--teal); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .who-clear { justify-self: start; }
+
+/* 사람별 할 일 복사 창과 정리본 텍스트 파일 저장 */
+.send-block { display: grid; gap: 8px; justify-items: start; padding-top: 16px; border-top: 1px solid var(--rule); }
+.todo-share, .who-settings { justify-self: start; }
+.save-text { width: 100%; margin-bottom: 4px; }
+.copy-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.copy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 8px; align-items: center; padding: 4px 4px 4px 10px; border: 1px solid var(--rule); border-radius: var(--radius-s); background: var(--well); }
+.copy-row[data-current="true"] { border-color: var(--teal); background: var(--teal-wash); }
+.copy-who { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; font-weight: 600; }
+.copy-name { min-width: 0; overflow-wrap: anywhere; }
+.copy-count { font-size: 13px; font-weight: 400; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.copy-row .button { min-height: 44px; min-width: 72px; padding: 6px 12px; }
+.copy-row .button[data-copied="true"] { border-color: var(--teal); color: var(--teal-deep); }
+.copy-status { font-size: 13px; font-weight: 600; color: var(--teal-deep); }
+.copy-status[data-tone="error"] { color: var(--rec-deep); }
+.copy-status:empty, .copy-preview-title:empty, .copy-preview:empty { display: none; }
+.copy-preview-title { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+.copy-preview { margin: 0; padding: 12px; border: 1px dashed var(--rule-strong); border-radius: var(--radius-s); background: #fff; font: inherit; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }

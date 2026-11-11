@@ -78,7 +78,7 @@
     $('model').disabled = !idle || !state.connection.models.length;
     for (const id of ['custom-save','custom-delete','custom-name','custom-instruction']) $(id).disabled = !idle;
     for (const input of document.querySelectorAll('#custom-section-list input,#custom-section-list button')) input.disabled = !idle || input.dataset.edge === 'true';
-    for (const input of document.querySelectorAll('#prep input,#prep textarea,#prep select,#default-format,[data-pick-folder],[data-clear-folder],#export-settings,#import-settings,#apply-settings')) input.disabled = !idle;
+    for (const input of document.querySelectorAll('#prep input,#prep textarea,#prep select,#default-format,[data-pick-folder],[data-clear-folder],#export-settings,#import-settings,#apply-settings,#my-name,#my-name-save')) input.disabled = !idle;
     for (const button of $('history').querySelectorAll('button')) button.disabled = !idle;
     $('refresh').disabled = !idle; $('close-result').disabled = state.busy;
     $('result-version').disabled = !idle;
@@ -90,7 +90,7 @@
     $('refine-cost').hidden = !comment.trim();
     $('review-count').textContent = `${number(comment.length)} / 1,000`;
     $('copy-result').disabled = !idle || !(state.resultTab === 'transcript' ? state.result?.transcript : state.result?.minutes);
-    $('share-result').disabled = $('copy-result').disabled;
+    $('share-result').disabled = $('copy-result').disabled; $('save-text').disabled = $('copy-result').disabled;
     $('share-all').disabled = !idle || !state.opened;
     $('save-copies').disabled = !resultReady;
     // 받는 동안 녹음 시작·분석·저장 같은 작업이 끼면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 '설치'를 다시 누른다.
@@ -113,7 +113,8 @@
   // 모달 위에 미리보기 모달이 겹칠 수 있으므로 돌아갈 포커스는 모달마다 따로 기억한다.
   function openDialog(id, opener) { if ($(id).open) return; $(id).returnFocus = opener || document.activeElement; $(id).showModal(); }
   // 연 단추가 그 사이 숨었으면(예: 새 버전 안내 줄이 사라짐) 프로그램 정보는 설정 단추로 초점을 돌린다.
-  for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { const opener = dialog.returnFocus; dialog.returnFocus = null; if (opener && document.contains(opener) && !opener.hidden) opener.focus(); else if (dialog.id === 'about') $('open-settings').focus(); });
+  for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { const opener = dialog.returnFocus; dialog.returnFocus = null; if (opener && document.contains(opener) && !opener.hidden) opener.focus(); else if (dialog.id === 'about') $('open-settings').focus(); else if (!$('result').hidden && !(state.resultTab === 'mine' && focusMineControl())) $(`tab-${state.resultTab}`).focus(); });
+  // 결과 화면에서 연 창의 단추가 그사이 다시 그려졌으면(설정에 내 이름을 적어 나를 알게 된 경우 등) 내 할 일의 바꾸기·후보나 보고 있던 탭으로 초점을 돌린다.
   for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => $(button.dataset.close).close());
 
   function renderAccess() {
@@ -248,6 +249,11 @@
       clear.onclick = () => saveMe(null); box.append(clear);
       // 이 회의에 저장된 선택이 있으면 지울 수 있다. 지금 결과의 후보에 없어 적용되지 않는 옛 선택도 지울 수 있어야 한다.
     }
+    if (!state.settings?.myName) {
+      const settings = node('button', '설정에 내 이름 적어 두기', 'link who-settings'); settings.type = 'button'; settings.dataset.todoFocus = 'who-settings'; settings.setAttribute('aria-haspopup', 'dialog');
+      settings.onclick = () => openSettings({ currentTarget: settings }, 'me'); box.append(settings);
+      // 설정에 내 이름이 없으면 회의마다 고르지 않아도 되게 설정의 내 이름 칸으로 가는 길을 둔다.
+    }
     return box;
   }
   function renderMine() {
@@ -259,7 +265,7 @@
     const list = Todos.candidates(state.result.participants, items);
     if (!list.length) return panel.replaceChildren(node('p', '참석자를 적지 않은 회의라 누가 맡았는지 알 수 없습니다.', 'mine-empty'), restLine(items, null));
     const me = currentMe();
-    if (!me) return panel.replaceChildren(whoBox(list, null));
+    if (!me) return panel.replaceChildren(...[whoBox(list, null), shareBlock()].filter(Boolean));
     const mine = Todos.mine(items, me.name), left = mine.filter(item => !item.done).length, editable = !!state.opened?.resultId;
     const head = node('div', null, 'mine-head'), title = node('div', null, 'mine-title'), row = node('div', null, 'me-row');
     title.append(node('h3', '내가 맡은 일'));
@@ -284,7 +290,67 @@
       parts.push(rows);
     }
     parts.push(restLine(items, me.name));
+    const share = shareBlock(); if (share) parts.push(share);
     panel.replaceChildren(...parts);
+  }
+  function shareGroups() { return Todos.shareGroups(state.result?.participants || '', currentTodos()); }
+  function shareReady() {
+    // 사람별 글은 정리본이 있는 결과에서만 만든다. 담당자가 있는 남은 일이 한 건도 없으면 보낼 글이 없다.
+    return !!state.result?.data && shareGroups().length > 0;
+  }
+  function shareBlock() {
+    // 내 할 일 패널 끝에서 사람별 할 일 복사 창을 여는 단추다. 내가 누구인지와 상관없이 보낼 글이 있으면 보인다.
+    if (!shareReady()) return null;
+    const block = node('div', null, 'send-block'), open = node('button', '사람별 할 일 복사', 'button share-open');
+    open.type = 'button'; open.dataset.todoFocus = 'share-open'; open.setAttribute('aria-haspopup', 'dialog'); open.onclick = () => openShare(open);
+    block.append(open, node('p', '받는 사람마다 그 사람의 남은 일만 담은 글을 복사해 메신저나 메일에 붙여 넣습니다.', 'hint'));
+    return block;
+  }
+  function setShareStatus(text, tone = '') { $('share-status').textContent = text; $('share-status').dataset.tone = tone; }
+  function renderSharePreview(groups) {
+    const group = groups.find(entry => entry.name === state.shareCurrent);
+    $('share-preview-title').textContent = group ? `${group.name} 님에게 갈 글` : '';
+    $('share-preview').textContent = group ? Todos.shareText(state.result.title, state.result.date, group) : '';
+  }
+  function renderShare() {
+    // 남은 일이 한 건이라도 있는 사람을 번호순으로 한 줄씩 보여 주고, 고른 사람에게 갈 글을 아래에 미리 보여 준다.
+    const groups = shareGroups(), me = currentMe();
+    if (!groups.some(group => group.name === state.shareCurrent)) state.shareCurrent = groups[0]?.name ?? null;
+    $('share-list').replaceChildren(...groups.map(group => {
+      const row = node('li', null, 'copy-row'), who = node('span', null, 'copy-who'), copied = state.shareCopied.has(group.name);
+      row.dataset.current = String(group.name === state.shareCurrent);
+      if (group.number) who.append(node('b', group.number, 'num'));
+      who.append(node('span', Todos.sameName(group.name, me?.name) ? `${group.name} (나)` : group.name, 'copy-name'), node('span', `${group.tasks.length}건`, 'copy-count'));
+      const pick = () => {
+        state.shareCurrent = group.name;
+        for (const other of $('share-list').children) { const on = other === row; other.dataset.current = String(on); other.querySelector('.copy-show')?.setAttribute('aria-pressed', String(on)); }
+        renderSharePreview(groups);
+        // 줄을 다시 그리지 않고 표시만 바꿔 누른 단추에 초점이 남게 한다.
+      };
+      const show = node('button', '보기', 'link copy-show'); show.type = 'button'; show.setAttribute('aria-pressed', String(group.name === state.shareCurrent)); show.setAttribute('aria-label', `${group.name} 님에게 갈 글 보기`); show.onclick = pick;
+      const copy = node('button', copied ? '복사함' : '복사', 'button copy-button'); copy.type = 'button'; copy.dataset.copied = String(copied); copy.setAttribute('aria-label', `${group.name} 님 할 일 ${copied ? '다시 복사' : '복사'}`);
+      copy.onclick = async () => {
+        pick();
+        try {
+          await call('copyText', { text: Todos.shareText(state.result.title, state.result.date, group) });
+          state.shareCopied.add(group.name); copy.textContent = '복사함'; copy.dataset.copied = 'true'; copy.setAttribute('aria-label', `${group.name} 님 할 일 다시 복사`);
+          setShareStatus(`${group.name} 님 할 일을 복사했습니다. 메신저에 붙여 넣으세요.`);
+        } catch (error) { setShareStatus(error.message.includes('복사') ? error.message : `복사하지 못했습니다. ${error.message}`, 'error'); }
+        // 실패하면 복사함으로 바꾸지 않고, 아래 미리보기 글을 직접 골라 복사할 수 있게 둔다.
+      };
+      row.append(who, show, copy);
+      return row;
+    }));
+    const unassigned = currentTodos().filter(item => !item.done && !String(item.owner ?? '').trim()).length;
+    $('share-unassigned').hidden = !unassigned;
+    $('share-unassigned').textContent = unassigned ? `담당 미정 ${unassigned}건은 누구에게도 가지 않습니다. 정리본에서 담당자를 먼저 맞추세요.` : '';
+    renderSharePreview(groups);
+  }
+  function openShare(opener) {
+    // 창을 열 때마다 복사함 표시를 지운다. 누구에게 보냈는지는 저장하지 않는다. 떠 있는 알림은 창을 가리지 않게 치운다.
+    state.shareCopied = new Set(); state.shareCurrent = null; setShareStatus('');
+    clearTimeout(message.timer); $('message').hidden = true;
+    renderShare(); openDialog('share', opener);
   }
   async function saveMe(name) {
     // 이 회의에서 나를 고르거나(이름) 고른 것을 지운다(null). 먼저 화면에 반영하고, 실패하면 앞선 선택으로 되돌린다.
@@ -331,6 +397,8 @@
       const finish = node('button', finalized ? '담당자 다시 맞추기' : '맞추기 완료', 'button todo-finish'); finish.type = 'button'; finish.dataset.todoFocus = 'finish';
       finish.onclick = () => commitTodos({ finalized: !finalized, items: currentTodos() }, 'finish'); section.append(finish);
     }
+    if (shareReady()) { const share = node('button', '사람별 할 일 복사', 'button todo-share'); share.type = 'button'; share.dataset.todoFocus = 'share'; share.setAttribute('aria-haspopup', 'dialog'); share.onclick = () => openShare(share); section.append(share); }
+    // 담당자를 맞춘 자리에서 바로 사람마다 보낼 글을 복사할 수 있게 같은 창을 여는 단추를 둔다.
     host.append(section);
   }
   function todoRow(item, people, assigning, editable, undecided) {
@@ -407,7 +475,7 @@
     $('transcript').textContent = transcript;
     const format = Flow.outputFormat(record.outputFormat), custom = format === 'custom' ? record.customFormat || null : null, label = custom ? custom.name : Flow.FORMAT_LABELS[format === 'custom' ? 'meeting' : format];
     state.todos = data.todos || null; state.todoConfirmed = state.todos; state.todoEditing = null; state.me = data.me ?? null; state.mePicking = false; if (data.todosUnreadable) message('저장된 할 일 수정본을 읽지 못해 AI 결과를 보여 줍니다. 원본 파일은 보존합니다.');
-    state.result = { label, minutes: !!minutes, transcript: !!transcript, data: minutes || null, format, custom, participants: record.participants || '' };
+    state.result = { label, minutes: !!minutes, transcript: !!transcript, data: minutes || null, format, custom, participants: record.participants || '', title: record.title || '', date: record.date || '' };
     renderMinutes();
     if (!minutes) $('minutes').append(node('p', `아직 ${label}${format === 'tasks' ? '가' : '이'} 없습니다. 아래 재분석으로 다시 만들 수 있습니다.`, 'hint'));
     renderUsage(record);
@@ -496,7 +564,7 @@
     }
     if (state.opened) renderCopies(state.copies);
   }
-  function focusSettings(section) { const el = $('settings-' + section); el.focus({preventScroll:true}); $('settings').scrollTop = section === 'ai' ? 0 : el.offsetTop - 64; }
+  function focusSettings(section) { const el = $('settings-' + section); (section === 'me' ? $('my-name') : el).focus({preventScroll:true}); $('settings').scrollTop = section === 'ai' ? 0 : el.offsetTop - 64; }
   function renderStars() {
     for (const button of document.querySelectorAll('[data-stars]')) button.setAttribute('aria-pressed', String(Number(button.dataset.stars) === state.stars));
   }
@@ -685,6 +753,8 @@
     const name = minutes ? r.label || '정리본' : '전사문', ready = minutes ? r.minutes : r.transcript;
     $('copy-result').lastChild.textContent = `${name} 복사`; $('share-result').lastChild.textContent = `${name} 공유`;
     $('copy-result').disabled = !ready || state.busy || state.active; $('share-result').disabled = $('copy-result').disabled;
+    $('save-text').hidden = !minutes; $('save-text').disabled = $('copy-result').disabled;
+    // 텍스트 파일로 저장은 정리본 탭에만 있고 복사·공유와 같은 조건으로 잠긴다.
   }
   for (const name of RESULT_TABS) {
     $(`tab-${name}`).onclick = () => showTab(name);
@@ -698,8 +768,33 @@
   const resultKind = () => state.resultTab === 'transcript' ? 'transcript' : 'summary';
   $('copy-result').onclick = () => task(async () => { await call('copy', { ...state.opened, kind: resultKind() }); message(`‘${resultKind() === 'transcript' ? '전사문' : state.result?.label || '정리본'}’ 내용을 복사했습니다. 메신저나 메일에 붙여 넣으세요.`); });
   $('share-result').onclick = () => task(() => call('share', { ...state.opened, kind: resultKind() }));
+  $('save-text').onclick = () => task(async () => {
+    const result = await call('saveText', { ...state.opened });
+    // 글과 파일 이름은 네이티브가 저장된 결과와 할 일 수정본으로 만든다. 화면은 어느 회의의 어느 결과인지만 알린다.
+    if (!result?.cancelled) message(result?.file ? `‘${result.file}’ 파일로 저장했습니다.` : '텍스트 파일로 저장했습니다.');
+  });
 
-  function openSettings(event, section = 'ai') { state.removeArmed = false; $('remove-key').textContent = '키 삭제'; renderConnection(); renderSettings(); lock(); openDialog('settings', event?.currentTarget); focusSettings(section); }
+  function openSettings(event, section = 'ai') {
+    state.removeArmed = false; $('remove-key').textContent = '키 삭제'; renderConnection(); renderSettings(); lock();
+    if (!$('settings').open) { $('my-name').value = state.settings?.myName || ''; $('my-name-status').textContent = ''; }
+    // 내 이름 칸은 창을 새로 열 때만 채운다. 다른 설정을 저장하며 다시 그릴 때 적고 있던 글자를 지우지 않는다.
+    openDialog('settings', event?.currentTarget); focusSettings(section);
+  }
+  async function saveMyName() {
+    // 설정의 내 이름을 저장한다. 저장되면 지난 회의 목록의 내 일 수와 열려 있는 내 할 일 탭을 다시 계산한다.
+    try { await call('saveSettings', { myName: $('my-name').value.trim() }); }
+    catch (error) { $('my-name-status').textContent = `내 이름을 저장하지 못했습니다. ${error.message}`; return; }
+    // 실패하면 적어 둔 글자를 그대로 둬 다시 누를 수 있게 한다.
+    $('my-name').value = state.settings?.myName || ''; $('my-name-status').textContent = state.settings?.myName ? '내 이름을 저장했습니다.' : '내 이름을 지웠습니다.';
+    renderMine(); await history().catch(() => {});
+  }
+  function saveMyNameKeepingFocus() {
+    // 저장하는 동안 칸과 단추가 잠기며 초점이 빠지므로, 저장이 끝나면 누른 곳으로 초점을 돌려준다.
+    const back = document.activeElement;
+    return task(saveMyName).then(() => { const now = document.activeElement; if ((!now || now === document.body) && back && document.contains(back) && !back.disabled) back.focus(); });
+  }
+  $('my-name-save').onclick = saveMyNameKeepingFocus;
+  $('my-name').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); saveMyNameKeepingFocus(); } });
   $('open-settings').onclick = openSettings; $('blocker-settings').onclick = openSettings;
   async function saveKey() {
     const key = $('api-key').value.trim(); if (!key) throw new Error('API 키를 붙여 넣으세요.');

@@ -6,8 +6,8 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
   const item = (task, owner, due, done) => ({ task, owner, due, done });
   const FIRST_DONE = js({ 1234: { finalized: false, items: [item('출시 일정표 수정본 공유', '박서연', '11월 12일', true), item('전파 인증 진행 상황 확인', '김민수', '11월 14일', false), item('초도 물량 발주서 변경', '박서연', '다음 주 화요일까지', false), item('온라인 행사 대행사 견적 비교', null, null, false)] } });
   // 첫 일(박서연)을 이미 끝낸 수정본이다. 안 끝낸 일이 먼저 보이는지 본다.
-  const myName = name => evaluate(`__mock.myName=${js(name)};window.__settingsBridgeForTest('saveSettings',{defaultOutputFormat:'meeting'}).then(()=>true)`);
-  // 설정의 내 이름은 앱을 열 때 읽으므로, 모의 값을 바꾼 뒤 설정 저장 응답으로 화면에 다시 알린다.
+  const myName = name => evaluate(`window.__settingsBridgeForTest('saveSettings',{myName:${js(name)}}).then(()=>true)`);
+  // 설정의 내 이름은 앱을 열 때 읽으므로, 설정 저장 요청으로 모의 값을 바꾸고 그 응답으로 화면에 다시 알린다.
   const prepare = async ({ query = '', name = '박서연', participants = '박서연, 김민수, 이도현', actions = ACTIONS, saved = '{}', extra = '' } = {}) => {
     await load(query); await key();
     await evaluate(`__mock.todoActions=${actions};__mock.todoParticipants=${js(participants)};__mock.savedTodos=${saved};${extra}`);
@@ -193,5 +193,89 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
     if (width === 390) { await hideMessage(); await shot('내할일-390-긴글자.png'); }
     await closeResult();
   }
+
+  // 사람별 할 일 복사: 담당자가 있는 남은 일이 있으면 내 일 아래와 정리본 할 일 아래에서 창을 연다.
+  await viewport(390); await prepare(); await openFirst();
+  const inMine = await evaluate("!!document.querySelector('#panel-mine .share-open')");
+  await press('#tab-minutes');
+  const inMinutes = await evaluate("!!document.querySelector('#minutes .todo-share')");
+  await closeResult(); await myName(''); await openFirst();
+  const whenUnknown = await evaluate("!!document.querySelector('#panel-mine .who-box')&&!!document.querySelector('#panel-mine .share-open')");
+  check('사람별 할 일 복사는 내 일 아래와 정리본 할 일 아래에 있고 나를 몰라도 보인다', inMine && inMinutes && whenUnknown, js({ inMine, inMinutes, whenUnknown }));
+  await closeResult();
+  await evaluate(`__mock.savedTodos=${js({ 1234: { finalized: false, items: [item('출시 일정표 수정본 공유', '박서연', '11월 12일', true), item('전파 인증 진행 상황 확인', '김민수', '11월 14일', true), item('초도 물량 발주서 변경', '박서연', '다음 주 화요일까지', true), item('온라인 행사 대행사 견적 비교', null, null, false)] } })}`);
+  await myName('박서연'); await openFirst();
+  const noneInMine = await evaluate("!document.querySelector('#panel-mine .share-open')"); await press('#tab-minutes');
+  check('담당자가 있는 남은 일이 없으면 감춘다', noneInMine && await evaluate("!document.querySelector('#minutes .todo-share')"));
+  await closeResult(); await evaluate('__mock.savedTodos={}');
+
+  const firstCopy = "document.querySelectorAll('#share-list .copy-row')[0]?.querySelector('.copy-button')";
+  await openFirst(); await press('#panel-mine .share-open');
+  const shareRows = await evaluate("JSON.stringify([...document.querySelectorAll('#share-list .copy-row')].map(r=>[r.querySelector('.num')?.textContent||'',r.querySelector('.copy-name')?.textContent||'',r.querySelector('.copy-count')?.textContent||'']))");
+  check('복사 창은 남은 일이 있는 사람만 번호순으로 보여 주고 나는 (나)로 표시한다', await evaluate("document.getElementById('share')?.open===true") && shareRows === js([['1', '박서연 (나)', '2건'], ['2', '김민수', '1건']]), shareRows);
+  await evaluate("document.querySelectorAll('#share-list .copy-show')[1]?.click()");
+  check('보기를 누르면 그 사람에게 갈 글을 보여 준다', await evaluate(`document.getElementById('share-preview-title')?.textContent==='김민수 님에게 갈 글'&&document.getElementById('share-preview')?.textContent===${js('[옛 첫째] 2026-10-23\n김민수 님이 맡은 일 1건\n- 전파 인증 진행 상황 확인 · 기한 11월 14일')}&&document.querySelectorAll('#share-list .copy-row')[1]?.dataset.current==='true'&&document.querySelectorAll('#share-list .copy-show')[1]?.getAttribute('aria-pressed')==='true'`));
+  await evaluate(`(()=>{window.__copy=${firstCopy};window.__copy?.focus();window.__copy?.click();return true})()`);
+  const SHARE_TEXT = '[옛 첫째] 2026-10-23\n박서연 님이 맡은 일 2건\n- 출시 일정표 수정본 공유 · 기한 11월 12일\n- 초도 물량 발주서 변경 · 기한 다음 주 화요일까지';
+  check('복사하면 정해진 모양의 글을 넘기고 복사함으로 바꾼다', await until(`__mock.copied===${js(SHARE_TEXT)}&&!!window.__copy?.isConnected&&window.__copy.textContent==='복사함'&&document.activeElement===window.__copy&&document.getElementById('share-status').textContent==='박서연 님 할 일을 복사했습니다. 메신저에 붙여 넣으세요.'`), await evaluate('String(__mock.copied)'));
+  await press('[data-close=share]'); await press('#panel-mine .share-open');
+  check('창을 닫았다 열면 복사함 표시가 지워진다', await evaluate("document.querySelectorAll('#share-list .copy-button').length===2&&[...document.querySelectorAll('#share-list .copy-button')].every(b=>b.textContent==='복사')&&document.getElementById('share-status').textContent===''"));
+  await evaluate('__mock.copyFail=true'); await evaluate(`${firstCopy}?.click()`);
+  check('복사에 실패하면 알리고 복사함으로 바꾸지 않는다', await until("document.getElementById('share-status')?.textContent.includes('복사하지 못했습니다')") && await evaluate(`${firstCopy}?.textContent==='복사'`));
+  await evaluate('__mock.copyFail=false'); await press('[data-close=share]'); await closeResult();
+  await evaluate(`__mock.todoActions=${js(Array.from({ length: 60 }, (_, i) => ({ task: '가'.repeat(1990) + i, owner: '박서연', due: null })))}`);
+  await openFirst(); await press('#panel-mine .share-open'); await evaluate(`${firstCopy}?.click()`);
+  check('10만 자를 넘는 글은 실패로 알린다', await until("document.getElementById('share-status')?.textContent.includes('입력이 너무 큽니다')") && await evaluate(`${firstCopy}?.textContent==='복사'`));
+  await press('[data-close=share]'); await closeResult(); await evaluate(`__mock.todoActions=${ACTIONS}`);
+  await myName(''); await openFirst(); await press('#panel-mine .who-button');
+  await until("!document.getElementById('message').hidden&&document.getElementById('message').textContent==='이 회의에서 나는 박서연입니다.'");
+  await press('#panel-mine .share-open');
+  check('알림이 떠 있을 때 복사 창을 열면 알림을 치운다', await evaluate("document.getElementById('share')?.open===true&&document.getElementById('message').hidden"));
+  await press('[data-close=share]'); await closeResult(); await myName('박서연');
+  for (const width of [360, 390, 412]) {
+    await viewport(width); await openFirst(); await press('#panel-mine .share-open'); await hideMessage();
+    const sheet = await evaluate("(()=>{const d=document.getElementById('share');if(!d)return {open:false};const r=d.getBoundingClientRect(),w=document.documentElement.clientWidth;return {open:d.open,left:Math.round(r.left),right:Math.round(r.right),w,inner:d.scrollWidth-d.clientWidth,out:[...d.querySelectorAll('*')].filter(e=>{const q=e.getBoundingClientRect();return q.width>0&&(q.left<r.left-0.5||q.right>r.right+0.5)}).length,small:[...d.querySelectorAll('button')].filter(b=>{const q=b.getBoundingClientRect();return q.width<44||q.height<44}).map(b=>b.textContent)}})()");
+    check(width + 'px 복사 창은 화면 안에 들어오고 가로로 넘치지 않는다', sheet.open && sheet.left >= 0 && sheet.right <= sheet.w && sheet.inner <= 0 && sheet.out === 0 && sheet.small.length === 0, js(sheet));
+    await shot(`내할일-${width}-복사창.png`);
+    await press('[data-close=share]'); await closeResult();
+  }
+
+  // 텍스트 파일로 저장: 정리본 탭에서만 보이고, 글은 네이티브가 저장된 결과로 만든다.
+  await viewport(390); await prepare(); await openFirst();
+  const saveOnMine = await evaluate("!document.getElementById('save-text')?.getClientRects().length"); await press('#tab-transcript');
+  const saveOnTranscript = await evaluate("!document.getElementById('save-text')?.getClientRects().length"); await press('#tab-minutes');
+  const saveOnMinutes = await evaluate("!!document.getElementById('save-text')?.getClientRects().length&&!document.getElementById('save-text').disabled");
+  check('텍스트 파일로 저장은 정리본 탭에만 있다', saveOnMine && saveOnTranscript && saveOnMinutes, js({ saveOnMine, saveOnTranscript, saveOnMinutes }));
+  await hideMessage(); await shot('내할일-390-정리본저장.png');
+  await press('#save-text'); await until("__mock.calls.some(c=>c.method==='saveText')");
+  check('누르면 회의와 결과만 가리켜 요청하고 글은 싣지 않는다', await evaluate(`(()=>{const d=${last('saveText')};return !('text' in d)&&d.location==='p1'&&d.id===${js(MEETING)}&&d.resultId==='1234'})()`));
+  check('저장이 끝나면 알린다', await until("!document.getElementById('message').hidden&&document.getElementById('message').textContent.includes('저장했습니다')"));
+  await hideMessage(); await evaluate('__mock.saveTextCancel=true'); await press('#save-text'); await wait(200);
+  check('취소하면 아무것도 알리지 않는다', await evaluate("document.getElementById('message').hidden&&__mock.calls.filter(c=>c.method==='saveText').length===2"));
+  await evaluate('__mock.saveTextCancel=false;__mock.saveTextFail=true'); await press('#save-text');
+  check('실패하면 실패했다고 알린다', await until("!document.getElementById('message').hidden&&document.getElementById('message').textContent.includes('저장하지 못했습니다')"));
+  await evaluate('__mock.saveTextFail=false'); await closeResult();
+
+  // 설정의 내 이름: AI 연결 다음 구역이고, 저장하면 지난 회의 목록과 열린 내 할 일을 다시 계산한다.
+  await prepare(); await press('#open-settings'); await wait(40);
+  const layout = await evaluate("JSON.stringify({nav:[...document.querySelectorAll('#settings [data-settings-section]')].map(b=>b.dataset.settingsSection),sections:[...document.querySelectorAll('#settings .settings-section')].map(s=>s.id)})");
+  const filled = await evaluate("document.getElementById('my-name')?.value||''"), readsBeforeName = await calls('history');
+  await evaluate("(()=>{const i=document.getElementById('my-name');if(!i)return false;i.value='  김민수  ';i.dispatchEvent(new Event('input'));return true})()"); await press('#my-name-save');
+  check('설정의 내 이름은 AI 연결 다음에 있고 저장하면 목록과 내 할 일을 다시 계산한다', layout === js({ nav: ['ai', 'me', 'format', 'storage', 'file'], sections: ['settings-ai', 'settings-me', 'settings-format', 'settings-storage', 'settings-file'] }) && filled === '박서연' && await until(`${last('saveSettings')}.myName==='김민수'&&__mock.calls.filter(c=>c.method==='history').length>${readsBeforeName}&&document.getElementById('my-name-status')?.textContent==='내 이름을 저장했습니다.'&&document.getElementById('my-name').value==='김민수'`), layout);
+  await press('#close-settings');
+  await myName(''); await openFirst(); await press('#panel-mine .who-settings'); await wait(60);
+  const fromWho = await evaluate("document.getElementById('settings').open&&document.activeElement===document.getElementById('my-name')");
+  await evaluate("(()=>{const i=document.getElementById('my-name');if(!i)return false;i.value='박서연';i.dispatchEvent(new Event('input'));return true})()"); await press('#my-name-save');
+  await until("document.getElementById('my-name-status')?.textContent==='내 이름을 저장했습니다.'"); await press('#close-settings'); await wait(60);
+  check('나 고르기 상자에서 설정의 내 이름 칸으로 갈 수 있다', fromWho && await evaluate("document.querySelector('#panel-mine .me-name')?.textContent==='박서연'&&!document.querySelector('#panel-mine .who-box')&&!!document.activeElement?.classList.contains('me-change')"), js({ fromWho }));
+  await closeResult();
+  await prepare(); await evaluate("(()=>{const n=document.getElementById('notes');n.value='진행 중 잠금 확인';n.dispatchEvent(new Event('input',{bubbles:true}));return true})()"); await press('#start');
+  await until("document.body.classList.contains('recording')"); await press('#open-settings'); await wait(40);
+  check('진행 중에는 내 이름을 바꿀 수 없다', await evaluate("!!document.getElementById('my-name')?.disabled&&!!document.getElementById('my-name-save')?.disabled&&!document.getElementById('settings-lock').hidden"));
+  await press('#close-settings');
+  await prepare(); await evaluate('__mock.myNameFail=true'); await press('#open-settings'); await wait(40);
+  await evaluate("(()=>{const i=document.getElementById('my-name');if(!i)return false;i.value='최유진';i.dispatchEvent(new Event('input'));return true})()"); await press('#my-name-save');
+  check('내 이름 저장이 실패하면 적은 글자를 그대로 두고 알린다', await until("document.getElementById('my-name-status')?.textContent.includes('저장하지 못했습니다')") && await evaluate("document.getElementById('my-name').value==='최유진'&&__mock.myName==='박서연'"));
+  await press('#close-settings');
   await evaluate('__mock.todoActions=null');
 };
