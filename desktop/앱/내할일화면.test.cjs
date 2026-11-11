@@ -19,6 +19,7 @@ const walk = (node) => (node.children || []).filter((child) => child && typeof c
 const byClass = (node, name) => walk(node).filter((child) => String(child.className || '').split(' ').includes(name));
 const checks = (node) => walk(node).filter((child) => child.type === 'checkbox');
 const texts = (node) => [node.textContent, ...(node.children || []).flatMap(texts)].filter(Boolean);
+const detach = (node) => { node.isConnected = false; for (const child of node.children || []) if (child && typeof child === 'object') detach(child); };
 
 function fixture({ routes = {}, confirm = () => true } = {}) {
   let focused = null;
@@ -29,14 +30,15 @@ function fixture({ routes = {}, confirm = () => true } = {}) {
       classList: { add() {}, remove() {} }, removeAttribute(name) { delete this.attributes[name]; }, setAttribute(name, value) { this.attributes[name] = value; },
       addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }, dispatch(type, event = {}) { for (const fn of listeners[type] || []) fn({ target: node, preventDefault() {}, ...event }); },
       querySelectorAll(selector) { return selector === 'button' ? this.children.filter((child) => child.tag === 'button') : []; },
+      contains(other) { return other === node || walk(node).includes(other); },
       querySelector(selector) {
         const key = /^\[data-todo-focus="(.+)"\]$/.exec(selector)?.[1];
         if (key) return walk(node).find((child) => child.dataset.todoFocus === key) ?? null;
         return selector === '[data-close]' ? walk(node).find((child) => 'close' in child.dataset) ?? null : null;
       },
       // 브라우저가 내용을 갈면 스크롤이 올라가는 것을 흉내 낸다.
-      append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; this.scrollTop = 0; },
-      remove() {}, select() {}, focus() { focused = node; }, scrollIntoView() {}, click() { this.dispatch('click'); }, show() { this.open = true; }, showModal() { this.open = true; },
+      append(...items) { this.children.push(...items); }, replaceChildren(...items) { for (const old of this.children) if (old && typeof old === 'object' && !items.includes(old)) detach(old); this.children = items; this.scrollTop = 0; },
+      remove() {}, select() {}, focus() { if (!node.disabled) focused = node; }, scrollIntoView() {}, click() { this.dispatch('click'); }, show() { this.open = true; }, showModal() { this.open = true; },
       // 실제 대화상자처럼 close 이벤트는 나중에 온다.
       close() { this.open = false; setTimeout(() => this.dispatch('close'), 0); } };
     return node;
@@ -48,7 +50,7 @@ function fixture({ routes = {}, confirm = () => true } = {}) {
     navigator: { clipboard: { writeText: async (text) => { if (clipboard.fail) throw new Error('거절'); clipboard.texts.push(text); } } },
     window: { addEventListener() {}, MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
-    document: { body, execCommand: () => false, addEventListener() {}, getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element },
+    document: { body, get activeElement() { return focused && focused.isConnected && !focused.disabled ? focused : body; }, execCommand: () => false, addEventListener() {}, getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element },
     async fetch(url, options = {}) {
       calls.push({ url, options, body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body });
       const route = routes[url] || Object.entries(routes).find(([key]) => key.startsWith('^') && new RegExp(key).test(url))?.[1];
@@ -556,4 +558,45 @@ test('나 고르기 상자에서 연 설정 창을 닫으면 결과 화면의 �
   review.ui.settings.close();
   await settle();
   assert.equal(review.focused(), review.ui['tab-mine']);
+});
+
+test('긴 기한도 문장 칸을 밀어내지 않게 기한 칸의 폭을 제한하고 줄을 바꾼다', () => {
+  // 짝 검증 2의 W-1. 기한 칸이 내용 길이만큼(auto) 넓어지고 줄을 바꾸지 않으면, 허용 길이(200자) 안의 긴 기한이 문장 칸의 폭을 0으로 만든다.
+  const css = fs.readFileSync(path.join(__dirname, '화면', 'app.css'), 'utf8').replace(/\r\n/g, '\n');
+  const rule = (selector) => css.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
+  assert.match(rule('.mine-row'), /grid-template-columns: minmax\(0, 1fr\) fit-content\(40%\)/);
+  assert.doesNotMatch(rule('.mine-due'), /nowrap/);
+  assert.match(rule('.mine-due'), /overflow-wrap: anywhere/);
+});
+
+test('선택을 지운 뒤 나를 모르게 되면 다시 고를 수 있는 첫 후보에 초점을 둔다', async () => {
+  // 짝 검증 2의 W-2. 누른 선택 지우기 단추가 다시 그리며 사라지고 바꾸기 단추도 없어, 초점이 body에 남았다.
+  const record = meeting({ participants: '김민수, 이도현', minutes: minutes(action('가', '김민수')) });
+  const review = await openWith(record, { [ME]: meSaved }, { me: '김민수', myName: '박서연' });
+  const panel = review.ui['panel-mine'];
+  byClass(panel, 'me-change')[0].click();
+  const [clear] = byClass(panel, 'who-clear');
+  clear.focus();
+  clear.click();
+  await settle();
+  const [first] = byClass(panel, 'who-button');
+  assert.equal(byClass(panel, 'who-lead').length, 1, '나를 다시 묻는다');
+  assert.deepEqual([review.focused() === first, first.disabled], [true, false]);
+});
+
+test('나를 저장하는 사이 다른 곳으로 옮긴 초점은 빼앗지 않는다', async () => {
+  const record = meeting({ participants: '김민수, 이도현', minutes: minutes(action('가', '김민수')) });
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const review = await openWith(record, { [ME]: async (call) => { await held; return meSaved(call); } }, { me: '김민수', myName: '박서연' });
+  const panel = review.ui['panel-mine'];
+  byClass(panel, 'me-change')[0].click();
+  const [clear] = byClass(panel, 'who-clear');
+  clear.focus();
+  clear.click();
+  await settle();
+  review.ui['tab-minutes'].focus();
+  release();
+  await settle();
+  assert.equal(review.focused(), review.ui['tab-minutes']);
 });

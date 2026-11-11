@@ -1504,8 +1504,14 @@
 
   function focusMine(key) {
     const node = ui["panel-mine"].querySelector(`[data-todo-focus="${key}"]`);
-    node?.focus();
-    return Boolean(node);
+    if (!node || node.disabled) return false;
+    node.focus();
+    return true;
+  }
+
+  function focusMineControl() {
+    // 내 할 일 패널을 다시 그린 뒤 초점을 둘 곳이다. 나를 알면 바꾸기, 모르면 눌린 이름이나 첫 후보로 간다.
+    return focusMine("me-change") || focusMine("who:pressed") || focusMine("who:0");
   }
 
   function restLine(items, meName) {
@@ -1617,6 +1623,8 @@
     // 이 회의에서 나를 고르거나(이름) 고른 것을 지운다(null). 먼저 화면에 반영하고, 실패하면 앞선 선택으로 되돌린다.
     if (state.meBusy || !todoEditable()) return false;
     const resultId = state.resultId, route = `/api/meetings/${state.location}/${resultId}/me`, before = state.me;
+    const hadFocus = Boolean(ui["panel-mine"].contains?.(document.activeElement));
+    // 누른 단추는 다시 그리며 사라지므로, 초점이 이 패널 안에 있었는지 기억해 두었다가 같은 자리의 새 단추로 돌려준다.
     // 저장할 결과를 지금 결과로 고정한다. 저장 도중 새 회의로 넘어가도 원래 회의에만 저장되고 새 화면은 바꾸지 않는다.
     state.me = name;
     state.mePicking = false;
@@ -1624,7 +1632,7 @@
     state.todoPending++;
     // 할 일 저장과 같은 대기 수를 올려 저장이 끝날 때까지 결과 닫기·다른 회의 열기·업데이트 설치를 같은 규칙으로 막는다.
     renderMine();
-    focusMine("me-change");
+    if (hadFocus) focusMineControl();
     refresh();
     try {
       const { me = null } = await api(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
@@ -1646,10 +1654,11 @@
       state.todoPending--;
       clearTodoNotice();
       if (state.resultId === resultId) {
-        const inside = ui["panel-mine"].contains?.(document.activeElement);
+        const active = document.activeElement;
+        const keep = hadFocus && (!active || active === document.body || ui["panel-mine"].contains?.(active));
+        // 저장하는 동안 잠긴 단추는 초점을 받지 못해 초점이 body로 빠질 수 있다. 사용자가 그사이 다른 곳으로 옮긴 초점은 빼앗지 않는다.
         renderMine();
-        // 다시 그리면 초점이 있던 단추가 사라지므로 같은 자리의 새 단추로 돌려준다.
-        if (inside && !focusMine("me-change")) focusMine("who:0");
+        if (keep) focusMineControl();
       }
       refresh();
     }

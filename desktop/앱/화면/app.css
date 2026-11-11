@@ -427,13 +427,14 @@ body[data-recording="true"] .timer { color: var(--rec-deep); }
 .me-chip { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 5px; background: var(--teal); color: #fff; font-size: 12px; font-weight: 700; }
 .me-name { min-width: 0; font-size: 14px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
 .mine-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
-.mine-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; border-bottom: 1px solid var(--rule); }
+.mine-row { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(40%); gap: 12px; align-items: center; border-bottom: 1px solid var(--rule); }
 .mine-row label { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; min-height: 52px; padding: 6px 0; cursor: pointer; }
 .mine-row input { width: 18px; height: 18px; margin: 0 0 0 4px; accent-color: var(--teal); }
 .mine-row input:disabled { cursor: not-allowed; }
 .mine-task { min-width: 0; font-size: 16px; font-weight: 500; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
 .mine-row.is-done .mine-task { font-weight: 400; color: var(--ink-faint); text-decoration: line-through; }
-.mine-due { color: var(--ink-faint); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mine-due { color: var(--ink-faint); font-size: 13px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+/* 기한은 저장된 글자 그대로라 길 수 있다. 칸을 줄 폭의 40%까지로 두고 줄을 바꿔 문장 칸의 폭을 지킨다 */
 .mine-due:empty { display: none; }
 .mine-rest { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; font-size: 13px; color: var(--ink-faint); }
 .mine-rest b { font-weight: 600; color: var(--ink); }
