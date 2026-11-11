@@ -3,12 +3,12 @@ module.exports = '(' + function () {
   const m = window.__mock, previous = window.Native.request.bind(window.Native);
   m.storage = { audio: {uri:'',name:''}, transcript:{uri:'',name:''}, summary:{uri:'',name:''} };
   m.defaultOutputFormat = 'meeting'; m.reviews = {}; m.copyReport = {ok:true,written:[],skipped:[],failed:[]};
-  const settings = () => ({summaryModel:m.model,defaultOutputFormat:m.defaultOutputFormat,storage:m.storage});
+  const settings = () => ({summaryModel:m.model,defaultOutputFormat:m.defaultOutputFormat,storage:m.storage,myName:m.myName||''});
   Object.defineProperty(window, '__settingsResponse', {value:settings});
   window.Native.request = function (id, method, json) {
     const d = JSON.parse(json);
     const reply = (value, error) => setTimeout(() => window.receive(id,{value,error}), m.delay || 0);
-    const handled = ['saveSettings','pickFolder','clearFolder','exportSettings','importSettings','cancelSettings','review','refine','copies','open','applySettings','saveTodos'];
+    const handled = ['saveSettings','pickFolder','clearFolder','exportSettings','importSettings','cancelSettings','review','refine','copies','open','applySettings','saveTodos','saveMe'];
     if (!handled.includes(method)) {
       if (method === 'init') {
         const receive = window.receive;
@@ -36,7 +36,7 @@ module.exports = '(' + function () {
         const versions=selected?[{id:'1233',savedAt:2,outputFormat:'summary',refined:true},{id:selected==='legacy'?'legacy':'1234',savedAt:3,outputFormat:'tasks',refined:false}]:[];
         if(original.resultId==='1235')versions.push({id:'1235',savedAt:4,outputFormat:'summary',refined:true});
         if(minutes&&m.todoActions){minutes.actions=m.todoActions;record.participants=m.todoParticipants||'';}
-        reply({record,minutes,transcript:m.noTranscript?'':'저장된 전사',resultId:selected||null,versions:m.versions||versions,review:m.reviews[selected]||null,copies:m.copyReport,todos:(m.savedTodos||{})[selected]||null});
+        reply({record,minutes,transcript:m.noTranscript?'':'저장된 전사',resultId:selected||null,versions:m.versions||versions,review:m.reviews[selected]||null,copies:m.copyReport,todos:(m.savedTodos||{})[selected]||null,me:(m.me||{})[d.id]??null,todosUnreadable:!!m.todosUnreadable});
       } else if (method==='review') {if(m.failReview)throw Error('평가 저장 실패');const r={stars:d.stars,comment:d.comment,savedAt:'2026-10-23T00:00:00Z'};m.reviews[d.resultId]=r;reply(r);}
       else if (method==='refine') {
         if(m.failRefine)throw Error('요약 요청에 실패했습니다.');
@@ -46,6 +46,7 @@ module.exports = '(' + function () {
         reply({id:d.id,attemptId:d.attemptId});
       }
       else if (method==='saveTodos') {if(m.todoFail||(m.todoFailNext>0&&m.todoFailNext--))throw Error('디스크 오류');m.savedTodos={...(m.savedTodos||{}),[d.resultId]:d.todos};reply({version:1,...d.todos});}
+      else if (method==='saveMe') {if(m.meFail)throw Error('디스크 오류');m.me={...(m.me||{}),[d.id]:d.name};reply({me:d.name});}
       else if (method==='copies') {if(m.failCopies)throw Error('사본 저장 실패');m.copyReport=m.copiesResult||{ok:true,written:[{kind:'summaryMd',name:'회의.md'}],skipped:[],failed:[]};reply(m.copyReport);}
     } catch(error) {reply(null,error.message);}
   };

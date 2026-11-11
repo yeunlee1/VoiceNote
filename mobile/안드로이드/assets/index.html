@@ -105,14 +105,16 @@
     <span id="refined-badge" class="refined-badge" hidden>의견 반영본</span>
     <label id="version-wrap" class="field" hidden>결과 버전<select id="result-version"></select></label>
     <div class="result-tabs" role="tablist" aria-label="회의 결과">
-      <button id="tab-minutes" class="result-tab" type="button" role="tab" aria-selected="true" aria-controls="panel-minutes">정리본</button>
+      <button id="tab-mine" class="result-tab" type="button" role="tab" aria-selected="true" aria-controls="panel-mine">내 할 일</button>
+      <button id="tab-minutes" class="result-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-minutes" tabindex="-1">정리본</button>
       <button id="tab-transcript" class="result-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-transcript" tabindex="-1">전사문</button>
     </div>
     <div class="result-actions">
       <button id="copy-result" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>정리본 복사</span></button>
       <button id="share-result" class="button primary" type="button"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg><span>정리본 공유</span></button>
     </div>
-    <section id="panel-minutes" class="result-panel" role="tabpanel" aria-labelledby="tab-minutes">
+    <section id="panel-mine" class="result-panel mine" role="tabpanel" aria-labelledby="tab-mine"></section>
+    <section id="panel-minutes" class="result-panel" role="tabpanel" aria-labelledby="tab-minutes" hidden>
       <div id="minutes" class="minutes"></div>
       <section id="review-panel" class="block" hidden>
         <h3>이 요약 평가</h3>
@@ -137,7 +139,7 @@
       <p id="transcript-meta" class="hint"></p>
       <pre id="transcript" class="transcript-view"></pre>
     </section>
-    <details class="sub more">
+    <details id="result-more" class="sub more">
       <summary>AI 사용량 · 음성 포함 내보내기 · 다시 분석</summary>
       <section class="block usage" aria-labelledby="usage-heading"><h3 id="usage-heading">AI 사용량</h3><div id="usage"></div></section>
       <section class="block" aria-labelledby="export-heading">

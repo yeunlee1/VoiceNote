@@ -46,12 +46,16 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     await send('Page.enable');await send('Runtime.enable');await send('Page.addScriptToEvaluateOnNewDocument',{source:mock+require('./설정평가-모의브리지.cjs')+require('./업데이트-모의브리지.cjs')});
     const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result.value;};
     const until=async expression=>{const deadline=Date.now()+6500;while(Date.now()<deadline){if(await evaluate(expression))return true;await wait(50);}return false;};
-    const click=selector=>evaluate('document.querySelector('+JSON.stringify(selector)+').click()');
+    const tap=selector=>evaluate('document.querySelector('+JSON.stringify(selector)+').click()');
+    // 1.7.0부터 목록에서 회의를 열면 내 할 일 탭이 먼저 열린다. 아래 기존 검사는 정리본을 보므로 회의가 열리면 정리본 탭으로 옮긴다. 내 할 일 탭은 내할일검증-화면.cjs가 tap으로 직접 연다.
+    const opens=()=>evaluate("__mock.calls.filter(c=>c.method==='open').length");
+    const click=async selector=>{const before=selector.startsWith('#history button')?await opens():-1;await tap(selector);if(before>=0&&await until(`__mock.calls.filter(c=>c.method==='open').length>${before}&&!document.getElementById('result').hidden`))await tap('#tab-minutes');};
     const viewport=(width,height=820)=>send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:2,mobile:true});
     const load=async(query='')=>{await send('Page.navigate',{url:base+query});await wait(450);};
     const shot=async name=>{for(let n=0;n<65&&await evaluate("!document.getElementById('message').hidden");n++)await wait(100);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(path.join(outDir,name),Buffer.from(r.data,'base64'));};
     const key=async()=>{await click('#open-settings');await evaluate("document.getElementById('api-key').value='sk-test-00000000000000000000'");await click('#save-key');await wait(60);await click('#close-settings');};
     await require('./할일검증-화면.cjs')({viewport,load,key,click,evaluate,until,wait,shot,check});
+    await require('./내할일검증-화면.cjs')({viewport,load,key,tap,evaluate,until,wait,shot,check});
     await require('./후속검증-화면.cjs')({viewport,load,key,click,evaluate,until,wait,shot,check});
     await require('./업데이트검증-화면.cjs')({viewport,load,click,evaluate,until,wait,shot,check});
     for(const width of [360,390,412]){
