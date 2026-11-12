@@ -125,10 +125,12 @@
   <dialog id="meeting-detail" class="result-view" aria-labelledby="detail-title">
   <div class="result-bar">
     <div class="result-tabs" role="tablist" aria-label="회의 결과">
+      <button id="tab-mine" class="result-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-mine" tabindex="-1" hidden>내 할 일</button>
       <button id="tab-minutes" class="result-tab" type="button" role="tab" aria-selected="true" aria-controls="panel-minutes">정리본</button>
       <button id="tab-transcript" class="result-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-transcript" tabindex="-1">전사문</button>
     </div>
     <div class="result-actions">
+      <button id="share-open" class="button button-outline" type="button" aria-haspopup="dialog" aria-controls="share-dialog" hidden>사람별 할 일 복사</button>
       <button id="save-result" class="button button-outline" type="button">텍스트 파일로 저장</button>
       <button id="share-result" class="button button-outline" type="button" hidden>공유</button>
       <button id="copy-result" class="button button-primary" type="button">회의록 복사</button>
@@ -145,6 +147,7 @@
       </div>
     </div>
     <p id="result-status" class="fine-print" role="status"></p>
+    <section id="panel-mine" class="result-panel mine" role="tabpanel" aria-labelledby="tab-mine" hidden></section>
     <section id="panel-minutes" class="result-panel" role="tabpanel" aria-labelledby="tab-minutes">
       <p id="archive-status" class="fine-print" role="status">분석이 끝나면 지난 회의에 자동 저장됩니다.</p>
       <button id="save-archive" class="button button-outline" type="button" disabled>저장 다시 시도</button>
@@ -199,18 +202,11 @@
   </div>
 </dialog>
 </main>
-
-<aside id="open-panel" class="inspector" aria-labelledby="open-title" tabindex="-1">
-  <h2 id="open-title" class="rail-heading">아직 안 끝난 일</h2>
-  <p id="open-status" class="rail-meta">확인 중입니다.</p>
-  <ul id="open-todos" class="open-todos"></ul>
-</aside>
 </div>
 
 <footer class="statusbar">
   <button id="open-settings" class="ai-chip" type="button" aria-haspopup="dialog" aria-controls="settings"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-sliders"/></svg><span>설정</span><span id="ai-status-label" class="ai-chip-state">확인 중</span></button>
   <button id="update-chip" class="update-chip" type="button" aria-haspopup="dialog" aria-controls="about" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-update"/></svg><span id="update-chip-label">새 버전</span></button>
-  <button id="open-toggle" class="tool-button open-toggle" type="button" aria-expanded="false" aria-controls="open-panel">아직 안 끝난 일</button>
   <span class="grow"></span>
   <button id="clear" class="tool-button" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-eraser"/></svg>현재 화면 비우기</button>
   <button id="shutdown" class="tool-button" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-power"/></svg>도구 종료</button>
@@ -238,6 +234,15 @@
         <label class="field">요약 모델<select id="summary-model" aria-describedby="model-help"></select></label>
         <p id="model-help" class="fine-print">서버가 제공하는 모델 목록을 불러오는 중입니다.</p>
       </div>
+    </section>
+    <section id="settings-me" class="settings-section" aria-labelledby="settings-me-title">
+      <h3 id="settings-me-title" class="settings-heading" tabindex="-1">내 이름</h3>
+      <p id="my-name-help" class="fine-print">참석자 칸에 적는 이름과 똑같이 적어 두면 지난 회의에서 내가 맡은 일을 바로 보여 줍니다.</p>
+      <div class="my-name-form">
+        <label class="field">이름 <span class="field-note">선택 · 200자까지</span><input id="my-name" maxlength="200" autocomplete="off" spellcheck="false" aria-describedby="my-name-help" /></label>
+        <button id="my-name-save" class="button button-outline" type="button">내 이름 저장</button>
+      </div>
+      <p id="my-name-status" class="fine-print" role="status"></p>
     </section>
     <section id="settings-format" class="settings-section" aria-labelledby="settings-format-title">
       <h3 id="settings-format-title" class="settings-heading" tabindex="-1">출력 형식</h3>
@@ -283,6 +288,21 @@
       <p class="fine-print">앱이 보관한 회의 기록과 원음이 든 폴더를 엽니다.</p>
       <div class="button-row"><button id="open-data-folder" class="button button-outline" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg>회의자료 폴더 열기</button></div>
     </section>
+  </div>
+</dialog>
+
+<dialog id="share-dialog" class="modal modal-share" aria-labelledby="share-title">
+  <div class="modal-head">
+    <h2 id="share-title" class="modal-title">사람별 할 일 복사</h2>
+    <button class="icon-button" type="button" data-close aria-label="사람별 할 일 복사 닫기"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
+  </div>
+  <div class="modal-body">
+    <p class="fine-print">받는 사람마다 그 사람이 맡은 일 가운데 남은 일만 담은 글을 복사합니다. 끝낸 일은 빠집니다.</p>
+    <ul id="share-list" class="copy-list"></ul>
+    <p id="share-unassigned" class="notice" hidden></p>
+    <p id="share-status" class="fine-print" role="status"></p>
+    <p id="share-preview-title" class="copy-preview-title"></p>
+    <pre id="share-preview" class="copy-preview" tabindex="0" aria-labelledby="share-preview-title"></pre>
   </div>
 </dialog>
 

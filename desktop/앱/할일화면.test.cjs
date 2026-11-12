@@ -1,4 +1,4 @@
-// 결과 화면의 할 일 저장 순서, 편집 중 보호, 회의록 닫기, 남은 일 패널과 목록 강조를 검증한다.
+// 결과 화면의 할 일 저장 순서, 편집 중 보호, 회의록 닫기, 목록 다시 그리기와 강조를 검증한다.
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
@@ -19,21 +19,21 @@ function fixture({ routes = {}, confirm = () => true } = {}) {
   const documentListeners = {};
   const element = (tag = 'div') => {
     const listeners = {};
-    const node = { tag, value: '', checked: false, style: {}, hidden: false, disabled: false, open: false, textContent: '', dataset: {}, children: [], attributes: {}, isConnected: true,
+    const node = { tag, value: '', checked: false, scrollTop: 0, style: {}, hidden: false, disabled: false, open: false, textContent: '', dataset: {}, children: [], attributes: {}, isConnected: true,
       classList: { add() {}, remove() {} }, removeAttribute(name) { delete this.attributes[name]; }, setAttribute(name, value) { this.attributes[name] = value; },
       addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }, dispatch(type, event = {}) { for (const fn of listeners[type] || []) fn({ target: node, preventDefault() {}, ...event }); },
       querySelectorAll(selector) { return selector === 'button' ? this.children.filter((child) => child.tag === 'button') : []; }, querySelector() { return null; },
-      append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+      append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; this.scrollTop = 0; },
       remove() {}, focus() { focused = node; }, scrollIntoView() {}, click() { this.dispatch('click'); }, show() { this.open = true; }, showModal() { this.open = true; },
       // 실제 대화상자처럼 close 이벤트는 나중에 온다.
       close() { this.open = false; setTimeout(() => this.dispatch('close'), 0); } };
     return node;
   };
-  const nodes = new Map(), calls = [], mediaListeners = [];
+  const nodes = new Map(), calls = [];
   const json = (body, status = 200) => Response.json(body, { status });
   const body = element('body');
   const sandbox = { crypto, Blob, AbortController, DOMException, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval, confirm,
-    window: { addEventListener() {}, matchMedia: () => ({ addEventListener(type, fn) { mediaListeners.push(fn); } }), MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') },
+    window: { addEventListener() {}, MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
     document: { body, addEventListener(type, fn) { (documentListeners[type] ||= []).push(fn); }, getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element },
     async fetch(url, options = {}) {
@@ -47,13 +47,13 @@ function fixture({ routes = {}, confirm = () => true } = {}) {
     } };
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
   const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/,
-    '  globalThis.review = { state, ui, bind, refresh, resetMeetingForm, openMeeting, loadHistory, loadOpenTodos, updateTodo, finishOpenTodo, exportDocument, refineSummary, hasUnsavedWork, updateBlockers, prepareMeeting, cancelTodoEdit };\n})();');
+    '  globalThis.review = { state, ui, bind, refresh, resetMeetingForm, openMeeting, loadHistory, updateTodo, exportDocument, refineSummary, hasUnsavedWork, updateBlockers, prepareMeeting, cancelTodoEdit };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const review = sandbox.review;
   review.bind();
   review.resetMeetingForm();
-  return { ...review, calls, body, focused: () => focused, mediaChange: (matches) => { for (const fn of mediaListeners) fn({ matches }); }, pressKey: (event) => { for (const fn of documentListeners.keydown || []) fn({ preventDefault() {}, ...event }); } };
+  return { ...review, calls, body, focused: () => focused };
 }
 
 const meeting = (extra = {}) => ({ id: crypto.randomUUID(), location: 'main', title: '출시 회의', date: '2026-11-09', dailySequence: 1, participants: '김민수, 박서연, 이도현', transcript: '전사',
@@ -116,40 +116,6 @@ test('연속 저장이 모두 실패하면 처음 상태로 되돌린다', async
   await review.updateTodo(0, { owner: '박서연' });
   await settle();
   assert.equal(review.state.todos, null);
-});
-
-test('남은 일 목록의 체크도 저장이 끝날 때까지 닫기와 업데이트 설치를 막는다', async () => {
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const review = fixture({ routes: { '^/api/meetings/main/[0-9a-f-]{36}/todos/0$': () => gate } });
-  const check = { checked: true };
-  const done = review.finishOpenTodo({ location: 'main', id: crypto.randomUUID(), index: 0 }, check);
-  await settle();
-  assert.equal(review.hasUnsavedWork(), true);
-  assert.match(review.updateBlockers()[0], /저장하는 중/);
-  release(Response.json({ todos: { finalized: false, items: [] } }));
-  await done;
-  await settle();
-  assert.equal(review.hasUnsavedWork(), false);
-  assert.equal(check.checked, true);
-});
-
-test('남은 일 목록의 체크가 실패하면 체크를 되돌린다', async () => {
-  const review = fixture({ routes: { '^/api/meetings/main/[0-9a-f-]{36}/todos/0$': () => failed() } });
-  const check = { checked: true };
-  await review.finishOpenTodo({ location: 'main', id: crypto.randomUUID(), index: 0 }, check);
-  assert.equal(check.checked, false);
-  assert.match(review.ui['open-status'].textContent, /디스크 오류/);
-});
-
-test('지금 열린 회의의 일을 남은 일 목록에서 체크하면 회의록 저장과 같은 줄로 보낸다', async () => {
-  const record = meeting();
-  const review = await openWith(record, { [SAVE]: () => ok() });
-  await review.finishOpenTodo({ location: 'main', id: record.id, index: 1 }, { checked: true });
-  await settle();
-  assert.equal(review.calls.some((call) => /\/todos\/1$/.test(call.url)), false, '한 줄만 고치는 요청을 따로 보내지 않는다');
-  assert.equal(review.calls.filter((call) => /\/todos$/.test(call.url)).at(-1).body.items[1].done, true);
-  assert.equal(review.state.todos.items[1].done, true);
 });
 
 test('현재 화면 비우기는 열린 회의록을 닫고 새 회의 입력으로 돌아간다', async () => {
@@ -216,33 +182,6 @@ test('결과를 보다가 새 회의를 누르면 목록이 아니라 회의명 
   assert.equal(review.focused(), review.ui.title);
 });
 
-test('창을 키워 패널을 접지 않게 되면 열린 표시를 지워 Esc가 회의록을 닫는다', async () => {
-  const review = await openWith(meeting());
-  review.ui['open-toggle'].click();
-  assert.equal(review.body.dataset.panel, 'open');
-  review.mediaChange(false);
-  assert.equal(review.body.dataset.panel, '');
-  assert.equal(review.ui['open-toggle'].attributes['aria-expanded'], 'false');
-  review.ui['meeting-detail'].dispatch('keydown', { key: 'Escape', defaultPrevented: false });
-  assert.equal(review.ui['meeting-detail'].open, false);
-});
-
-test('좁은 창의 남은 일 패널에서 회의를 열면 닫을 때 패널 단추로 초점이 돌아간다', async () => {
-  const record = meeting();
-  const item = { location: 'main', id: record.id, title: record.title, index: 0, task: '일정 공유', owner: null, due: null };
-  const review = fixture({ routes: { ...opening(record), '/api/meetings/open-todos': () => Response.json({ items: [item], skipped: 0 }) } });
-  await review.loadOpenTodos();
-  review.ui['open-toggle'].click();
-  const [row] = review.ui['open-todos'].children;
-  row.children.at(-1).click();
-  await settle();
-  assert.equal(review.body.dataset.panel, '');
-  assert.equal(review.ui['meeting-detail'].open, true);
-  review.ui['meeting-detail'].dispatch('keydown', { key: 'Escape', defaultPrevented: false });
-  await settle();
-  assert.equal(review.focused(), review.ui['open-toggle']);
-});
-
 test('열린 회의는 왼쪽 목록에서 강조하고 닫으면 강조를 지운다', async () => {
   const record = meeting();
   const review = await openWith(record, { '/api/meetings': () => Response.json({ meetings: [{ location: 'main', id: record.id, title: record.title, date: record.date, dailySequence: 1, outputFormat: 'meeting', analyzed: true, audioCount: 0 }], skipped: 0 }) });
@@ -252,45 +191,6 @@ test('열린 회의는 왼쪽 목록에서 강조하고 닫으면 강조를 지�
   review.ui['meeting-detail'].dispatch('keydown', { key: 'Escape', defaultPrevented: false });
   await settle();
   assert.equal(button.attributes['aria-current'], undefined);
-});
-
-test('저장 중이라 회의를 열지 못하면 좁은 창 패널과 초점을 그대로 둔다', async () => {
-  const first = meeting(), second = meeting({ title: '다른 회의' });
-  const item = { location: 'main', id: second.id, title: second.title, index: 0, task: '일정 공유', owner: null, due: null };
-  let release;
-  const held = new Promise((resolve) => { release = resolve; });
-  const review = await openWith(first, { ...opening(second), [SAVE]: async () => { await held; return ok(); }, '/api/meetings/open-todos': () => Response.json({ items: [item], skipped: 0 }) });
-  await review.loadOpenTodos();
-  const saving = review.updateTodo(0, { owner: '김민수' });
-  await settle();
-  review.ui['open-toggle'].click();
-  const button = review.ui['open-todos'].children[0].children.at(-1);
-  button.focus();
-  button.click();
-  await settle();
-  assert.equal(review.body.dataset.panel, 'open');
-  assert.equal(review.ui['open-toggle'].attributes['aria-expanded'], 'true');
-  assert.equal(review.focused(), button);
-  assert.equal(review.state.resultId, first.id);
-  release();
-  await saving;
-});
-
-test('확인창을 취소해 회의를 열지 않으면 좁은 창 패널과 초점을 그대로 둔다', async () => {
-  const first = meeting(), second = meeting({ title: '다른 회의' });
-  const item = { location: 'main', id: second.id, title: second.title, index: 0, task: '일정 공유', owner: null, due: null };
-  const review = fixture({ confirm: () => false, routes: { ...opening(first), ...opening(second), '/api/meetings/open-todos': () => Response.json({ items: [item], skipped: 0 }) } });
-  await review.openMeeting('main', first.id, undefined);
-  await review.loadOpenTodos();
-  review.state.todoEditing = { index: 0, task: '고치는 중', due: '' };
-  review.ui['open-toggle'].click();
-  const button = review.ui['open-todos'].children[0].children.at(-1);
-  button.focus();
-  button.click();
-  await settle();
-  assert.equal(review.body.dataset.panel, 'open');
-  assert.equal(review.focused(), button);
-  assert.equal(review.state.resultId, first.id);
 });
 
 test('결과를 연 채 다른 회의를 열면 초점을 결과 안으로 옮기고 닫을 때 새로 누른 곳으로 돌아간다', async () => {
@@ -331,22 +231,6 @@ test('결과 안에서 버전을 바꾸면 불러오는 동안 잃은 초점을 
   assert.equal(firstOpenerFocused, 1);
 });
 
-test('창이 좁을 때 쓰는 남은 일 단추는 건수를 보여 주고 패널을 열고 닫는다', async () => {
-  const review = fixture({ routes: { '/api/meetings/open-todos': () => Response.json({ items: [
-    { location: 'main', id: crypto.randomUUID(), title: '회의', index: 0, task: '하나', owner: null, due: null }, { location: 'main', id: crypto.randomUUID(), title: '회의', index: 0, task: '둘', owner: null, due: null }], skipped: 0 }) } });
-  await review.loadOpenTodos();
-  const toggle = review.ui['open-toggle'];
-  assert.match(toggle.textContent, /2건/);
-  toggle.click();
-  assert.equal(review.body.dataset.panel, 'open');
-  assert.equal(toggle.attributes['aria-expanded'], 'true');
-  assert.equal(review.focused(), review.ui['open-panel']);
-  review.pressKey({ key: 'Escape' });
-  assert.equal(review.body.dataset.panel, '');
-  assert.equal(toggle.attributes['aria-expanded'], 'false');
-  assert.equal(review.focused(), toggle);
-});
-
 test('의견 반영 결과를 저장할 때 보던 결과를 함께 보낸다', async () => {
   const record = meeting();
   const review = await openWith(record, { '^/api/meetings/main/[0-9a-f-]{36}/review$': (call) => Response.json({ review: { version: 1, stars: null, comment: call.body.comment, savedAt: 'x' } }),
@@ -356,4 +240,70 @@ test('의견 반영 결과를 저장할 때 보던 결과를 함께 보낸다', 
   await review.refineSummary();
   const saved = review.calls.find((call) => call.url === '/api/meetings/main' && call.options.method === 'POST');
   assert.equal(saved.body.sourceResultId, record.id);
+});
+
+test('할 일을 저장하면 지난 회의 목록을 다시 읽고 남은 일 목록은 부르지 않는다', async () => {
+  const review = await openWith(meeting(), { [SAVE]: () => ok() });
+  const lists = () => review.calls.filter((call) => call.url === '/api/meetings').length, before = lists();
+  await review.updateTodo(0, { done: true });
+  await settle();
+  assert.equal(lists(), before + 1);
+  assert.equal(review.calls.some((call) => call.url === '/api/meetings/open-todos'), false);
+});
+
+test('남은 일 영역과 상태줄 단추는 화면에 없다', () => {
+  const read = (name) => fs.readFileSync(path.join(__dirname, '화면', name), 'utf8');
+  for (const name of ['index.html', 'app.css', 'app.js']) assert.doesNotMatch(read(name), /open-panel|open-toggle|open-todos|open-status|inspector|아직 안 끝난 일/, name);
+  assert.match(read('app.css'), /\.app-shell \{[^}]*grid-template-columns: 296px minmax\(0, 1fr\); \}/);
+});
+
+const listedRow = (id, groupId) => () => Response.json({ meetings: [{ location: 'main', id, groupId, title: '출시 회의', date: '2026-11-09', dailySequence: 1, outputFormat: 'meeting', analyzed: true, audioCount: 0 }], skipped: 0 });
+
+test('목록을 다시 그려도 보던 자리를 지키고 닫으면 방금 닫은 회의 줄로 초점이 간다', async () => {
+  const record = meeting();
+  const review = fixture({ routes: { ...opening(record), '/api/meetings': listedRow(record.id, record.id), [SAVE]: () => ok() } });
+  await review.loadHistory();
+  const [opener] = review.ui['meeting-history'].children;
+  await review.openMeeting('main', record.id, opener);
+  review.ui['meeting-history'].scrollTop = 120;
+  await review.updateTodo(0, { done: true });
+  await settle();
+  const [rebuilt] = review.ui['meeting-history'].children;
+  assert.notEqual(rebuilt, opener, '목록은 새로 그려졌다');
+  assert.equal(review.ui['meeting-history'].scrollTop, 120);
+  opener.isConnected = false;
+  review.ui['meeting-detail'].dispatch('keydown', { key: 'Escape', defaultPrevented: false });
+  await settle();
+  assert.equal(review.focused(), rebuilt);
+});
+
+test('녹음 없이 만든 회의의 옛 결과를 보다 닫아도 그 회의 줄로 돌아간다', async () => {
+  const first = meeting(), latestId = crypto.randomUUID();
+  const review = fixture({ routes: { ...opening(first), '/api/meetings': listedRow(latestId, first.id), [SAVE]: () => ok() } });
+  await review.loadHistory();
+  const [opener] = review.ui['meeting-history'].children;
+  await review.openMeeting('main', first.id, opener);
+  await review.updateTodo(0, { done: true });
+  await settle();
+  const [rebuilt] = review.ui['meeting-history'].children;
+  opener.isConnected = false;
+  review.ui['meeting-detail'].dispatch('keydown', { key: 'Escape', defaultPrevented: false });
+  await settle();
+  assert.deepEqual([review.focused(), rebuilt.dataset.meeting], [rebuilt, latestId], '목록에는 최신 결과 id만 있어도 묶음 열쇠로 같은 줄을 찾는다');
+});
+
+test('묶음 열쇠가 같은 회의가 다른 보관함에 있어도 방금 닫은 보관함의 줄로 돌아간다', async () => {
+  const record = meeting({ location: 'p2' });
+  const rows = () => Response.json({ meetings: ['p1', 'p2'].map((location) => ({ location, id: record.id, groupId: record.id, title: '출시 회의', date: '2026-11-09', dailySequence: 1, outputFormat: 'meeting', analyzed: true, audioCount: 0 })), skipped: 0 });
+  const review = fixture({ routes: { [`/api/meetings/p2/${record.id}`]: () => Response.json({ meeting: record, versions: [], review: null, todos: null }), '/api/meetings': rows, '^/api/meetings/p2/[0-9a-f-]{36}/todos$': () => ok() } });
+  await review.loadHistory();
+  const opener = review.ui['meeting-history'].children[1];
+  await review.openMeeting('p2', record.id, opener);
+  await review.updateTodo(0, { done: true });
+  await settle();
+  const rebuilt = review.ui['meeting-history'].children[1];
+  opener.isConnected = false;
+  review.ui['meeting-detail'].dispatch('keydown', { key: 'Escape', defaultPrevented: false });
+  await settle();
+  assert.deepEqual([review.focused(), rebuilt.dataset.location], [rebuilt, 'p2']);
 });

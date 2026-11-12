@@ -80,6 +80,8 @@ function createMeetingStore(root, validateMinutes, options = {}) {
   const recordingPath = (location, id) => path.join(directory(location), `녹음-${checkId(id)}.json`);
   const reviewPath = (location, id) => path.join(directory(location), `평가-${checkId(id)}.json`);
   const todoPath = (location, id) => path.join(directory(location), `할일-${checkId(id)}.json`);
+  const mePath = (location, record) => path.join(directory(location), `나-${checkId(groupKey(record))}.json`);
+  // 이 회의에서 고른 나는 결과가 아니라 회의에 붙인다. 의견을 반영해 새 결과가 생겨도 다시 묻지 않게 묶음 열쇠로 이름을 붙인다.
   // 보관함 폴더에서 녹음·결과 파일만 고른다. 남은 .tmp나 사용자가 둔 다른 파일은 기록으로 보지 않는다.
   function recordFiles(location) {
     const dir = directory(location);
@@ -181,6 +183,22 @@ function createMeetingStore(root, validateMinutes, options = {}) {
     write(file, JSON.stringify(value, null, 2));
     return value;
   }
+  function loadMe(location, record) {
+    // 파일이 없거나 읽지 못하면 고른 적이 없는 것으로 본다. 읽지 못한 파일은 지우지 않고, 목록이나 열기를 실패시키지도 않는다.
+    try {
+      const file = mePath(location, record);
+      if (!fs.existsSync(file)) return null;
+      const saved = readJson(file);
+      return saved.version === 1 && typeof saved.name === 'string' && saved.name.trim() && saved.name.length <= todoRules.LIMITS.field ? saved.name : null;
+    } catch { return null; }
+  }
+  function mineOpenCount(record, myName) {
+    // 지난 회의 목록에 붙일 수다. 내가 누구인지 모르거나 세다가 오류가 나면 0으로 두어 그 줄만 수 없이 보이게 한다.
+    try {
+      const items = todoRules.effective(record.minutes, loadTodos(record.location, record.id, record.minutes.actions));
+      return todoRules.mineOpen(record.participants, items, loadMe(record.location, record), myName) || 0;
+    } catch { return 0; }
+  }
   function analyzedRecord(location, id) {
     if (!fs.existsSync(recordPath(location, id))) throw fail(404, '할 일을 고칠 회의 결과를 찾지 못했습니다.');
     return load(location, id);
@@ -237,14 +255,16 @@ function createMeetingStore(root, validateMinutes, options = {}) {
       return null;
     },
     // 모든 보관함의 기록을 합쳐 녹음마다 최신 결과 하나를 날짜 최신순으로 돌려준다.
-    listMeetings() {
+    listMeetings(myName = '') {
       const { records: latest, skipped } = latestRecords();
       const meetings = latest.map(record => {
         const review = record.minutes ? loadReview(record.location, record.id) : null;
-        return { location: record.location, id: record.id, ...(record.recordingId ? { recordingId: record.recordingId } : {}), title: record.title, date: record.date,
+        const open = record.minutes ? mineOpenCount(record, myName) : 0;
+        return { location: record.location, id: record.id, groupId: groupKey(record), ...(record.recordingId ? { recordingId: record.recordingId } : {}), title: record.title, date: record.date,
           dailySequence: record.dailySequence, ...(record.projectName ? { projectName: record.projectName } : {}), savedAt: record.savedAt, outputFormat: record.outputFormat,
           analyzed: Boolean(record.minutes), audioCount: record.audio?.length || 0, ...(record.expectedParts ? { expectedParts: record.expectedParts } : {}),
-          ...(review?.stars ? { stars: review.stars } : {}), refined: Boolean(record.feedback) };
+          ...(review?.stars ? { stars: review.stars } : {}), refined: Boolean(record.feedback), ...(open ? { mineOpen: open } : {}) };
+        // groupId는 한 회의의 결과들을 묶는 열쇠다. 화면이 옛 결과를 보다 닫아도 같은 줄로 돌아가는 데 쓴다.
       }).sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')) || b.dailySequence - a.dailySequence || savedAt(b).localeCompare(savedAt(a)));
       return { meetings, skipped };
     },
@@ -252,31 +272,28 @@ function createMeetingStore(root, validateMinutes, options = {}) {
     loadMeeting(location, id) {
       const meeting = load(location, id);
       const todos = meeting.minutes ? loadTodos(location, id, meeting.minutes.actions) : null;
-      return { meeting, versions: versionsOf(location, meeting), review: meeting.minutes ? loadReview(location, id) : null, todos, todosUnreadable: Boolean(meeting.minutes) && !todos && fs.existsSync(todoPath(location, id)) };
-    },
-    // 회의마다 최신 결과에서 아직 끝나지 않은 일만 최신 날짜순으로 모은다.
-    openTodos() {
-      const { records, skipped } = latestRecords();
-      const items = [];
-      for (const record of records.filter(record => record.minutes).sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')))) {
-        todoRules.effective(record.minutes, loadTodos(record.location, record.id, record.minutes.actions)).forEach((item, index) => {
-          if (!item.done) items.push({ location: record.location, id: record.id, title: record.title, date: record.date, index, task: item.task, owner: item.owner, due: item.due });
-        });
-      }
-      return { items, skipped };
+      return { meeting, versions: versionsOf(location, meeting), review: meeting.minutes ? loadReview(location, id) : null, todos, todosUnreadable: Boolean(meeting.minutes) && !todos && fs.existsSync(todoPath(location, id)),
+        me: meeting.minutes ? loadMe(location, meeting) : null };
     },
     saveTodos(location, id, data) {
       const record = analyzedRecord(location, id);
       return writeTodos(location, id, data, record.minutes.actions);
     },
-    setTodoDone(location, id, index, done) {
+    saveMe(location, id, name) {
+      // 이 회의에서 나를 고르거나(이름) 고른 것을 지운다(null). 보고 있는 결과의 후보에 있는 이름만 받아 후보의 표기로 저장한다.
       const record = analyzedRecord(location, id);
-      if (typeof done !== 'boolean') throw fail(400, '할 일 내용을 확인하세요.');
-      const edits = loadTodos(location, id, record.minutes.actions);
-      const items = todoRules.effective(record.minutes, edits).map(item => ({ ...item }));
-      if (!items[index]) throw fail(400, '할 일 내용을 확인하세요.');
-      items[index].done = done;
-      return writeTodos(location, id, { finalized: Boolean(edits?.finalized), items }, record.minutes.actions);
+      const file = mePath(location, record);
+      if (name === null) {
+        if (fs.existsSync(file)) remove(file);
+        return null;
+      }
+      const invalid = () => fail(400, '이 회의의 참석자나 담당자 이름 가운데서 골라 주세요.');
+      if (typeof name !== 'string' || name.length > todoRules.LIMITS.field) throw invalid();
+      const items = todoRules.effective(record.minutes, loadTodos(location, id, record.minutes.actions));
+      const found = todoRules.candidates(record.participants, items).find(entry => todoRules.sameName(entry.name, name));
+      if (!found) throw invalid();
+      write(file, JSON.stringify({ version: 1, name: found.name, savedAt: new Date().toISOString() }, null, 2));
+      return found.name;
     },
     createRecording(location, id, data) {
       if (location !== 'main') { directory(location); throw fail(400, '새 녹음은 기본 보관함에만 만들 수 있습니다.'); }

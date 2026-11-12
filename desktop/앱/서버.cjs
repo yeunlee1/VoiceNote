@@ -20347,6 +20347,8 @@ function createMeetingServer(options = {}) {
   let storedSummaryModel;
   let defaultOutputFormat = "meeting";
   let storage = { audio: "", transcript: "", summary: "" };
+  let myName = "";
+  // 설정의 내 이름이다. 지난 회의에서 같은 이름의 사람을 나로 미리 고르는 데만 쓰고 설정 내보내기 파일에는 담지 않는다.
   if (settingsFile) {
     // 저장된 모델이 목록에 없으면 다른 모델로 바꾸지 않고 다시 선택하도록 알린다.
     try {
@@ -20362,6 +20364,7 @@ function createMeetingServer(options = {}) {
         const value = object3(stored?.storage)?.[kind];
         return [kind, typeof value === "string" && value.length <= settingsFormat.MAX_FOLDER ? value : ""];
       }));
+      myName = typeof stored?.myName === "string" && stored.myName.length <= 200 ? stored.myName.trim() : "";
     } catch (error62) {
       if (error62.code !== "ENOENT") {
         summaryModel = null;
@@ -20369,7 +20372,7 @@ function createMeetingServer(options = {}) {
       }
     }
   }
-  const settings = () => ({ summaryModel, defaultOutputFormat, storage: { ...storage } });
+  const settings = () => ({ summaryModel, defaultOutputFormat, storage: { ...storage }, myName });
   const copyWriter = require("./사본저장.cjs").createCopyWriter({ store: meetingStore, storage: () => ({ ...storage }), fs: options.copyFs });
   // 사본 저장이 실패해도 회의 결과 저장은 성공으로 두고, 실패 내용만 응답에 담는다.
   function copiesAfterSave(location, id) {
@@ -20379,7 +20382,7 @@ function createMeetingServer(options = {}) {
       return { ok: false, written: [], skipped: [], failed: [{ kind: "all", message: "고른 폴더에 사본을 쓰지 못했습니다. 설정에서 저장 위치를 확인하세요." }] };
     }
   }
-  const currentSettings = () => ({ storedSummaryModel, defaultOutputFormat, storage: { ...storage } });
+  const currentSettings = () => ({ storedSummaryModel, defaultOutputFormat, storage: { ...storage }, myName });
   function writeSettingsFile(content) {
     const temporary = `${settingsFile}.${(0, import_node_crypto.randomBytes)(8).toString("hex")}.tmp`;
     try {
@@ -20396,7 +20399,7 @@ function createMeetingServer(options = {}) {
   }
   function saveSettings(next) {
     if (!settingsFile) return;
-    writeSettingsFile(JSON.stringify({ ...next.storedSummaryModel !== void 0 ? { summaryModel: next.storedSummaryModel } : {}, defaultOutputFormat: next.defaultOutputFormat, storage: next.storage }));
+    writeSettingsFile(JSON.stringify({ ...next.storedSummaryModel !== void 0 ? { summaryModel: next.storedSummaryModel } : {}, defaultOutputFormat: next.defaultOutputFormat, storage: next.storage, ...next.myName ? { myName: next.myName } : {} }));
   }
   // 저장에 성공한 값만 메모리에 반영한다. 요약 모델은 바뀐 경우에만 다시 정한다.
   function applySettings(next) {
@@ -20407,11 +20410,12 @@ function createMeetingServer(options = {}) {
     storedSummaryModel = next.storedSummaryModel;
     defaultOutputFormat = next.defaultOutputFormat;
     storage = { ...next.storage };
+    myName = next.myName;
   }
   // 화면이 보낸 일부 값만 바꾼다. 저장 위치는 실제로 파일을 쓸 수 있는 폴더일 때만 받는다.
   function changedSettings(data) {
     if (!object3(data)) throw fail("INVALID_SETTINGS", "설정 값을 확인하세요.", 400);
-    const extra = Object.keys(data).find((key) => !["summaryModel", "defaultOutputFormat", "storage"].includes(key));
+    const extra = Object.keys(data).find((key) => !["summaryModel", "defaultOutputFormat", "storage", "myName"].includes(key));
     if (extra !== void 0) throw fail("INVALID_SETTINGS", `설정에 알 수 없는 항목(${extra.slice(0, 40)})이 있습니다.`, 400);
     const next = currentSettings();
     if (data.summaryModel !== void 0) {
@@ -20421,6 +20425,10 @@ function createMeetingServer(options = {}) {
     if (data.defaultOutputFormat !== void 0) {
       next.defaultOutputFormat = meetingFormats.format(data.defaultOutputFormat);
       if (!next.defaultOutputFormat) throw fail("INVALID_SETTINGS", "기본 출력 형식을 확인하세요.", 400);
+    }
+    if (data.myName !== void 0) {
+      if (typeof data.myName !== "string" || data.myName.length > 200) throw fail("INVALID_SETTINGS", "내 이름은 200자 이하로 적어 주세요.", 400);
+      next.myName = data.myName.trim();
     }
     if (data.storage !== void 0) {
       const folders = object3(data.storage);
@@ -20603,8 +20611,13 @@ function createMeetingServer(options = {}) {
               json2(response, 200, { review: meetingStore.saveReview(reviewRoute[1], reviewRoute[2], await jsonBody(request)) });
               return;
             }
-            if (path === "/api/meetings/open-todos" && request.method === "GET") {
-              json2(response, 200, meetingStore.openTodos());
+            const meRoute = /^\/api\/meetings\/([a-z0-9]+)\/([0-9a-f-]{36})\/me$/.exec(path);
+            if (meRoute && request.method === "POST") {
+              // 이 회의에서 나를 고르거나(이름) 고른 것을 지운다(null). 이름 말고 다른 값은 받지 않는다.
+              const data = await jsonBody(request);
+              if (!object3(data) || Object.keys(data).some((key) => key !== "name") || !(data.name === null || typeof data.name === "string"))
+                throw fail("INVALID_INPUT", "나로 고를 이름을 확인하세요.", 400);
+              json2(response, 200, { me: meetingStore.saveMe(meRoute[1], meRoute[2], data.name) });
               return;
             }
             const todosRoute = /^\/api\/meetings\/([a-z0-9]+)\/([0-9a-f-]{36})\/todos$/.exec(path);
@@ -20612,14 +20625,9 @@ function createMeetingServer(options = {}) {
               json2(response, 200, { todos: meetingStore.saveTodos(todosRoute[1], todosRoute[2], await jsonBody(request)) });
               return;
             }
-            const todoDoneRoute = /^\/api\/meetings\/([a-z0-9]+)\/([0-9a-f-]{36})\/todos\/(\d{1,3})$/.exec(path);
-            if (todoDoneRoute && request.method === "POST") {
-              json2(response, 200, { todos: meetingStore.setTodoDone(todoDoneRoute[1], todoDoneRoute[2], Number(todoDoneRoute[3]), (await jsonBody(request))?.done) });
-              return;
-            }
             const match = /^\/api\/meetings\/([a-z0-9]+)(?:\/([0-9a-f-]{36}))?$/.exec(path);
             if (path === "/api/meetings" && request.method === "GET") {
-              json2(response, 200, meetingStore.listMeetings());
+              json2(response, 200, meetingStore.listMeetings(myName));
             } else if (match && match[2] && request.method === "GET") {
               json2(response, 200, meetingStore.loadMeeting(match[1], match[2]));
             } else if (match && !match[2] && request.method === "POST") {

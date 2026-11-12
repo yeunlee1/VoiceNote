@@ -5,6 +5,15 @@ import java.util.*;
 
 final class MeetingDocument {
     static String value(JSONObject object,String key){return object.isNull(key)?"":object.optString(key,"");}
+    static String textFileName(String date,String title,String label){
+        // 정리본 텍스트 파일 이름이다. Windows 앱의 baseName·saveResult와 같은 규칙으로 <날짜>-<제목>-<형식명>.txt를 만든다.
+        String name=JsonText.trim(title==null?"":title).replaceAll("[\\\\/:*?\"<>|\\x00-\\x1f]","-");
+        if(name.length()>70)name=name.substring(0,70);
+        StringBuilder kind=new StringBuilder();
+        for(char c:(label==null?"":label).toCharArray())if(!JsonText.space(c)&&"\\/:*?\"<>|".indexOf(c)<0)kind.append(c);
+        // 공백은 JavaScript와 같은 집합(JsonText.space)으로 지운다. Java의 trim이나 \s와는 다루는 글자가 다르다.
+        return (date==null||date.isEmpty()?"날짜없음":date)+"-"+(name.isEmpty()?"회의록":name)+"-"+kind+".txt";
+    }
     static String action(JSONObject item){String owner=value(item,"owner"),due=value(item,"due");return "- "+item.optString("task")+" · 담당 "+(owner.isEmpty()?"미정":owner)+" · 기한 "+(due.isEmpty()?"미정":due);}
     static void list(List<String> out,String title,JSONArray items,boolean actions)throws Exception {
         if(items.length()==0)return;out.add("## "+title);for(int i=0;i<items.length();i++)out.add(actions?action(items.getJSONObject(i)):"- "+items.getString(i));out.add("");

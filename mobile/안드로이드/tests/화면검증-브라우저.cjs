@@ -46,12 +46,16 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     await send('Page.enable');await send('Runtime.enable');await send('Page.addScriptToEvaluateOnNewDocument',{source:mock+require('./설정평가-모의브리지.cjs')+require('./업데이트-모의브리지.cjs')});
     const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result.value;};
     const until=async expression=>{const deadline=Date.now()+6500;while(Date.now()<deadline){if(await evaluate(expression))return true;await wait(50);}return false;};
-    const click=selector=>evaluate('document.querySelector('+JSON.stringify(selector)+').click()');
+    const tap=selector=>evaluate('document.querySelector('+JSON.stringify(selector)+').click()');
+    // 1.7.0부터 목록에서 회의를 열면 내 할 일 탭이 먼저 열린다. 아래 기존 검사는 정리본을 보므로 회의가 열리면 정리본 탭으로 옮긴다. 내 할 일 탭은 내할일검증-화면.cjs가 tap으로 직접 연다.
+    const opens=()=>evaluate("__mock.calls.filter(c=>c.method==='open').length");
+    const click=async selector=>{const before=selector.startsWith('#history button')?await opens():-1;await tap(selector);if(before>=0&&await until(`__mock.calls.filter(c=>c.method==='open').length>${before}&&!document.getElementById('result').hidden`))await tap('#tab-minutes');};
     const viewport=(width,height=820)=>send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:2,mobile:true});
     const load=async(query='')=>{await send('Page.navigate',{url:base+query});await wait(450);};
     const shot=async name=>{for(let n=0;n<65&&await evaluate("!document.getElementById('message').hidden");n++)await wait(100);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(path.join(outDir,name),Buffer.from(r.data,'base64'));};
     const key=async()=>{await click('#open-settings');await evaluate("document.getElementById('api-key').value='sk-test-00000000000000000000'");await click('#save-key');await wait(60);await click('#close-settings');};
     await require('./할일검증-화면.cjs')({viewport,load,key,click,evaluate,until,wait,shot,check});
+    await require('./내할일검증-화면.cjs')({viewport,load,key,tap,evaluate,until,wait,shot,check});
     await require('./후속검증-화면.cjs')({viewport,load,key,click,evaluate,until,wait,shot,check});
     await require('./업데이트검증-화면.cjs')({viewport,load,click,evaluate,until,wait,shot,check});
     for(const width of [360,390,412]){
@@ -168,7 +172,7 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     check('초안 읽기 실패 뒤에도 목록·상태를 불러온다',await evaluate("document.querySelectorAll('#history button').length===3&&__mock.calls.some(c=>c.method==='status')"));
 
     await load();await key();await click('#open-settings');
-    check('설정은 네 구역이며 내 형식은 회의 준비 밖에 있다',await evaluate("document.querySelectorAll('#settings .settings-section').length===4&&document.querySelector('#settings #custom-editor')&&!document.querySelector('#prep #custom-editor')&&document.getElementById('settings-title').textContent==='설정'"));
+    check('설정은 다섯 구역이며 내 형식은 회의 준비 밖에 있다',await evaluate("document.querySelectorAll('#settings .settings-section').length===5&&document.querySelector('#settings #custom-editor')&&!document.querySelector('#prep #custom-editor')&&document.getElementById('settings-title').textContent==='설정'"));
     await evaluate("document.getElementById('default-format').value='tasks';document.getElementById('default-format').dispatchEvent(new Event('change'))");await wait(60);
     check('기본 출력 형식을 저장하고 새 회의에 적용한다',await evaluate("__mock.calls.some(c=>c.method==='saveSettings'&&c.data.defaultOutputFormat==='tasks')&&document.getElementById('output-format').value==='tasks'"));
     await click('[data-pick-folder=summary]');await wait(60);
@@ -198,7 +202,7 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     await evaluate('__mock.delay=180');await click('#refine');await wait(35);
     check('평가 저장을 기다리는 동안 버전과 결과 조작을 잠근다',await evaluate("document.getElementById('result-version').disabled&&document.getElementById('copy-result').disabled&&document.getElementById('save-review').disabled"));
     await wait(430);
-    check('의견 반영은 평가 저장 뒤 다듬은 의견으로 요청한다',await evaluate("(()=>{const c=__mock.calls,r=c.findLastIndex(x=>x.method==='refine');return r>0&&c.slice(0,r).filter(x=>!['history','status','saveDraft','openTodos'].includes(x.method)).at(-1)?.method==='review'&&c[r].data.feedback==='담당자를 확인해 주세요.'&&c[r].data.resultId==='1234'&&!c.some(x=>x.method==='analyze')})()"));
+    check('의견 반영은 평가 저장 뒤 다듬은 의견으로 요청한다',await evaluate("(()=>{const c=__mock.calls,r=c.findLastIndex(x=>x.method==='refine');return r>0&&c.slice(0,r).filter(x=>!['history','status','saveDraft'].includes(x.method)).at(-1)?.method==='review'&&c[r].data.feedback==='담당자를 확인해 주세요.'&&c[r].data.resultId==='1234'&&!c.some(x=>x.method==='analyze')})()"));
 
     await load();await key();await evaluate('__mock.noTranscript=true');await click('#history button');await wait(60);
     await evaluate("document.getElementById('review-comment').value='고쳐 주세요';document.getElementById('review-comment').dispatchEvent(new Event('input'))");await click('#refine');await wait(60);

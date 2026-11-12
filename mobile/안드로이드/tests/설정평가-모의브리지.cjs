@@ -3,12 +3,12 @@ module.exports = '(' + function () {
   const m = window.__mock, previous = window.Native.request.bind(window.Native);
   m.storage = { audio: {uri:'',name:''}, transcript:{uri:'',name:''}, summary:{uri:'',name:''} };
   m.defaultOutputFormat = 'meeting'; m.reviews = {}; m.copyReport = {ok:true,written:[],skipped:[],failed:[]};
-  const settings = () => ({summaryModel:m.model,defaultOutputFormat:m.defaultOutputFormat,storage:m.storage});
+  const settings = () => ({summaryModel:m.model,defaultOutputFormat:m.defaultOutputFormat,storage:m.storage,myName:m.myName||''});
   Object.defineProperty(window, '__settingsResponse', {value:settings});
   window.Native.request = function (id, method, json) {
     const d = JSON.parse(json);
     const reply = (value, error) => setTimeout(() => window.receive(id,{value,error}), m.delay || 0);
-    const handled = ['saveSettings','pickFolder','clearFolder','exportSettings','importSettings','cancelSettings','review','refine','copies','open','applySettings','openTodos','saveTodos','todoDone'];
+    const handled = ['saveSettings','pickFolder','clearFolder','exportSettings','importSettings','cancelSettings','review','refine','copies','open','applySettings','saveTodos','saveMe','copyText','saveText'];
     if (!handled.includes(method)) {
       if (method === 'init') {
         const receive = window.receive;
@@ -18,7 +18,7 @@ module.exports = '(' + function () {
     }
     m.calls.push({method,data:d});
     try {
-      if (method==='saveSettings') {m.defaultOutputFormat=d.defaultOutputFormat;reply({settings:settings()});}
+      if (method==='saveSettings') {if('myName' in d){if(m.myNameFail)throw Error('디스크 오류');m.myName=d.myName;}else m.defaultOutputFormat=d.defaultOutputFormat;reply({settings:settings()});}
       else if (method==='pickFolder') {if(!m.cancelFolder)m.storage[d.kind]={uri:'content://test/tree/'+d.kind,name:'회의 기록을 오래 보관하는 폴더 '+d.kind};reply({settings:settings(),cancelled:!!m.cancelFolder});}
       else if (method==='clearFolder') {m.storage[d.kind]={uri:'',name:''};reply({settings:settings()});}
       else if (method==='exportSettings' || method==='cancelSettings') reply(true);
@@ -35,8 +35,8 @@ module.exports = '(' + function () {
         const minutes=record.state==='complete'?{overview:selected==='1233'?'앞선 결과입니다.':'전체 방향 | 회의 내용을 보존합니다.',topics:[{title:'보관함',points:['원래 보관함에서 기록을 엽니다.']}],decisions:[],actions:[],openQuestions:[]}:null;
         const versions=selected?[{id:'1233',savedAt:2,outputFormat:'summary',refined:true},{id:selected==='legacy'?'legacy':'1234',savedAt:3,outputFormat:'tasks',refined:false}]:[];
         if(original.resultId==='1235')versions.push({id:'1235',savedAt:4,outputFormat:'summary',refined:true});
-        if(minutes&&m.todoActions){minutes.actions=m.todoActions;record.participants=m.todoParticipants||'';}
-        reply({record,minutes,transcript:m.noTranscript?'':'저장된 전사',resultId:selected||null,versions:m.versions||versions,review:m.reviews[selected]||null,copies:m.copyReport,todos:(m.savedTodos||{})[selected]||null});
+        if(minutes&&m.todoActions){minutes.actions=(m.todoActionsByResult||{})[selected]||m.todoActions;record.participants=m.todoParticipants||'';}
+        reply({record,minutes,transcript:m.noTranscript?'':'저장된 전사',resultId:selected||null,versions:m.versions||versions,review:m.reviews[selected]||null,copies:m.copyReport,todos:(m.savedTodos||{})[selected]||null,me:(m.me||{})[d.id]??null,todosUnreadable:!!m.todosUnreadable});
       } else if (method==='review') {if(m.failReview)throw Error('평가 저장 실패');const r={stars:d.stars,comment:d.comment,savedAt:'2026-10-23T00:00:00Z'};m.reviews[d.resultId]=r;reply(r);}
       else if (method==='refine') {
         if(m.failRefine)throw Error('요약 요청에 실패했습니다.');
@@ -45,9 +45,10 @@ module.exports = '(' + function () {
         if(['failure','success'].includes(m.refineOutcome))terminal();
         reply({id:d.id,attemptId:d.attemptId});
       }
-      else if (method==='openTodos') reply({items:m.openTodos||[],skipped:0});
       else if (method==='saveTodos') {if(m.todoFail||(m.todoFailNext>0&&m.todoFailNext--))throw Error('디스크 오류');m.savedTodos={...(m.savedTodos||{}),[d.resultId]:d.todos};reply({version:1,...d.todos});}
-      else if (method==='todoDone') {m.openTodos=(m.openTodos||[]).filter(t=>!(t.id===d.id&&t.index===d.index));reply({version:1,finalized:false,items:[]});}
+      else if (method==='copyText') {if(JSON.stringify(d).length>100000)throw Error('입력이 너무 큽니다.');if(m.copyFail)throw Error('복사하지 못했습니다. 아래 글을 직접 골라 복사해 주세요.');m.copied=d.text;reply(true);}
+      else if (method==='saveText') {if(m.saveTextFail)throw Error('텍스트 파일을 저장하지 못했습니다. 다른 위치를 골라 다시 시도하세요.');reply(m.saveTextCancel?{cancelled:true}:{saved:true,file:'2026-10-23-옛 첫째-업무정리.txt'});}
+      else if (method==='saveMe') {if(m.meFail)throw Error('디스크 오류');m.me={...(m.me||{}),[d.id]:d.name};reply({me:d.name});}
       else if (method==='copies') {if(m.failCopies)throw Error('사본 저장 실패');m.copyReport=m.copiesResult||{ok:true,written:[{kind:'summaryMd',name:'회의.md'}],skipped:[],failed:[]};reply(m.copyReport);}
     } catch(error) {reply(null,error.message);}
   };

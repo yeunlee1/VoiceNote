@@ -151,3 +151,66 @@ test('AI 결과에 빈 문장이 있어도 그 줄 때문에 나머지 저장이
   assert.equal(todos.validate({ finalized: false, items: [item('', true), item('발주 변경')] }, 2, actions).items[0].done, true);
   assert.throws(() => todos.validate({ finalized: false, items: [item(''), item(' ')] }, 2, actions), /할 일/, '원래 문장이 있는 줄을 비울 수는 없다');
 });
+
+const item = (task, owner = null, due = null, done = false) => ({ task, owner, due, done });
+
+test('이름은 앞뒤 공백과 이어진 공백만 정리해 비교한다', () => {
+  assert.equal(todos.sameName(' 김 민수 ', '김  민수'), true);
+  assert.equal(todos.sameName('김\u3000민수', '김\u00A0민수'), true, '전각 공백과 NBSP도 공백이다');
+  assert.equal(todos.sameName('김민수', '김 민수'), false);
+  assert.equal(todos.sameName('박서연', '박서연 대리'), false);
+  assert.equal(todos.sameName('', ''), false);
+  assert.equal(todos.sameName(null, null), false);
+});
+
+test('나를 고를 후보는 참석자 번호 그대로이고 공백만 다른 이름은 먼저 나온 하나만 쓴다', () => {
+  assert.deepEqual(todos.candidates('박서연, 김 민수, 김  민수, 이도현', [item('일', '다른 사람')]),
+    [{ name: '박서연', number: 1 }, { name: '김 민수', number: 2 }, { name: '이도현', number: 4 }]);
+});
+
+test('참석자를 안 적은 회의는 담당자 이름을 처음 나온 순서로 20명까지 후보로 쓴다', () => {
+  assert.deepEqual(todos.candidates('', [item('가', '김 민수'), item('나'), item('다', ' 박서연 '), item('라', '김  민수'), item('마', '  ')]),
+    [{ name: '김 민수', number: 0 }, { name: '박서연', number: 0 }]);
+  assert.equal(todos.candidates('', Array.from({ length: 25 }, (_, i) => item(`일${i}`, `사람${i}`))).length, 20);
+  assert.deepEqual(todos.candidates('', [item('가'), item('나')]), []);
+});
+
+test('나는 저장된 선택, 설정의 내 이름 순서로 정하고 후보에 없으면 모른다', () => {
+  const list = todos.candidates('박서연 대리, 김민수', []);
+  assert.deepEqual(todos.resolveMe(list, '김민수', '박서연 대리'), { name: '김민수', number: 2, source: 'saved' });
+  assert.deepEqual(todos.resolveMe(list, '이도현', ' 박서연  대리 '), { name: '박서연 대리', number: 1, source: 'settings' }, '저장된 선택이 후보에서 사라지면 설정의 내 이름으로 다시 정한다');
+  assert.equal(todos.resolveMe(list, null, '박서연'), null, '직함이 붙은 이름은 다른 이름이다');
+  assert.equal(todos.resolveMe(list, null, ''), null);
+  assert.equal(todos.resolveMe([], '박서연', '박서연'), null);
+});
+
+test('내 일은 담당자 이름이 나와 같은 일만이고 안 끝낸 일이 앞에 온다', () => {
+  const items = [item('가', '박서연', null, true), item('나', '김민수'), item('다', '박서연', '11월 12일'), item('라', '박서연, 김민수'), item('마', ' 박서연 '), item('바')];
+  assert.deepEqual(todos.mine(items, '박서연').map(entry => [entry.index, entry.task, entry.done]), [[2, '다', false], [4, '마', false], [0, '가', true]]);
+  assert.deepEqual(todos.rest(items, '박서연'), { unassigned: 1, others: 2 }, '두 사람으로 적힌 일은 내 일이 아니다');
+  assert.deepEqual(todos.rest(items, null), { unassigned: 1, others: 5 });
+});
+
+test('목록에 붙일 수는 내가 안 끝낸 일의 수이고 내가 누구인지 모르면 null이다', () => {
+  const items = [item('가', '박서연', null, true), item('나', '박서연'), item('다', '김민수'), item('라', '김민수')];
+  assert.equal(todos.mineOpen('박서연, 김민수', items, null, '박서연'), 1);
+  assert.equal(todos.mineOpen('박서연, 김민수', items, '김민수', '박서연'), 2, '직접 고른 선택이 설정의 내 이름보다 먼저다');
+  assert.equal(todos.mineOpen('박서연, 김민수', [item('가', '박서연', null, true)], null, '박서연'), 0);
+  assert.equal(todos.mineOpen('박서연, 김민수', items, null, ''), null);
+  assert.equal(todos.mineOpen('', items, null, '박서연'), 1, '참석자가 없으면 담당자 이름에서 나를 찾는다');
+  assert.equal(todos.mineOpen('', [item('가'), item('나')], null, '박서연'), null);
+});
+
+test('사람별 글은 담당자가 있고 안 끝낸 일만 참석자 번호순으로 묶고 명단에 없는 이름은 뒤에 붙인다', () => {
+  const items = [item('외주 견적', '외부 김 실장'), item('서버 점검 결과 공유', '김  민수', '11월 10일(화)'), item('끝낸 일', '김 민수', null, true),
+    item('미정인 일'), item('일정표', '박서연'), item('장비 반입 절차 확인', '김 민수'), item('계약서', '외부 김  실장')];
+  const groups = todos.shareGroups('박서연, 김 민수', items);
+  assert.deepEqual(groups, [
+    { name: '박서연', number: 1, tasks: [{ task: '일정표', due: null }] },
+    { name: '김 민수', number: 2, tasks: [{ task: '서버 점검 결과 공유', due: '11월 10일(화)' }, { task: '장비 반입 절차 확인', due: null }] },
+    { name: '외부 김 실장', number: 0, tasks: [{ task: '외주 견적', due: null }, { task: '계약서', due: null }] },
+  ]);
+  assert.equal(todos.shareText('주간 업무 회의', '2026-11-09', groups[1]), '[주간 업무 회의] 2026-11-09\n김 민수 님이 맡은 일 2건\n- 서버 점검 결과 공유 · 기한 11월 10일(화)\n- 장비 반입 절차 확인');
+  assert.equal(todos.shareText(' ', '', groups[0]).split('\n')[0], '[회의]');
+  assert.deepEqual(todos.shareGroups('박서연', [item('가', '박서연', null, true), item('나')]), []);
+});

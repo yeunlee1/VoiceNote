@@ -186,6 +186,30 @@ public final class AndroidChecks extends Instrumentation {
         expect((new Store(store.context).draft()).length()==0,"녹음 뒤 다시 열어도 옛 메모가 되살아나지 않는다");
         expect(new File(p1,"작성중.json").exists()&&new File(p2,"작성중.json").exists()&&new File(p3,"작성중.json").exists(),"옛 메모 파일을 지우지 않는다");
     }
+    void myNameFailureCheck()throws Exception{
+        // 설정을 디스크에 쓰지 못하는 휴대폰을 흉내 낸다. commit이 메모리에는 값을 넣고(apply) false를 돌려준다.
+        Store store=new Store(testContext());
+        store.saveSettings(new JSONObject().put("myName","박서연"));
+        final android.content.Context base=store.context;
+        Store failing=new Store(new android.content.ContextWrapper(base){
+            public android.content.Context getApplicationContext(){return this;}
+            public android.content.SharedPreferences getSharedPreferences(String key,int mode){return failingCommits(base.getSharedPreferences(key,mode));}
+        });
+        try{failing.saveSettings(new JSONObject().put("myName","김민수"));throw new AssertionError("디스크에 쓰지 못한 내 이름을 저장했다고 답했습니다.");}
+        catch(IOException expected){expect(expected.getMessage().contains("내 이름을 저장하지 못했습니다"),"내 이름을 디스크에 쓰지 못하면 실패로 알린다");}
+        expect("박서연".equals(store.myName())&&"박서연".equals(failing.myName()),"디스크에 쓰지 못한 내 이름은 메모리에서도 이전 이름으로 되돌린다");
+    }
+    static android.content.SharedPreferences failingCommits(final android.content.SharedPreferences real){
+        return (android.content.SharedPreferences)java.lang.reflect.Proxy.newProxyInstance(Store.class.getClassLoader(),new Class<?>[]{android.content.SharedPreferences.class},(proxy,method,args)->{
+            if(!method.getName().equals("edit"))return method.invoke(real,args);
+            final android.content.SharedPreferences.Editor editor=real.edit();
+            return java.lang.reflect.Proxy.newProxyInstance(Store.class.getClassLoader(),new Class<?>[]{android.content.SharedPreferences.Editor.class},(chain,call,values)->{
+                if(call.getName().equals("commit")){editor.apply();return false;}
+                Object result=call.invoke(editor,values);return result==editor?chain:result;
+            });
+        });
+        // 설정 편집기의 commit만 바꾼 대리 객체다. 다른 메서드는 실제 설정으로 넘기고, 이어 쓰는 편집기는 대리 객체를 돌려준다.
+    }
     android.content.Context testContext(){
         return new android.content.ContextWrapper(getTargetContext()){
             final String name="task10-"+UUID.randomUUID();
@@ -644,8 +668,61 @@ public final class AndroidChecks extends Instrumentation {
     }
     static JSONObject todoAction(String task,String owner)throws Exception{return new JSONObject().put("task",task).put("owner",owner==null?JSONObject.NULL:owner).put("due",JSONObject.NULL);}
     static JSONObject todoItem(String task,String owner,boolean done)throws Exception{return todoAction(task,owner).put("done",done);}
+    static JSONObject historyRow(Store store,String id)throws Exception{
+        JSONArray rows=store.history().getJSONArray("meetings");
+        for(int i=0;i<rows.length();i++)if(rows.getJSONObject(i).getString("id").equals(id))return rows.getJSONObject(i);
+        return null;
+    }
+    static void meChecks(Store store)throws Exception{
+        // 회의마다 고른 나, 지난 회의 목록의 내가 안 끝낸 일의 수, 설정의 내 이름을 확인한다.
+        JSONObject record=store.create(new JSONObject().put("date","2099-05-01").put("title","나 회의").put("participants","박서연 대리, 김민수"));String id=record.getString("id");
+        store.finish(record,minutes().put("actions",new JSONArray().put(todoAction("가","박서연 대리")).put(todoAction("나","박서연 대리")).put(todoAction("다","김민수"))),null);
+        String first=record.getString("resultId");
+        expect(store.loadMe("main",id)==null&&!historyRow(store,id).has("mineOpen"),"고른 적이 없고 내 이름도 없으면 나를 모른다");
+        expect("박서연 대리".equals(store.saveMe("main",id,first," 박서연  대리 ")),"공백만 다른 이름은 후보의 표기로 저장한다");
+        expect("박서연 대리".equals(store.loadMe("main",id))&&new File(store.directory("main",id),"나.json").exists(),"고른 나는 회의 폴더의 나.json에 둔다");
+        expect(historyRow(store,id).optInt("mineOpen")==2,"목록에 내가 안 끝낸 일의 수를 준다");
+        store.saveTodos("main",id,first,new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("가","박서연 대리",true)).put(todoItem("나","박서연 대리",false)).put(todoItem("다","김민수",false))));
+        expect(historyRow(store,id).optInt("mineOpen")==1,"한 건 끝내면 수가 줄어든다");
+        store.saveTodos("main",id,first,new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("가","박서연 대리",true)).put(todoItem("나","박서연 대리",true)).put(todoItem("다","김민수",false))));
+        expect(!historyRow(store,id).has("mineOpen"),"내 일을 다 끝내면 수를 붙이지 않는다");
+        for(String bad:new String[]{"이도현","",new String(new char[201]).replace('\0','가')}){
+            try{store.saveMe("main",id,first,bad);throw new AssertionError("후보에 없는 이름을 저장했습니다: "+bad.length());}catch(IOException expected){expect(expected.getMessage().contains("골라 주세요"),"후보에 없는 이름은 거절한다");}
+        }
+        expect(store.saveMe("main",id,first,null)==null&&store.loadMe("main",id)==null,"고른 나를 지운다");
+        expect(store.saveMe("main",id,first,null)==null,"다시 지워도 실패하지 않는다");
+        Store.write(new File(store.directory("main",id),"나.json"),"{깨짐");
+        expect(store.loadMe("main",id)==null&&historyRow(store,id)!=null,"깨진 나.json은 고른 적이 없는 것으로 보고 회의는 목록에 남는다");
+        expect(Store.read(new File(store.directory("main",id),"나.json")).equals("{깨짐"),"읽지 못한 나.json을 지우거나 고치지 않는다");
+        for(String version:new String[]{"1.5","\"1\"","2"}){
+            String saved="{\"version\":"+version+",\"name\":\"박서연 대리\",\"savedAt\":\"2099-01-01T00:00:00Z\"}";
+            Store.write(new File(store.directory("main",id),"나.json"),saved);
+            expect(store.loadMe("main",id)==null&&Store.read(new File(store.directory("main",id),"나.json")).equals(saved),"버전이 숫자 1이 아닌 나.json("+version+")은 고른 적이 없는 것으로 보고 지우거나 고치지 않는다");
+        }
+        expect("김민수".equals(store.saveSettings(new JSONObject().put("myName","  김민수 ")).getString("myName")),"내 이름을 앞뒤 공백 없이 저장한다");
+        expect(historyRow(store,id).optInt("mineOpen")==1,"고른 선택을 읽지 못하면 설정의 내 이름으로 나를 정한다");
+        try{store.saveSettings(new JSONObject().put("myName",new String(new char[201]).replace('\0','가')));throw new AssertionError("201자 이름을 저장했습니다.");}catch(IOException expected){expect(expected.getMessage().contains("200자"),"201자 이름은 거절한다");}
+        store.saveSettings(new JSONObject().put("defaultOutputFormat","tasks"));
+        expect("김민수".equals(store.settings().getString("myName")),"다른 설정을 바꿔도 내 이름이 남는다");
+        byte[] exported=store.exportSettings();
+        expect(!new String(exported,"UTF-8").contains("김민수"),"설정 내보내기 파일에 내 이름을 담지 않는다");
+        store.importSettings(SettingsFile.read(exported));
+        expect("김민수".equals(store.settings().getString("myName")),"설정을 불러와도 내 이름이 남는다");
+        JSONObject again=store.result("main",id,first);again.remove("minutes");again.put("participants","김민수, 이도현");
+        store.finish(again,minutes().put("actions",new JSONArray().put(todoAction("라","이도현"))),"다시 정리");
+        String second=again.getString("resultId");
+        expect("박서연 대리".equals(store.saveMe("main",id,first,"박서연 대리")),"옛 결과에서는 그 결과의 후보를 고를 수 있다");
+        try{store.saveMe("main",id,second,"박서연 대리");throw new AssertionError("다른 결과의 후보를 저장했습니다.");}catch(IOException expected){expect(expected.getMessage().contains("골라 주세요"),"새 결과의 후보에 없는 이름은 거절한다");}
+        expect("박서연 대리".equals(store.loadMe("main",id))&&!historyRow(store,id).has("mineOpen"),"선택은 회의에 하나이고 목록의 수는 최신 결과로 센다");
+        expect("박서연 대리".equals(MainActivity.requestedMe(new JSONObject().put("name","박서연 대리"))),"나 저장 요청의 이름을 그대로 읽는다");
+        expect(MainActivity.requestedMe(new JSONObject().put("name",JSONObject.NULL))==null,"이름 칸이 null이면 선택 지우기다");
+        for(JSONObject bad:new JSONObject[]{new JSONObject(),new JSONObject().put("name",3)}){
+            try{MainActivity.requestedMe(bad);throw new AssertionError("잘못된 나 저장 요청을 받아들였습니다: "+bad);}catch(IOException expected){expect(expected.getMessage().contains("이름을 확인"),"잘못된 나 저장 요청은 거절한다");}
+        }
+        // 이름 칸이 없는 요청은 지우기로 보지 않고 거절해, 저장된 나를 지우지 않는다.
+    }
     static void todoChecks(Store store)throws Exception{
-        // 사람이 고친 할 일이 결과 파일과 따로 저장되고 공유 문서·남은 일 목록·의견 반영에 맞게 이어지는지 확인한다.
+        // 사람이 고친 할 일이 결과 파일과 따로 저장되고 공유 문서·의견 반영에 맞게 이어지는지 확인한다.
         JSONObject record=store.create(new JSONObject().put("date","2099-04-01").put("title","할 일 회의").put("participants","김민수, 박서연"));String id=record.getString("id");
         store.finish(record,minutes().put("actions",new JSONArray().put(todoAction("일정 공유",null)).put(todoAction("발주 변경","김민수"))),null);
         String first=record.getString("resultId");File dir=store.directory("main",id),resultFile=new File(dir,"결과-"+first+".json");String before=Store.read(resultFile);
@@ -657,9 +734,6 @@ public final class AndroidChecks extends Instrumentation {
         expect(head.getString("task").equals("발주 변경")&&!head.has("done"),"담당자를 맞춘 회의록은 이름순으로 합치고 체크는 넣지 않는다");
         String text=MeetingDocument.text(record2,applied);expect(text.indexOf("발주 변경")<text.indexOf("일정 공유")&&text.contains("담당 최유진"),"공유 문서에 맞춘 담당자가 이름순으로 들어간다");
         expect(store.result("main",id,first).getJSONObject("minutes").getJSONArray("actions").getJSONObject(0).getString("task").equals("일정 공유"),"보관된 AI 결과는 그대로다");
-        List<Integer> open=new ArrayList<>();JSONArray items=store.openTodos().getJSONArray("items");for(int i=0;i<items.length();i++)if(items.getJSONObject(i).getString("id").equals(id))open.add(items.getJSONObject(i).getInt("index"));
-        expect(open.equals(Collections.singletonList(1)),"아직 안 끝난 일에는 끝나지 않은 일만 모은다");
-        store.setTodoDone("main",id,first,1,true);items=store.openTodos().getJSONArray("items");boolean left=false;for(int i=0;i<items.length();i++)left|=items.getJSONObject(i).getString("id").equals(id);expect(!left,"목록에서 체크하면 빠진다");
         for(JSONObject bad:new JSONObject[]{new JSONObject(),new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("하나",null,false))),new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem(" ",null,false)).put(todoItem("둘",null,false))),new JSONObject().put("finalized","no").put("items",new JSONArray().put(todoItem("하나",null,false)).put(todoItem("둘",null,false)))}){
             try{store.saveTodos("main",id,first,bad);throw new AssertionError("잘못된 수정본을 저장했습니다: "+bad);}catch(IOException expected){expect(expected.getMessage().contains("할 일"),"잘못된 수정본을 거절한다");}
         }
@@ -683,7 +757,7 @@ public final class AndroidChecks extends Instrumentation {
         store.finish(older,minutes().put("actions",new JSONArray().put(todoAction("일정 공유",null))),"옛 결과에서 다시 정리");
         expect(store.loadTodos("main",id,older.getString("resultId")).getJSONArray("items").getJSONObject(0).getString("owner").equals("첫째 담당"),"옛 결과에서 의견 반영하면 그 결과의 수정본을 잇는다");
         JSONObject blank=store.create(new JSONObject().put("date","2099-04-02").put("title","빈 문장 회의"));store.finish(blank,minutes().put("actions",new JSONArray().put(todoAction("",null)).put(todoAction("발주",null))),null);
-        store.setTodoDone("main",blank.getString("id"),blank.getString("resultId"),1,true);
+        store.saveTodos("main",blank.getString("id"),blank.getString("resultId"),new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("",null,false)).put(todoItem("발주",null,true))));
         expect(store.loadTodos("main",blank.getString("id"),blank.getString("resultId")).getJSONArray("items").getJSONObject(1).getBoolean("done"),"AI 결과에 빈 문장이 있어도 다른 줄을 체크할 수 있다");
         File target=new File(store.context.getCacheDir(),"할일 사본 "+UUID.randomUUID());target.mkdir();Map<String,String> folders=new HashMap<>();folders.put("audio","");folders.put("transcript","");folders.put("summary",target.toURI().toString());
         JSONObject copied=store.create(new JSONObject().put("date","2099-04-03").put("title","사본 할 일").put("participants","김민수"));String copiedId=copied.getString("id");store.finish(copied,minutes(),null);String copiedResult=copied.getString("resultId");
@@ -711,6 +785,8 @@ public final class AndroidChecks extends Instrumentation {
         settingsChecks(new Store(testContext()));
         draftFailureCheck();
         todoChecks(new Store(testContext()));
+        meChecks(new Store(testContext()));
+        myNameFailureCheck();
         updateChecks();
         URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){protected URLConnection openConnection(URL url){return new HttpURLConnection(url){
             final ByteArrayOutputStream sent=new ByteArrayOutputStream();

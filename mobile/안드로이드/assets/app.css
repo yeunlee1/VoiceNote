@@ -127,7 +127,8 @@ legend { padding: 0; margin-bottom: 4px; font-size: 13px; font-weight: 600; colo
 .history button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 0; min-height: 60px; border: 0; border-bottom: 1px solid var(--rule); background: transparent; text-align: left; }
 .history small { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .history strong { grid-column: 1; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
-.history .state { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+.history .state { grid-column: 2; grid-row: 1 / span 2; align-self: center; display: grid; justify-items: end; gap: 3px; font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+.mine-count { padding: 0 8px; border-radius: 999px; background: var(--teal-wash); color: var(--teal-deep); font-size: 12px; font-weight: 600; line-height: 22px; font-variant-numeric: tabular-nums; }
 .history .state.failed { color: var(--rec-deep); }
 .empty { color: var(--ink-faint); font-size: 14px; padding: 12px 0; }
 .foot { color: var(--ink-faint); font-size: 12px; padding: 12px 0 4px; }
@@ -231,8 +232,8 @@ body.typing .toast { bottom: 12px; }
 .custom-row .move { min-width: 44px; padding: 0; }
 
 /* 회의 결과: 정리본·전사문 탭과 복사·공유 */
-.result-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-top: 12px; border-radius: var(--radius-m); background: var(--rule); }
-.result-tab { min-height: var(--tap); border: 0; border-radius: var(--radius-s); background: transparent; font-size: 15px; font-weight: 600; color: var(--ink-soft); }
+.result-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; padding: 4px; margin-top: 12px; border-radius: var(--radius-m); background: var(--rule); }
+.result-tab { min-height: var(--tap); padding: 0 4px; border: 0; border-radius: var(--radius-s); background: transparent; font-size: 15px; font-weight: 600; color: var(--ink-soft); }
 .result-tab[aria-selected="true"] { background: #fff; color: var(--teal-deep); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
 .result-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 4px; }
 .result-panel { padding-top: 8px; }
@@ -329,14 +330,6 @@ details.more { margin-top: 20px; border-top: 1px solid var(--rule); padding-top:
 .search { display: flex; align-items: center; gap: 8px; min-height: var(--tap); padding: 0 12px; border-radius: var(--radius-s); background: #ecece9; color: var(--ink-faint); }
 .search:focus-within { outline: 3px solid var(--focus); outline-offset: 1px; }
 .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 16px; color: var(--ink); }
-.open-block { margin: 12px 0; }
-.open-block h2 { font-size: 15px; }
-.open-todos { list-style: none; margin: 4px 0 0; padding: 0; }
-.open-todos li { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; border-bottom: 1px solid var(--rule); }
-.open-todos label { display: grid; place-items: center; min-height: 48px; }
-.open-todos input { width: 20px; height: 20px; accent-color: var(--teal); }
-.open-todo-open { width: 100%; min-height: 48px; padding: 6px 4px; border: 0; background: transparent; text-align: left; font-size: 14px; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
-.open-todo-open small { display: block; font-size: 12px; color: var(--ink-faint); }
 
 /* 참석자 번호와 할 일 담당자 맞추기 */
 .people { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; padding: 0; font-size: 14px; }
@@ -364,3 +357,54 @@ details.more { margin-top: 20px; border-top: 1px solid var(--rule); padding-top:
 .todo-editor input { width: 100%; min-width: 0; min-height: var(--tap); padding: 8px 12px; border: 1px solid var(--rule-strong); border-radius: var(--radius-s); background: #fff; font-size: 16px; }
 .todo-editor .row .button { flex: 1 1 100px; }
 .todo-finish { justify-self: start; }
+
+/* 내 할 일 탭: 이 회의에서 내가 맡은 일, 나 고르기, 나머지 일의 수 */
+.mine { display: grid; gap: 12px; align-content: start; }
+.mine-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; min-width: 0; }
+.mine-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.mine-head h3 { font-size: 16px; font-weight: 700; }
+.mine-left { font-size: 13px; font-weight: 600; color: var(--teal-deep); font-variant-numeric: tabular-nums; }
+.me-row { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.me-chip { display: inline-grid; place-items: center; flex: none; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 5px; background: var(--teal); color: #fff; font-size: 12px; font-weight: 700; }
+.me-name { min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.me-change { flex: none; }
+.mine-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.mine-row { border-bottom: 1px solid var(--rule); scroll-margin-top: 64px; }
+.mine-row label { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; min-height: 60px; padding: 8px 0; cursor: pointer; }
+.mine-row input { width: 20px; height: 20px; margin: 0; justify-self: center; accent-color: var(--teal); }
+.mine-text { min-width: 0; }
+.mine-task { display: block; font-size: 16px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.mine-due { display: block; margin-top: 1px; font-size: 13px; color: var(--ink-faint); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* 기한은 저장된 글자 그대로라 길 수 있어 문장 아래에서 줄을 바꾼다 */
+.mine-due:empty { display: none; }
+.mine-row.is-done .mine-task { font-weight: 400; color: var(--ink-faint); text-decoration: line-through; }
+.mine-rest { display: grid; justify-items: start; gap: 8px; font-size: 13px; color: var(--ink-faint); }
+.mine-rest b { font-weight: 600; color: var(--ink); }
+.mine-empty { padding: 12px; border: 1px solid var(--rule); border-radius: var(--radius-s); background: var(--well); font-size: 14px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.who-box { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px dashed var(--rule-strong); border-radius: var(--radius-s); background: var(--sheet); }
+.who-lead { font-size: 15px; font-weight: 600; }
+.who-list { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.who-button { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: var(--tap); padding: 6px 14px 6px 10px; border: 1px solid var(--rule-strong); border-radius: var(--radius-s); background: var(--sheet); font-size: 15px; font-weight: 600; text-align: left; }
+.who-button span { min-width: 0; overflow-wrap: anywhere; }
+.who-button[aria-pressed="true"] { border-color: var(--teal); background: var(--teal-wash); color: var(--teal-deep); }
+.who-button:disabled { opacity: .55; }
+.num { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 5px; background: var(--teal-wash); color: var(--teal); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.who-clear { justify-self: start; }
+
+/* 사람별 할 일 복사 창과 정리본 텍스트 파일 저장 */
+.send-block { display: grid; gap: 8px; justify-items: start; padding-top: 16px; border-top: 1px solid var(--rule); }
+.todo-share, .who-settings { justify-self: start; }
+.save-text { width: 100%; margin-bottom: 4px; }
+.copy-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.copy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 8px; align-items: center; padding: 4px 4px 4px 10px; border: 1px solid var(--rule); border-radius: var(--radius-s); background: var(--well); }
+.copy-row[data-current="true"] { border-color: var(--teal); background: var(--teal-wash); }
+.copy-who { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; font-weight: 600; }
+.copy-name { min-width: 0; overflow-wrap: anywhere; }
+.copy-count { font-size: 13px; font-weight: 400; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.copy-row .button { min-height: 44px; min-width: 72px; padding: 6px 12px; }
+.copy-row .button[data-copied="true"] { border-color: var(--teal); color: var(--teal-deep); }
+.copy-status { font-size: 13px; font-weight: 600; color: var(--teal-deep); }
+.copy-status[data-tone="error"] { color: var(--rec-deep); }
+.copy-status:empty, .copy-preview-title:empty, .copy-preview:empty { display: none; }
+.copy-preview-title { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+.copy-preview { margin: 0; padding: 12px; border: 1px dashed var(--rule-strong); border-radius: var(--radius-s); background: #fff; font: inherit; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
