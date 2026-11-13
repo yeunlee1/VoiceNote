@@ -737,6 +737,19 @@ public final class AndroidChecks extends Instrumentation {
             }
         }finally{code=200;replies.clear();Store.sessionKey=previousKey;MeetingService.snapshot=previousSnapshot;MeetingService.startingAt=0;deleteTree(source);}
     }
+    void sampleFiles()throws Exception{
+        // 문서 선택 창 확인용 합성 통화 녹음(30초, 25분)을 공용 다운로드의 VoiceNote합성 폴더에 만든다. 440Hz 소리만 담은 합성 파일이고 실제 녹음이나 회의 자료는 쓰지 않는다.
+        android.content.Context context=getTargetContext();android.content.ContentResolver resolver=context.getContentResolver();File dir=new File(context.getCacheDir(),"선택창표본-"+UUID.randomUUID());dir.mkdirs();
+        try{
+            for(Object[] sample:new Object[][]{{"합성 통화 30초.m4a",30},{"합성 통화 25분.m4a",1500}}){
+                String name=(String)sample[0];File file=syntheticAac(dir,name,(Integer)sample[1]);
+                android.content.ContentValues values=new android.content.ContentValues();
+                values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,name);values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"audio/mp4");values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,android.os.Environment.DIRECTORY_DOWNLOADS+"/VoiceNote합성");
+                Uri uri=resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);expect(uri!=null,name+" 파일을 다운로드 폴더에 만든다");
+                try(OutputStream out=resolver.openOutputStream(uri);InputStream in=new FileInputStream(file)){byte[] buffer=new byte[65536];for(int read;(read=in.read(buffer))>0;)out.write(buffer,0,read);}
+            }
+        }finally{deleteTree(dir);}
+    }
     void dispatchFCopyChecks()throws Exception{
         JSONArray failures=new JSONArray();String[] kinds={"transcript","summaryMd","summaryTxt","transcript","audio"},messages={"폴더 없음.","권한 없음.","폴더 없음","폴더 없음.","권한 없음"};
         for(int i=0;i<kinds.length;i++)failures.put(new JSONObject().put("kind",kinds[i]).put("message",messages[i]));
@@ -973,6 +986,8 @@ public final class AndroidChecks extends Instrumentation {
         // 기기 시험 중에는 업데이트 확인이 실제 깃허브나 아래 AI 모의 응답에 닿지 않게 한다.
         Updates.opener=url->{throw new IOException("기기 시험 중에는 업데이트를 확인하지 않습니다.");};
         if(probe.equals("u-e2e")){updateEndToEnd();return;}
+        if(probe.equals("samples")){sampleFiles();result.putString("stream","PASS "+checks+" sample files\n");finish(-1,result);return;}
+        // 문서 선택 창 확인용 합성 파일만 만들고 끝낸다. 시험 결과를 바꾸지 않는다.
         if(probe.equals("import")){importChecks(new Store(testContext()));result.putString("stream","PASS "+checks+" import checks\n");finish(-1,result);return;}
         if(!probe.isEmpty()&&!probe.startsWith("f-")&&!probe.startsWith("g-")){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
         for(String name:new String[]{"first","open","review","draft","finish","n1new","n1old","n1meta"})regressionCheck(name);
