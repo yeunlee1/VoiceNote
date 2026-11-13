@@ -11,12 +11,12 @@ function fixture(summaryResponse, responses = {}) {
     addEventListener() {}, setAttribute() {}, removeAttribute() {}, querySelectorAll() { return []; }, querySelector() { return null; },
     focus() {}, show() { this.open = true; }, showModal() { this.open = true; }, close() { this.open = false; } });
   const nodes = new Map(), calls = [], summaryBodies = [], posts = [], requests = [];
-  const sandbox = { crypto, Blob, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: { MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') },
+  const sandbox = { crypto, Blob, File, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: { MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
     document: { getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element },
     async fetch(url, options = {}) {
       calls.push(url);
-      requests.push({ url, headers: options.headers || {} });
+      requests.push({ url, headers: options.headers || {}, body: options.body });
       if (options.method === 'POST' && typeof options.body === 'string') posts.push({ url, body: JSON.parse(options.body) });
       if (url === '/api/summary') {
         summaryBodies.push(JSON.parse(options.body));
@@ -31,7 +31,7 @@ function fixture(summaryResponse, responses = {}) {
       return Response.json(body);
     } };
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
-  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, loadHistory, openMeeting };\n})();');
+  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, loadHistory, openMeeting, importAudio, finishMeeting };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const { state, ui } = sandbox.review;
@@ -114,6 +114,73 @@ test('회의명 없이 녹음·분석하면 AI 제목으로 저장한다', async
   const saved = posts.find(post => post.url === '/api/meetings/main');
   assert.equal(saved.body.title, 'AI가 정한 제목');
   assert.equal(ui.title.value, 'AI가 정한 제목');
+});
+
+const mp4Head = () => Uint8Array.from([0, 0, 0, 24, ...Buffer.from('ftypM4A '), 0, 0, 0, 0, ...Buffer.from('M4A isom')]);
+const webmHead = () => Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81]);
+const wavHead = () => Uint8Array.from([...Buffer.from('RIFF'), 4, 0, 0, 0, ...Buffer.from('WAVE')]);
+const picked = (...files) => ({ target: { files: files.map(file => file instanceof File ? file : new File([file[2]], file[0], { type: file[1] })), value: 'C:\\fakepath\\선택' } });
+// 크롬 계열(WebView2)은 파일 형식 이름을 확장자로 정한다. .m4a는 audio/x-m4a, .mp4는 video/mp4, .webm은 video/webm이다(2026-11-12 이고라이트 실측).
+class SlowFile extends File {
+  slice(...args) { const part = super.slice(...args); return { arrayBuffer: () => new Promise(resolve => setTimeout(() => resolve(part.arrayBuffer()), 30)) }; }
+  arrayBuffer() { return new Promise(resolve => setTimeout(() => resolve(super.arrayBuffer()), 30)); }
+}
+// 앞부분을 늦게 읽는 파일이다. 형식을 확인하는 사이에 다른 일이 끼어드는 경우를 만든다.
+
+test('불러온 음성 파일은 브라우저가 붙인 형식 이름과 달라도 내용대로 서버가 받는 형식으로 저장하고 전사한다', async () => {
+  for (const [name, browserType, head, want] of [
+    ['통화 녹음.m4a', 'audio/x-m4a', mp4Head(), 'audio/mp4'],
+    ['화면 녹화.mp4', 'video/mp4', mp4Head(), 'audio/mp4'],
+    ['원음-file001.webm', 'video/webm', webmHead(), 'audio/webm'],
+    ['녹음.wav', 'audio/wav', wavHead(), 'audio/wav'],
+    ['확장자 없는 녹음', '', mp4Head(), 'audio/mp4'],
+    ['이름만 wav.wav', 'audio/wav', mp4Head(), 'audio/mp4'],
+  ]) {
+    const { state, importAudio, finishMeeting, requests } = fixture();
+    state.keyConfigured = true;
+    await importAudio(picked([name, browserType, head]));
+    await finishMeeting();
+    const saved = requests.find(request => /^\/api\/recordings\/main\/[0-9a-f-]{36}\/audio\/1$/.test(request.url));
+    assert.equal(saved?.headers['Content-Type'], want, `${name} 저장`);
+    assert.deepEqual([...new Uint8Array(await saved.body.arrayBuffer())], [...head], `${name} 저장 바이트`);
+    const transcribed = requests.find(request => request.url === '/api/transcribe');
+    assert.equal(transcribed?.headers['Content-Type'], want, `${name} 전사`);
+  }
+});
+
+test('고른 파일 중 하나라도 불러올 수 없으면 하나도 바꾸지 않고 앞서 불러온 원음과 전사를 지키며 그 파일 이름을 알린다', async () => {
+  const wrongLengthWav = wavHead(); new DataView(wrongLengthWav.buffer).setUint32(4, 100, true);
+  for (const [badName, badBytes] of [
+    ['빈 파일.m4a', new Uint8Array(0)],
+    ['짧은 파일.m4a', mp4Head().slice(0, 8)],
+    ['메모.m4a', new TextEncoder().encode('음성이 아닌 메모입니다')],
+    ['길이가 틀린 녹음.wav', wrongLengthWav],
+  ]) {
+    const { state, ui, importAudio } = fixture();
+    await importAudio(picked(['통화 녹음.m4a', 'audio/x-m4a', mp4Head()]));
+    ui.transcript.value = '앞서 받은 전사';
+    await importAudio(picked(['회의 앞부분.m4a', 'audio/x-m4a', mp4Head()], [badName, 'audio/x-m4a', badBytes]));
+    assert.deepEqual(Array.from(state.parts, part => part.blob.name), ['통화 녹음.m4a'], badName);
+    assert.equal(ui.transcript.value, '앞서 받은 전사', badName);
+    assert.ok(ui.status.textContent.includes(badName), `${badName}: ${ui.status.textContent}`);
+  }
+});
+
+test('형식을 확인하는 동안 다른 파일을 고르면 늦게 끝난 앞선 확인으로 덮어쓰지 않는다', async () => {
+  const { state, importAudio } = fixture();
+  const first = importAudio(picked(new SlowFile([mp4Head()], '먼저 고른 통화.m4a', { type: 'audio/x-m4a' })));
+  await importAudio(picked(['나중에 고른 통화.m4a', 'audio/x-m4a', mp4Head()]));
+  await first;
+  assert.deepEqual(Array.from(state.parts, part => part.blob.name), ['나중에 고른 통화.m4a']);
+});
+
+test('형식을 확인하는 동안 분석이 시작되면 불러오지 않고 지금 원음을 지킨다', async () => {
+  const { state, importAudio } = fixture();
+  await importAudio(picked(['통화 녹음.m4a', 'audio/x-m4a', mp4Head()]));
+  const pending = importAudio(picked(new SlowFile([mp4Head()], '새 통화.m4a', { type: 'audio/x-m4a' })));
+  state.aiController = new AbortController();
+  await pending;
+  assert.deepEqual(Array.from(state.parts, part => part.blob.name), ['통화 녹음.m4a']);
 });
 
 const successfulSummary = body => Response.json({ minutes: { overview: '전체 방향 | 기준을 정합니다.\n주요 결정 | 표준화합니다.\n다음 할 일 | 항목을 검토합니다.\n남은 쟁점 | 담당자 미정입니다.', topics: [], decisions: [...(body.previousMinutes?.decisions || []), body.text], actions: [], openQuestions: [] } });

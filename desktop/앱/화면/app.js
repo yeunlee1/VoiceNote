@@ -993,13 +993,26 @@
     announce("원음 다운로드를 시작했습니다. 파일이 실제로 저장됐는지 확인하세요.");
   }
 
+  async function audioType(file) {
+    // 브라우저가 붙이는 형식 이름은 확장자로 정해져 서버가 받는 이름과 다를 수 있다(크롬 계열은 .m4a를 audio/x-m4a로 붙인다).
+    // 서버의 전사 판정(서버.cjs transcribeMeeting)과 같은 앞부분 조건으로 형식을 정하고, 맞는 형식이 없으면 빈 글자를 돌려준다.
+    const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+    const ascii = (start, end) => String.fromCharCode(...head.slice(start, end));
+    if (head.length >= 12 && ascii(4, 8) === "ftyp") return "audio/mp4";
+    if (head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) return "audio/webm";
+    if (head.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WAVE" && new DataView(head.buffer).getUint32(4, true) + 8 === file.size) return "audio/wav";
+    return "";
+  }
+
+  let importTicket = 0;
   async function importAudio(event) {
     const files = Array.from(event.target.files || []).sort((a, b) =>
       a.name.localeCompare(b.name, "ko", { numeric: true }),
     );
     event.target.value = "";
     if (!files.length) return;
-    if (state.recorders.size || state.permissionPending || state.aiController) {
+    const busy = () => state.recorders.size || state.permissionPending || state.aiController;
+    if (busy()) {
       announce("진행 중인 작업을 마친 뒤 파일을 불러오세요.");
       return;
     }
@@ -1007,15 +1020,33 @@
       announce("각 오디오 파일은 22MB 이하여야 합니다.");
       return;
     }
+    const ticket = ++importTicket;
+    let types;
+    try {
+      types = await Promise.all(files.map(audioType));
+    } catch {
+      if (ticket === importTicket) announce("고른 파일을 읽지 못했습니다. 파일을 다시 골라 주세요.");
+      return;
+    }
+    if (ticket !== importTicket) return;
+    // 확인하는 사이에 다른 파일을 골랐으면 늦게 끝난 이 확인은 버린다.
+    if (busy()) {
+      announce("진행 중인 작업을 마친 뒤 파일을 불러오세요.");
+      return;
+    }
+    // 확인하는 사이에 녹음·분석이 시작됐으면 지금 원음을 지킨다.
+    const unknown = files.find((file, index) => !types[index]);
+    if (unknown) {
+      announce(`‘${unknown.name}’ 파일은 불러올 수 없습니다. m4a·mp4·webm·wav 음성 파일만 불러올 수 있습니다.`);
+      return;
+    }
+    // 고른 파일을 모두 확인한 뒤에만 지금 원음과 전사를 바꾼다. 하나라도 맞지 않으면 아무것도 바꾸지 않는다.
     if (!confirmReplacement()) return;
     clearParts();
-    state.parts = files.map((file) => ({
-      blob: file,
-      url: URL.createObjectURL(file),
-      saved: true,
-      transcript: "",
-      applied: false,
-    }));
+    state.parts = files.map((file, index) => {
+      const blob = new File([file], file.name, { type: types[index], lastModified: file.lastModified });
+      return { blob, url: URL.createObjectURL(blob), saved: true, transcript: "", applied: false };
+    });
     renderParts();
     resetResult();
     ui["record-state"].textContent = "파일 불러옴";
