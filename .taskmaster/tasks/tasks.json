@@ -1254,12 +1254,14 @@
             "title": "develop 합치기와 push (사용자 허락 대기)",
             "description": "작업 브랜치 work/2026-11-13-m4a불러오기(develop 1a4d674 위 커밋 14개)를 develop에 병합 커밋으로 합치고 origin/develop에 push한다. 합치기와 push 모두 사용자의 명시적 허락이 있어야 한다. push 직전에 origin/develop을 받아 합치고 깨끗한 복제본 시험을 다시 돌린다.",
             "details": "",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
-            "parentTaskId": 35
+            "parentTaskId": 35,
+            "updatedAt": "2026-11-13T08:26:07.942Z",
+            "parentId": "undefined"
           }
         ],
-        "updatedAt": "2026-11-13T08:10:39.360Z"
+        "updatedAt": "2026-11-13T08:26:07.942Z"
       },
       {
         "id": 36,
@@ -1280,19 +1282,29 @@
             "dependencies": [],
             "parentTaskId": 36,
             "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "사용자가 직접 수정하기로 함 (2026-11-14 집에서)",
+            "description": "사용자 원문 \"아니야 개조식은 그냥 내일 내가 집에서 수정할게\"(2026-11-13). 춘식은 조사만 하다 멈췄고 파일은 고치지 않았다. 짝도 만들지 않았다.",
+            "details": "멈추기 전에 찾은 수정 위치(2026-11-13 develop 75f4e59 기준). (1) AI 지시: desktop/앱/서버.cjs 약 20002~20080행의 형식별 지시. 핵심 요약은 overview를 '3~6문장의 이어지는 문단', points를 '1~3개의 짧은 문단'으로, 회의록은 points를 '서로 연결되는 2~4문장의 문단'(글머리표를 쓰지 말라는 문장 포함), decisions를 '대상 — 합의한 행동. 그 이유나 적용 범위.' 문장으로, 업무 정리는 task를 '한 문장', overview를 '2~4문장'으로 쓰라고 한다. 결과 줄이기 지시 COMPACT_INSTRUCTION은 약 19968행. (2) 휴대폰은 빌드(빌드.ps1)가 서버.cjs를 띄워 summary-<형식>.json을 만들어 넣으므로 서버.cjs를 고치고 다시 빌드하면 따라간다. 내 형식 지시는 desktop/앱/출력형식.js customInstruction과 휴대폰 CustomFormat.java가 같은 문장을 만들어 두 곳을 함께 고쳐야 한다. (3) 예시 화면의 SAMPLE(출력형식.js, 휴대폰 assets/formats.js와 같은 파일)도 문장형이다. (4) points는 화면과 저장 파일(customText 등)에서 문단으로 나온다. 개조식이면 글머리표로 보일지 함께 정한다. (5) 이미 만든 회의 결과를 그대로 둘지, 요약 계약 시험(요약규칙일치·AI요청계약 등)도 함께 바꿀지 정한다.",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 36
           }
-        ]
+        ],
+        "updatedAt": "2026-11-13T08:27:10.144Z"
       }
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-13T08:10:39.360Z",
+      "lastModified": "2026-11-13T08:27:10.145Z",
       "taskCount": 36,
       "completedCount": 18,
       "tags": [
         "master"
       ],
-      "created": "2026-11-13T08:10:41.602Z",
+      "created": "2026-11-13T08:27:17.844Z",
       "description": "Tasks for master context"
     }
   }
