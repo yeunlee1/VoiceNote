@@ -11,7 +11,7 @@ module.exports = '(' + function () {
     // ok는 서비스가 담기를 시작한 상태, failFast는 회의를 만들기 전에 곧바로 실패해 첫 상태 조회부터 끝나 있는 상태다.
     if (m.importMode === 'failFast') { m.active = false; m.meeting = { state: 'failed', message: '휴대폰 저장 공간이 부족해 파일을 불러오지 못했습니다.' }; }
     else { m.active = true; m.meeting = { state: 'analyzing', message: '녹음 파일을 준비하는 중', createdAt: Date.now() }; }
-    m.draft = {};
     reply({ id: null, started: true }, null);
+    // 네이티브는 회의를 만든 뒤에야 초안을 지우므로 시작 응답에서는 초안을 그대로 둔다.
   };
 } + ')();';

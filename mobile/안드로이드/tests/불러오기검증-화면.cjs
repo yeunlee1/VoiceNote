@@ -33,13 +33,18 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
   check('불러오기 요청에 회의명·날짜·참석자·상세 내용·출력 형식을 싣는다', data.title === '거래처 통화' && /^\d{4}-\d{2}-\d{2}$/.test(data.date || '') && data.participants === '김민수, 박서연' && data.notes === '계약 조건 재확인' && data.outputFormat === 'meeting', js(data));
   const preparing = await workflow('녹음 파일을 준비하는 중');
   s = await buttons();
-  check('시작되면 칸을 비우고 진행 문구를 보여 주며 불러오기 단추를 감춘다', preparing && await fields() === js(['', '', '']) && !s.shown, js({ fields: await fields(), s }));
+  check('시작되면 진행 문구를 보여 주고 불러오기 단추를 감추며, 회의가 만들어지기 전에는 칸 값과 초안을 지우지 않는다', preparing && await fields() === FILLED && !s.shown && await evaluate("__mock.draft.title==='거래처 통화'"), js({ fields: await fields(), s, draft: await evaluate('__mock.draft') }));
   await shot('모바일-390-녹음파일불러오기-준비중.png');
   await evaluate("__mock.active=false;__mock.meeting={state:'failed',message:'파일을 읽지 못했습니다. 다시 골라 주세요.'};true");
-  check('담는 중에 실패하면 서비스 상태의 안내를 보여 준다', await workflow('파일을 읽지 못했습니다'));
+  check('회의를 만들기 전에 담기가 실패하면 그 안내를 보여 주고 작성한 칸 값을 그대로 돌려준다', await workflow('파일을 읽지 못했습니다') && await until(`${js(FILLED)}===JSON.stringify(['title','participants','notes'].map(id=>document.getElementById(id).value))&&!document.getElementById('import-wrap').hidden`), await fields());
 
-  await load(); await key(); await mode('failFast'); await press();
-  check('회의를 만들기 전에 곧바로 실패해도 첫 상태 조회에서 그 안내를 보여 준다', await workflow('저장 공간이 부족'), await evaluate("document.getElementById('workflow').textContent"));
+  await mode('ok'); await press(); await workflow('녹음 파일을 준비하는 중');
+  await evaluate("__mock.meeting={id:'55555555-5555-4555-8555-555555555555',location:'main',state:'analyzing',message:'음성 저장 완료 · 분석을 시작합니다.',createdAt:Date.now()};__mock.draft={};true");
+  check('회의가 만들어지면 그때 칸을 비운다', await until("['title','participants','notes'].every(id=>document.getElementById(id).value==='')"), await fields());
+  // 서비스가 조각을 다 담아 회의를 만들고(상태에 id가 생김) 네이티브가 초안을 지운 순간을 흉내 낸다.
+
+  await load(); await key(); await fill(); await mode('failFast'); await press();
+  check('회의를 만들기 전에 곧바로 실패해도 첫 상태 조회에서 그 안내를 보여 주고 칸 값을 지우지 않는다', await workflow('저장 공간이 부족') && await fields() === FILLED, await evaluate("JSON.stringify([document.getElementById('workflow').textContent,['title','participants','notes'].map(id=>document.getElementById(id).value)])"));
 
   for (const width of [360, 390]) {
     await viewport(width); await load(); await key();

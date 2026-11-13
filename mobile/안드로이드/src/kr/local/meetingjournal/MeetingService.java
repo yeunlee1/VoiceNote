@@ -82,6 +82,8 @@ public final class MeetingService extends Service {
             List<File> parts=AudioImport.store(this,uri,AudioImport.inspect(this,uri),temp);
             if(parts.size()>1){String message="녹음 파일을 "+parts.size()+"개로 나눴습니다";snapshot=new JSONObject(snapshot).put("message",message).toString();show(message,false);}
             record=store.createImported(fields,parts);
+            try{store.clearDraft();}catch(Exception ignored){}
+            // 회의를 실제로 만든 뒤에야 작성 중 초안을 지운다. 그 전에 실패하면 사용자가 적은 칸 값이 초안에 남는다. 초안을 못 지워도 회의는 그대로 분석한다.
             analyze();
         }catch(Exception ex){fail(ex);}
         finally{AudioImport.cleanTemp(this);}

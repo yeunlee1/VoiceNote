@@ -244,6 +244,7 @@ public final class AndroidChecks extends Instrumentation {
             expectImportError(context,memo,AudioImport.unsupported(null),"ftyp가 없는 파일은 받지 않는다");
             importVideoTrackCheck(context,dir);
             importStoreChecks(store);
+            importStageCheck(store);
             importTempCleanupCheck(store);
         }finally{deleteTree(dir);}
     }
@@ -267,6 +268,16 @@ public final class AndroidChecks extends Instrumentation {
             try{store.createImported(new JSONObject().put("date","2099-06-02").put("title","옮기기 실패"),Arrays.asList(syntheticAac(source,"ok.m4a",1),new File(source,"없는 조각.m4a")));throw new AssertionError("없는 조각으로 회의를 만들었습니다.");}
             catch(IOException ex){expect(meetingDirs(store)==before+1,"조각을 옮기다 실패하면 만든 회의 폴더를 지운다");}
         }finally{deleteTree(source);}
+    }
+    static void importStageCheck(Store store)throws Exception{
+        // 조각과 회의정보를 다 담아도 공개(폴더 이름 바꾸기) 전에는 목록에 보이지 않고, 그 상태에서 앱이 끝나 임시 폴더를 지우면 회의가 남지 않는다.
+        android.content.Context context=store.context;File source=new File(AudioImport.tempRoot(context),"단계시험-"+UUID.randomUUID());source.mkdirs();
+        int before=meetingDirs(store),listed=store.history().getJSONArray("meetings").length();File staging=new File(source,"회의");
+        JSONObject staged=store.stageImported(new JSONObject().put("date","2099-06-03").put("title","공개 전 종료"),Arrays.asList(syntheticAac(source,"a.m4a",1),syntheticAac(source,"b.m4a",1)),staging);
+        expect(new File(staging,"회의정보.json").isFile()&&new File(staging,"원음-002.m4a").isFile()&&staged.getJSONArray("audio").length()==2,"공개 전 준비 폴더에 조각과 회의정보를 다 담는다");
+        expect(meetingDirs(store)==before&&store.history().getJSONArray("meetings").length()==listed,"공개 전에는 회의 목록에 보이지 않는다");
+        AudioImport.cleanTemp(context);
+        expect(!source.exists()&&meetingDirs(store)==before&&store.history().getJSONArray("meetings").length()==listed,"공개 전에 앱이 끝나 임시 폴더를 지우면 회의가 남지 않는다");
     }
     static int meetingDirs(Store store){File[] dirs=store.locationDirectory("main").listFiles(File::isDirectory);return dirs==null?0:dirs.length;}
     static void importTempCleanupCheck(Store store)throws Exception{

@@ -134,34 +134,50 @@ final class Store {
         // 출력 형식을 비워 보내면 설정의 기본 형식을 쓰므로 여기서는 보내온 값만 본다.
     }
     JSONObject create(JSONObject input)throws Exception {
-        synchronized(Store.class){
-            checkNew(input);
-            String date=input.optString("date"),format=input.optString("outputFormat",defaultOutputFormat());
-            JSONObject custom=null;
-            if("custom".equals(format)){
-                if(input.has("customFormat"))custom=new JSONObject(CustomFormat.parse(String.valueOf(input.opt("customFormat"))).json());
-                else{custom=customFormat();if(custom==null)format="meeting";}
-            }
-            int sequence=1;File[] dirs=locationDirectory("main").listFiles(File::isDirectory);
-            if(dirs!=null)for(File dir:dirs){try{JSONObject item=load("main",dir.getName());if(date.equals(item.optString("date")))sequence=Math.max(sequence,item.optInt("dailySequence")+1);}catch(Exception ignored){}}
-            JSONObject record=new JSONObject().put("id",UUID.randomUUID().toString()).put("location","main").put("date",date).put("dailySequence",sequence)
-                .put("title",input.optString("title","")).put("outputFormat",format).put("participants",input.optString("participants")).put("notes",notes(input))
-                .put("createdAt",System.currentTimeMillis()).put("state","recording").put("audio",new JSONArray());
-            if(custom!=null)record.put("customFormat",custom);save(record);return record;
+        synchronized(Store.class){JSONObject record=newRecord(input);save(record);return record;}
+    }
+    private JSONObject newRecord(JSONObject input)throws Exception {
+        // 새 회의 기록을 만들기만 하고 저장하지 않는다. 날짜별 차수는 이미 목록에 있는 회의로 센다.
+        checkNew(input);
+        String date=input.optString("date"),format=input.optString("outputFormat",defaultOutputFormat());
+        JSONObject custom=null;
+        if("custom".equals(format)){
+            if(input.has("customFormat"))custom=new JSONObject(CustomFormat.parse(String.valueOf(input.opt("customFormat"))).json());
+            else{custom=customFormat();if(custom==null)format="meeting";}
         }
+        int sequence=1;File[] dirs=locationDirectory("main").listFiles(File::isDirectory);
+        if(dirs!=null)for(File dir:dirs){try{JSONObject item=load("main",dir.getName());if(date.equals(item.optString("date")))sequence=Math.max(sequence,item.optInt("dailySequence")+1);}catch(Exception ignored){}}
+        JSONObject record=new JSONObject().put("id",UUID.randomUUID().toString()).put("location","main").put("date",date).put("dailySequence",sequence)
+            .put("title",input.optString("title","")).put("outputFormat",format).put("participants",input.optString("participants")).put("notes",notes(input))
+            .put("createdAt",System.currentTimeMillis()).put("state","recording").put("audio",new JSONArray());
+        if(custom!=null)record.put("customFormat",custom);return record;
     }
     JSONObject createImported(JSONObject input,List<File> parts)throws Exception {
-        // 다 담아 둔 녹음 조각으로 새 회의를 만든다. 조각을 회의 폴더의 원음-001.m4a부터 옮기고, 옮기다 실패하면 만든 회의 폴더를 지운다.
-        JSONObject record=create(input);File dir=directory("main",record.getString("id"));
-        try{
-            JSONArray audio=record.getJSONArray("audio");
-            for(int i=0;i<parts.size();i++){
-                String name=String.format(Locale.ROOT,"원음-%03d.m4a",i+1);File part=parts.get(i),target=new File(dir,name);
-                if(!part.renameTo(target)){copyBytes(part,target);part.delete();}
-                audio.put(name);
-            }
-            record.put("state","saved").put("message","녹음 파일을 불러왔습니다.");save(record);return record;
-        }catch(Exception ex){removeTree(dir);throw ex;}
+        // 녹음 조각과 회의정보를 목록 밖 준비 폴더에 다 담은 뒤 폴더 이름을 바꿔 한 번에 목록에 올린다. 중간에 실패하거나 앱이 끝나도 원음 없는 회의가 목록에 생기지 않는다.
+        if(parts.isEmpty())throw new IOException("불러온 녹음 조각이 없습니다.");
+        File staging=new File(parts.get(0).getParentFile(),"회의-"+UUID.randomUUID());
+        synchronized(Store.class){
+            try{return publishImported(stageImported(input,parts,staging),staging);}
+            catch(Exception ex){removeTree(staging);throw ex;}
+        }
+    }
+    JSONObject stageImported(JSONObject input,List<File> parts,File staging)throws Exception {
+        // 준비 폴더에 조각을 원음-001.m4a부터 옮기고 마지막에 회의정보를 쓴다. 목록은 보관함 폴더만 읽으므로 여기 담긴 것은 아직 보이지 않는다.
+        JSONObject record=newRecord(input);
+        if(!staging.mkdirs()&&!staging.isDirectory())throw new IOException("녹음 파일을 담을 폴더를 만들지 못했습니다.");
+        JSONArray audio=record.getJSONArray("audio");
+        for(int i=0;i<parts.size();i++){
+            String name=String.format(Locale.ROOT,"원음-%03d.m4a",i+1);File part=parts.get(i),target=new File(staging,name);
+            if(!part.renameTo(target)){copyBytes(part,target);part.delete();}
+            audio.put(name);
+        }
+        record.put("state","saved").put("message","녹음 파일을 불러왔습니다.");write(new File(staging,"회의정보.json"),record.toString(2));return record;
+    }
+    JSONObject publishImported(JSONObject record,File staging)throws Exception {
+        File target=directory("main",record.getString("id"));target.getParentFile().mkdirs();
+        if(target.exists()||!staging.renameTo(target))throw new IOException("불러온 녹음으로 회의를 만들지 못했습니다.");
+        return record;
+        // 같은 저장 공간 안의 폴더 이름 바꾸기라 회의 폴더가 한꺼번에 나타난다.
     }
     private static void copyBytes(File from,File to)throws IOException {
         try(InputStream in=new FileInputStream(from);OutputStream out=new FileOutputStream(to)){byte[] b=new byte[65536];for(int n;(n=in.read(b))!=-1;)out.write(b,0,n);}

@@ -268,7 +268,6 @@ public final class MainActivity extends Activity {
             AudioImport.inspect(this,uri);
             if(MeetingService.active||MeetingService.starting())throw new IOException("이미 진행 중인 회의가 있습니다.");
             if(Updates.installing())throw new IOException(UPDATE_WAIT);
-            store.clearDraft();
             MeetingService.startingAt=System.currentTimeMillis();
             Intent request=new Intent(this,MeetingService.class).setAction("import").setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra("input",input.toString());
             runOnUiThread(()->{try{startForegroundService(request);answer(id,new JSONObject().put("id",JSONObject.NULL).put("started",true),null);}catch(Exception ex){MeetingService.startingAt=0;answer(id,null,"녹음 파일 불러오기를 시작하지 못했습니다. 다시 시도하세요.");}});

@@ -682,6 +682,9 @@
       const status = await call('status'), meeting = status.meeting;
       if (state.busy && !force) return;
       state.active = status.active; state.recording = status.active && meeting.state === 'recording';
+      if (state.importing && meeting.id) { state.importing = false; clearNewMeeting(); }
+      else if (state.importing && !status.active) state.importing = false;
+      // 녹음 파일 불러오기는 상태에 회의 id가 생기면 회의가 만들어진 것이다. 그 전에 끝났으면 실패한 것이라 칸 값을 지우지 않는다.
       // 받는 동안 녹음·분석이 시작되면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 다시 눌러야 설치한다.
       if (state.active || state.refining) state.updateIntent = false;
       document.body.classList.toggle('recording', state.recording);
@@ -744,20 +747,22 @@
   $('start').onclick = () => task(async () => {
     await flushDraft();
     await call('start', { date: $('date').value, title: $('title').value.trim(), participants: $('participants').value, notes: $('notes').value, ...formatFields() });
+    clearNewMeeting(); setPrep(false); await poll(true);
+  });
+  function clearNewMeeting() {
     clearTimeout(draftTimer); draftTimer = 0;
     for (const id of ['title', 'participants', 'notes']) $(id).value = '';
-    state.formatChosen = false; $('output-format').value = newMeetingFormat(); setPrep(false); await poll(true);
-  });
+    state.formatChosen = false; $('output-format').value = newMeetingFormat();
+  }
+  // 회의가 만들어진 뒤 새 회의 칸을 비운다. 회의 시작은 요청이 끝나면 곧바로, 녹음 파일 불러오기는 서비스가 회의를 만든 것을 상태 조회로 본 뒤에 부른다.
   $('import-audio').onclick = () => task(async () => {
     await flushDraft();
     const started = await call('importAudio', { date: $('date').value, title: $('title').value.trim(), participants: $('participants').value, notes: $('notes').value, ...formatFields() });
     if (!started || started.cancelled) return;
-    clearTimeout(draftTimer); draftTimer = 0;
-    for (const id of ['title', 'participants', 'notes']) $(id).value = '';
-    state.formatChosen = false; $('output-format').value = newMeetingFormat(); setPrep(false);
+    state.importing = true; setPrep(false);
     state.lastState = 'active'; await poll(true);
   });
-  // 파일 선택 창이 열린 동안에는 task가 화면을 잠근다. 서비스가 회의를 만들기 전에 곧바로 실패해도 첫 상태 조회가 그 안내를 보여 주게 진행 중이었던 것으로 둔다.
+  // 파일 선택 창이 열린 동안에는 task가 화면을 잠근다. 칸 값은 회의가 실제로 만들어진 뒤에 비우므로 그 전에 실패하면 적은 값이 그대로 남는다. 서비스가 곧바로 실패해도 첫 상태 조회가 그 안내를 보여 주게 진행 중이었던 것으로 둔다.
   $('finish').onclick = () => task(async () => { await call('finish'); $('workflow').textContent = '녹음을 저장하고 분석합니다.'; });
   $('retry').onclick = () => { if (!todoHolding()) task(async () => {
     if (!Flow.canAnalyze(state.connection)) { openSettings(null, 'ai'); throw new Error(state.connection.accessMode === 'exhausted' ? Flow.EXHAUSTED_MESSAGE : '설정의 AI 연결에서 API 키를 먼저 등록하세요.'); }
