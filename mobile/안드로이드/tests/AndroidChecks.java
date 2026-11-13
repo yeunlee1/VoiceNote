@@ -715,6 +715,28 @@ public final class AndroidChecks extends Instrumentation {
             }
         }finally{code=200;Store.sessionKey=previousKey;MeetingService.snapshot=previousSnapshot;}
     }
+    void serviceImportChecks()throws Exception{
+        // 실제 녹음 서비스로 합성 녹음 파일을 불러와 분석까지 끝내고, 성공·실패로 끝난 상태에도 이번 시도 번호가 남는지 본다. 화면은 이 번호로 이번 불러오기의 끝을 알아본다.
+        android.content.Context context=getTargetContext();Store store=new Store(context);String previousKey=Store.sessionKey,previousSnapshot=MeetingService.snapshot;
+        File source=new File(context.getCacheDir(),"서비스불러오기-"+UUID.randomUUID());source.mkdirs();
+        try{
+            Store.sessionKey="sk-test-00000000000000000000";MeetingService.startingAt=System.currentTimeMillis();
+            startActivitySync(new android.content.Intent(context,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            // 화면이 열리며 남은 임시 폴더를 지우는 일이 이번 불러오기와 겹치지 않게 시작 중 표시를 먼저 켠다. 서비스가 요청을 받으면 지운다.
+            for(String outcome:new String[]{"complete","failed"}){
+                final String attempt="합성불러오기-"+outcome;
+                if(outcome.equals("complete")){replies.add("{\"text\":\"합성 전사\"}");replies.add(completed());}else{code=500;replies.add("{}");}
+                JSONObject input=new JSONObject().put("date","2099-06-04").put("title","합성 불러오기 "+outcome).put("participants","김민수").put("notes","").put("outputFormat","meeting").put("attemptId",attempt);
+                final android.content.Intent request=new android.content.Intent(context,MeetingService.class).setAction("import").setData(Uri.fromFile(syntheticAac(source,outcome+".m4a",2))).putExtra("input",input.toString()).putExtra("attemptId",attempt);
+                MeetingService.startingAt=System.currentTimeMillis();runOnMainSync(()->context.startForegroundService(request));
+                long deadline=System.currentTimeMillis()+15000;JSONObject event;
+                do{Thread.sleep(20);event=new JSONObject(MeetingService.snapshot);}while(System.currentTimeMillis()<deadline&&(MeetingService.active||!outcome.equals(event.optString("state"))));
+                expect(!MeetingService.active&&outcome.equals(event.optString("state"))&&!event.optString("id").isEmpty()&&attempt.equals(event.optString("attemptId")),"불러온 회의의 분석이 "+(outcome.equals("complete")?"성공":"실패")+"으로 끝난 상태에도 이번 시도 번호가 남는다");
+                expect(!store.load("main",event.getString("id")).has("attemptId"),"시도 번호는 회의 기록에 저장하지 않는다");
+                code=200;waitForIdleSync();Thread.sleep(100);
+            }
+        }finally{code=200;replies.clear();Store.sessionKey=previousKey;MeetingService.snapshot=previousSnapshot;MeetingService.startingAt=0;deleteTree(source);}
+    }
     void dispatchFCopyChecks()throws Exception{
         JSONArray failures=new JSONArray();String[] kinds={"transcript","summaryMd","summaryTxt","transcript","audio"},messages={"폴더 없음.","권한 없음.","폴더 없음","폴더 없음.","권한 없음"};
         for(int i=0;i<kinds.length;i++)failures.put(new JSONObject().put("kind",kinds[i]).put("message",messages[i]));
@@ -971,7 +993,7 @@ public final class AndroidChecks extends Instrumentation {
             public InputStream getInputStream()throws IOException{requests.add(new String(sent.toByteArray(),StandardCharsets.UTF_8));routes.add(url.getPath());auths.add(lastAuth);String next=replies.poll();if(next==null)throw new IOException("Unexpected network request");return new ByteArrayInputStream(next.getBytes(StandardCharsets.UTF_8));}
             public InputStream getErrorStream(){try{return getInputStream();}catch(IOException ex){throw new RuntimeException(ex);}}
         };}}:null);
-        if(probe.startsWith("f-")){if(probe.equals("f-attempt"))serviceAttemptChecks();else dispatchFCopyChecks();result.putString("stream","PASS "+checks+" Dispatch F checks: "+probe+"\n");finish(-1,result);return;}
+        if(probe.startsWith("f-")){if(probe.equals("f-attempt"))serviceAttemptChecks();else if(probe.equals("f-import"))serviceImportChecks();else dispatchFCopyChecks();result.putString("stream","PASS "+checks+" Dispatch F checks: "+probe+"\n");finish(-1,result);return;}
         if(probe.startsWith("g-")){copyInspectionChecks(new Store(testContext()),probe.equals("g-file"));result.putString("stream","PASS "+checks+" Dispatch G checks\n");finish(-1,result);return;}
         Store store=new Store(testContext());
         String previousModel=store.summaryModel();store.summaryModel(null);
@@ -1035,7 +1057,7 @@ public final class AndroidChecks extends Instrumentation {
         missingFolderCheck(new Store(testContext()));
         copyRecoveryCheck(new Store(testContext()));
         serviceRefineFailureCheck(new Store(testContext()));
-        dispatchFCopyChecks();serviceAttemptChecks();
+        dispatchFCopyChecks();serviceAttemptChecks();serviceImportChecks();
         copyInspectionChecks(new Store(testContext()),false);
         store.summaryModel(previousModel);
         result.putString("stream","PASS "+checks+" native storage and recovery checks; real API calls=0\n");finish(-1,result);

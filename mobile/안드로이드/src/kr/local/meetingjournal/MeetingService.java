@@ -63,7 +63,7 @@ public final class MeetingService extends Service {
     }
     private void analyze() throws Exception {
         analyzing=true;show("회의록 분석 중",false);status("analyzing","음성 저장 완료 · 분석을 시작합니다.");
-        worker.submit(()->{try{new Ai(store,message->{status("analyzing",message);show(message,false);}).run(record);snapshot=record.toString();}catch(Exception ex){try{status("failed",safeMessage(ex));}catch(Exception ignored){}}finally{active=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}});
+        worker.submit(()->{try{new Ai(store,message->{status("analyzing",message);show(message,false);}).run(record);publish();}catch(Exception ex){try{status("failed",safeMessage(ex));}catch(Exception ignored){}}finally{active=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}});
     }
     static final String PREPARING="녹음 파일을 준비하는 중";
     private void startImport(Intent intent)throws Exception {
