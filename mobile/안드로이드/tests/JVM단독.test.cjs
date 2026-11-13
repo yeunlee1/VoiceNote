@@ -21,7 +21,7 @@ function run(name, sources, classpath) {
 const plain = { SettingsFileTest: ['JsonText', 'CustomFormat', 'SettingsFile'], TextChunksTest: ['TextChunks'], TrialAccessTest: ['TrialAccess'], AiUsageTest: ['AiUsage', 'AiModels'], UpdateRulesTest: ['JsonText', 'UpdateRules'] };
 for (const [name, sources] of Object.entries(plain)) test(`JVM 시험 ${name}`, () => run(name, sources.map(source)));
 // 아래 셋은 android.jar 스텁으로 컴파일하고, 실행 경로는 java.*만 쓰는 정적 메서드다.
-for (const name of ['AiResponseModelTest', 'AiFeedbackTest', 'CopyFilesTest', 'TextFileNameTest']) test(`JVM 시험 ${name}`, () => run(name, allSources(), androidJar));
+for (const name of ['AiResponseModelTest', 'AiFeedbackTest', 'CopyFilesTest', 'TextFileNameTest', 'AudioImportTest']) test(`JVM 시험 ${name}`, () => run(name, allSources(), androidJar));
 // 기기 시험은 가상기기에서만 돌지만, 지운 메서드를 부르는 것 같은 깨짐은 PC에서 컴파일만 해 봐도 알 수 있다.
 test('기기 시험 AndroidChecks가 컴파일된다', () => {
   const output = fs.mkdtempSync(path.join(os.tmpdir(), 'vn-jvm-'));
