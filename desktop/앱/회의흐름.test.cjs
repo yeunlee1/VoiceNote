@@ -5,7 +5,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-function fixture(summaryResponse, responses = {}) {
+function fixture(summaryResponse, responses = {}, extra = {}) {
   const element = () => ({ value: '', checked: true, hidden: false, disabled: false, open: false, textContent: '', dataset: {}, style: {}, children: [],
     classList: { add() {}, remove() {} }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
     addEventListener() {}, setAttribute() {}, removeAttribute() {}, querySelectorAll() { return []; }, querySelector() { return null; },
@@ -22,6 +22,7 @@ function fixture(summaryResponse, responses = {}) {
         summaryBodies.push(JSON.parse(options.body));
         if (summaryResponse) return summaryResponse(summaryBodies.at(-1), summaryBodies.length);
       }
+      if (responses[url] instanceof Response) return responses[url];
       if (typeof responses[url] === 'function') return responses[url](JSON.parse(options.body));
       let body = {};
       if (Object.hasOwn(responses, url)) body = responses[url];
@@ -30,8 +31,11 @@ function fixture(summaryResponse, responses = {}) {
       else if (url === '/api/summary') body = { minutes: { overview: '시험', topics: [], decisions: [], actions: [], openQuestions: [] } };
       return Response.json(body);
     } };
+  Object.assign(sandbox.window, extra.window);
+  Object.assign(sandbox, { ...extra, window: sandbox.window });
+  // 시험마다 필요한 브라우저 기능(예: 가짜 마이크)을 더한다. window는 이미 있는 내용에 합친다.
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
-  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, loadHistory, openMeeting, importAudio, finishMeeting };\n})();');
+  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, loadHistory, openMeeting, importAudio, finishMeeting, clearLocal, archiveResult, startRecording };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const { state, ui } = sandbox.review;
@@ -121,11 +125,16 @@ const webmHead = () => Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86
 const wavHead = () => Uint8Array.from([...Buffer.from('RIFF'), 4, 0, 0, 0, ...Buffer.from('WAVE')]);
 const picked = (...files) => ({ target: { files: files.map(file => file instanceof File ? file : new File([file[2]], file[0], { type: file[1] })), value: 'C:\\fakepath\\선택' } });
 // 크롬 계열(WebView2)은 파일 형식 이름을 확장자로 정한다. .m4a는 audio/x-m4a, .mp4는 video/mp4, .webm은 video/webm이다(2026-11-12 이고라이트 실측).
-class SlowFile extends File {
-  slice(...args) { const part = super.slice(...args); return { arrayBuffer: () => new Promise(resolve => setTimeout(() => resolve(part.arrayBuffer()), 30)) }; }
-  arrayBuffer() { return new Promise(resolve => setTimeout(() => resolve(super.arrayBuffer()), 30)); }
+function heldFile(bytes, name, type) {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  class HeldFile extends File {
+    slice(...args) { const part = super.slice(...args); return { arrayBuffer: () => gate.then(() => part.arrayBuffer()) }; }
+    arrayBuffer() { return gate.then(() => super.arrayBuffer()); }
+  }
+  return { file: new HeldFile([bytes], name, { type }), release };
 }
-// 앞부분을 늦게 읽는 파일이다. 형식을 확인하는 사이에 다른 일이 끼어드는 경우를 만든다.
+// 앞부분 읽기를 시험이 release를 부를 때까지 붙잡아 두는 파일이다. 형식을 확인하는 사이에 다른 일이 끼어드는 경우를 만든다.
 
 test('불러온 음성 파일은 브라우저가 붙인 형식 이름과 달라도 내용대로 서버가 받는 형식으로 저장하고 전사한다', async () => {
   for (const [name, browserType, head, want] of [
@@ -168,19 +177,136 @@ test('고른 파일 중 하나라도 불러올 수 없으면 하나도 바꾸지
 
 test('형식을 확인하는 동안 다른 파일을 고르면 늦게 끝난 앞선 확인으로 덮어쓰지 않는다', async () => {
   const { state, importAudio } = fixture();
-  const first = importAudio(picked(new SlowFile([mp4Head()], '먼저 고른 통화.m4a', { type: 'audio/x-m4a' })));
+  const held = heldFile(mp4Head(), '먼저 고른 통화.m4a', 'audio/x-m4a');
+  const first = importAudio(picked(held.file));
   await importAudio(picked(['나중에 고른 통화.m4a', 'audio/x-m4a', mp4Head()]));
+  held.release();
   await first;
   assert.deepEqual(Array.from(state.parts, part => part.blob.name), ['나중에 고른 통화.m4a']);
+});
+
+test('형식을 확인하는 동안 나중에 고른 파일이 크기 상한에 걸려 거절돼도 앞선 확인은 적용하지 않는다', async () => {
+  const { state, ui, importAudio } = fixture();
+  state.maxAudioBytes = 100;
+  await importAudio(picked(['통화 녹음.m4a', 'audio/x-m4a', mp4Head()]));
+  const held = heldFile(mp4Head(), '먼저 고른 통화.m4a', 'audio/x-m4a');
+  const first = importAudio(picked(held.file));
+  await importAudio(picked(['큰 통화.m4a', 'audio/x-m4a', new Uint8Array(101)]));
+  held.release();
+  await first;
+  assert.deepEqual(Array.from(state.parts, part => part.blob.name), ['통화 녹음.m4a']);
+  assert.match(ui.status.textContent, /22MB 이하/);
+});
+
+test('빈 선택은 확인 중인 불러오기를 취소하지 않는다', async () => {
+  const { state, importAudio } = fixture();
+  const held = heldFile(mp4Head(), '고른 통화.m4a', 'audio/x-m4a');
+  const pending = importAudio(picked(held.file));
+  await importAudio(picked());
+  held.release();
+  await pending;
+  assert.deepEqual(Array.from(state.parts, part => part.blob.name), ['고른 통화.m4a']);
 });
 
 test('형식을 확인하는 동안 분석이 시작되면 불러오지 않고 지금 원음을 지킨다', async () => {
   const { state, importAudio } = fixture();
   await importAudio(picked(['통화 녹음.m4a', 'audio/x-m4a', mp4Head()]));
-  const pending = importAudio(picked(new SlowFile([mp4Head()], '새 통화.m4a', { type: 'audio/x-m4a' })));
+  const held = heldFile(mp4Head(), '새 통화.m4a', 'audio/x-m4a');
+  const pending = importAudio(picked(held.file));
   state.aiController = new AbortController();
+  held.release();
   await pending;
   assert.deepEqual(Array.from(state.parts, part => part.blob.name), ['통화 녹음.m4a']);
+});
+
+test('형식을 확인하는 동안 원음 저장을 시작해 마쳐도 늦게 끝난 확인으로 저장한 원음을 바꾸지 않는다', async () => {
+  const { state, ui, importAudio, finishMeeting } = fixture();
+  await importAudio(picked(['통화 녹음.m4a', 'audio/x-m4a', mp4Head()]));
+  const held = heldFile(mp4Head(), '새 통화.m4a', 'audio/x-m4a');
+  const pending = importAudio(picked(held.file));
+  await finishMeeting();
+  assert.equal(state.flowBusy, false);
+  assert.equal(state.audioStored, true);
+  assert.match(ui['workflow-status'].textContent, /음성은 저장했습니다/);
+  held.release();
+  await pending;
+  assert.deepEqual(Array.from(state.parts, part => part.blob.name), ['통화 녹음.m4a']);
+  assert.equal(state.audioStored, true);
+});
+// 키가 없어 분석 없이 원음 저장만 하고 끝나는 경우다. 분석이 성공하면 마지막 자동 보관도 불러오기를 버리므로 저장 시작의 취소만 따로 보려고 분석을 뺐다.
+
+test('형식을 확인하는 동안 전사·요약을 시작해 끝내도 늦게 끝난 확인으로 지금 원음과 전사를 바꾸지 않는다', async () => {
+  const { state, ui, importAudio, finishMeeting, summarize } = fixture(() => Response.json({ error: { code: 'AI_SERVER_ERROR', message: '시험 요약 오류' } }, { status: 503 }));
+  await importAudio(picked(['통화 녹음.m4a', 'audio/x-m4a', mp4Head()]));
+  await finishMeeting();
+  assert.equal(state.audioStored, true);
+  state.keyConfigured = true;
+  const held = heldFile(mp4Head(), '새 통화.m4a', 'audio/x-m4a');
+  const pending = importAudio(picked(held.file));
+  await summarize();
+  assert.equal(state.aiController, null);
+  const transcript = ui.transcript.value;
+  assert.match(transcript, /시험 회의 발언입니다/);
+  held.release();
+  await pending;
+  assert.deepEqual(Array.from(state.parts, part => part.blob.name), ['통화 녹음.m4a']);
+  assert.equal(ui.transcript.value, transcript);
+});
+// 키 없이 원음을 먼저 저장해 두고(그래야 summarize가 finishMeeting으로 넘어가지 않는다), 요약이 실패해 자동 보관까지 가지 않게 했다. 전사·요약 시작(setBusy)의 취소만 따로 본다.
+
+test('형식을 확인하는 동안 녹음을 시작하려 했으면 마이크가 거절돼도 늦게 끝난 확인을 적용하지 않는다', async () => {
+  const denied = () => Promise.reject(Object.assign(new Error('마이크 거절'), { name: 'NotAllowedError' }));
+  const { state, ui, importAudio, startRecording } = fixture(null, {}, { navigator: { mediaDevices: { getUserMedia: denied } }, window: { MediaRecorder: class {} } });
+  state.keyConfigured = true;
+  const held = heldFile(mp4Head(), '새 통화.m4a', 'audio/x-m4a');
+  const pending = importAudio(picked(held.file));
+  await startRecording();
+  assert.equal(state.permissionPending, false);
+  assert.match(ui.status.textContent, /마이크 사용이 거절됐습니다/);
+  held.release();
+  await pending;
+  assert.equal(state.parts.length, 0);
+});
+// 불러온 파일이 열린 화면에서는 녹음 시작이 '지난 회의 기록이 열려 있음'으로 막히므로 빈 화면에서 시작한다.
+
+test('형식을 확인하는 동안 지난 회의를 열려고 했으면 열기가 실패해도 늦게 끝난 확인을 적용하지 않는다', async () => {
+  const id = crypto.randomUUID();
+  const { state, importAudio, openMeeting } = fixture(null, { [`/api/meetings/main/${id}`]: Response.json({ error: { message: '회의를 읽지 못했습니다.' } }, { status: 500 }) });
+  await importAudio(picked(['통화 녹음.m4a', 'audio/x-m4a', mp4Head()]));
+  const held = heldFile(mp4Head(), '새 통화.m4a', 'audio/x-m4a');
+  const pending = importAudio(picked(held.file));
+  await openMeeting('main', id);
+  assert.equal(state.historyBusy, false);
+  held.release();
+  await pending;
+  assert.deepEqual(Array.from(state.parts, part => part.blob.name), ['통화 녹음.m4a']);
+});
+
+test('형식을 확인하는 동안 화면을 비우면 늦게 끝난 확인으로 다시 채우지 않는다', async () => {
+  const { state, importAudio, clearLocal } = fixture();
+  await importAudio(picked(['통화 녹음.m4a', 'audio/x-m4a', mp4Head()]));
+  const held = heldFile(mp4Head(), '새 통화.m4a', 'audio/x-m4a');
+  const pending = importAudio(picked(held.file));
+  assert.equal(clearLocal(true), true);
+  held.release();
+  await pending;
+  assert.equal(state.parts.length, 0);
+});
+
+test('형식을 확인하는 동안 회의록을 보관하면 늦게 끝난 확인으로 보관한 화면을 바꾸지 않는다', async () => {
+  const { state, ui, importAudio, finishMeeting, archiveResult } = fixture();
+  state.keyConfigured = true;
+  await importAudio(picked(['통화 녹음.m4a', 'audio/x-m4a', mp4Head()]));
+  await finishMeeting();
+  const transcript = ui.transcript.value;
+  const held = heldFile(mp4Head(), '새 통화.m4a', 'audio/x-m4a');
+  const pending = importAudio(picked(held.file));
+  await archiveResult();
+  assert.equal(state.archiveBusy, false);
+  held.release();
+  await pending;
+  assert.deepEqual(Array.from(state.parts, part => part.blob.name), ['통화 녹음.m4a']);
+  assert.equal(ui.transcript.value, transcript);
 });
 
 const successfulSummary = body => Response.json({ minutes: { overview: '전체 방향 | 기준을 정합니다.\n주요 결정 | 표준화합니다.\n다음 할 일 | 항목을 검토합니다.\n남은 쟁점 | 담당자 미정입니다.', topics: [], decisions: [...(body.previousMinutes?.decisions || []), body.text], actions: [], openQuestions: [] } });

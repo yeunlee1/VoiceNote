@@ -892,6 +892,7 @@
     }
     const generation = ++state.permissionGeneration;
     state.permissionPending = true;
+    cancelPendingImport();
     ui["record-state"].textContent = "마이크 허가 대기";
     refresh();
     let stream;
@@ -1005,12 +1006,19 @@
   }
 
   let importTicket = 0;
+  function cancelPendingImport() {
+    // 녹음·저장·분석·회의 열기·보관·화면 비우기를 시작하면 형식을 확인하던 불러오기를 버려, 늦게 끝난 확인이 그 뒤의 화면을 덮지 않게 한다.
+    importTicket++;
+  }
+
   async function importAudio(event) {
     const files = Array.from(event.target.files || []).sort((a, b) =>
       a.name.localeCompare(b.name, "ko", { numeric: true }),
     );
     event.target.value = "";
     if (!files.length) return;
+    const ticket = ++importTicket;
+    // 새로 고른 파일이 있으면 아래에서 거절되더라도 앞서 확인하던 불러오기는 버린다. 빈 선택(고르기 취소)은 앞선 불러오기를 그대로 둔다.
     const busy = () => state.recorders.size || state.permissionPending || state.aiController;
     if (busy()) {
       announce("진행 중인 작업을 마친 뒤 파일을 불러오세요.");
@@ -1020,7 +1028,6 @@
       announce("각 오디오 파일은 22MB 이하여야 합니다.");
       return;
     }
-    const ticket = ++importTicket;
     let types;
     try {
       types = await Promise.all(files.map(audioType));
@@ -1064,6 +1071,7 @@
 
   function setBusy(controller) {
     state.aiController = controller;
+    if (controller) cancelPendingImport();
     refresh();
   }
 
@@ -2125,6 +2133,7 @@
     state.aiController?.abort();
     state.aiController = null;
     state.dataGeneration++;
+    cancelPendingImport();
     state.recorder = null;
     state.recordingStopping = true;
     for (const context of state.recorders) {
@@ -2351,6 +2360,7 @@
     if (state.todoPending) { announce(TODO_NOTICES.saving); return; }
     if (hasUnsavedWork() && !confirm("현재 저장하지 않은 내용을 비우고 지난 회의를 열까요?")) return;
     state.historyBusy = true;
+    cancelPendingImport();
     refresh();
     try {
       const { meeting, versions, review, todos, todosUnreadable, me = null } = await api(`/api/meetings/${location}/${id}`);
@@ -2415,6 +2425,7 @@
   async function archiveResult() {
     if (!state.minutes || stale()) throw new Error("현재 입력으로 회의록을 먼저 분석하세요.");
     state.archiveBusy = true;
+    cancelPendingImport();
     state.resultId ||= newOperationId();
     refresh();
     const document = { ...documentObject(), id: state.resultId, ...(state.recordingStored ? { recordingId: state.recordingId } : state.meetingId ? { meetingId: state.meetingId } : {}), ...(state.todoSource ? { sourceResultId: state.todoSource } : {}) };
@@ -2559,6 +2570,7 @@
   async function finishMeeting() {
     if (state.flowBusy || state.historyBusy || state.archiveBusy || state.aiController) return;
     state.flowBusy = true;
+    cancelPendingImport();
     ui["retry-analysis"].hidden = true;
     const pending = [...state.recorders].map(context => context.done);
     stopRecording();
