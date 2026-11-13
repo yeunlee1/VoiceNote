@@ -144,6 +144,8 @@ public final class MainActivity extends Activity {
                 if(MeetingService.active)throw new IOException("이미 진행 중인 회의가 있습니다.");
                 if(Updates.installing())throw new IOException(UPDATE_WAIT);
                 fileIdle();store.requireAccess();Store.notes(data);Store.checkNew(data);
+                {String attempt=data.optString("attemptId");if(attempt.isEmpty()||attempt.length()>128)throw new IOException("불러오기 시도를 확인할 수 없습니다. 다시 시도하세요.");}
+                // 화면은 이 시도 번호가 실린 상태만 이번 불러오기의 것으로 본다.
                 importInput=data;fileRequest=id;
                 runOnUiThread(()->{try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*").putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"audio/*","video/mp4"}),IMPORT_AUDIO);}
                     catch(Exception ex){fileRequest=null;importInput=null;answer(id,null,"파일 선택 창을 열지 못했습니다.");}});break;
@@ -269,7 +271,7 @@ public final class MainActivity extends Activity {
             if(MeetingService.active||MeetingService.starting())throw new IOException("이미 진행 중인 회의가 있습니다.");
             if(Updates.installing())throw new IOException(UPDATE_WAIT);
             MeetingService.startingAt=System.currentTimeMillis();
-            Intent request=new Intent(this,MeetingService.class).setAction("import").setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra("input",input.toString());
+            Intent request=new Intent(this,MeetingService.class).setAction("import").setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra("input",input.toString()).putExtra("attemptId",input.optString("attemptId"));
             runOnUiThread(()->{try{startForegroundService(request);answer(id,new JSONObject().put("id",JSONObject.NULL).put("started",true),null);}catch(Exception ex){MeetingService.startingAt=0;answer(id,null,"녹음 파일 불러오기를 시작하지 못했습니다. 다시 시도하세요.");}});
         }catch(Exception ex){answer(id,null,ex instanceof IOException?ex.getMessage():"고른 파일을 처리하지 못했습니다. 다시 골라 주세요.");}
         finally{fileRequest=null;importInput=null;}});

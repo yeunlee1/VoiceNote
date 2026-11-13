@@ -33,13 +33,13 @@
   const number = value => Number(value || 0).toLocaleString('ko-KR');
 
   function snapshot() {
-    return { busy: state.busy, active: state.active || !!state.refining, opened: !!state.opened, keyConfigured: Flow.canAnalyze(state.connection), trialExhausted: state.connection.accessMode === 'exhausted',
+    return { busy: state.busy, active: state.active || !!state.refining || !!state.importing, opened: !!state.opened, keyConfigured: Flow.canAnalyze(state.connection), trialExhausted: state.connection.accessMode === 'exhausted',
       date: $('date').value, notes: $('notes').value, customMissing: $('output-format').value === 'custom' && !state.customFormat,
       permissionPending: !!state.connection.permissionPending, filePending: !!state.connection.filePending, modelError: !!state.connection.modelError };
   }
   function renderBlockers() {
     const reasons = Flow.startBlockers(snapshot()), list = $('blocker-list');
-    $('blockers').hidden = state.active;
+    $('blockers').hidden = state.active || !!state.importing;
     list.replaceChildren(...(reasons.length ? reasons.map(reason => node('li', reason.text)) : [node('li', '위쪽의 회의 시작을 누르면 바로 녹음합니다.')]));
     $('blockers').classList.toggle('ready', reasons.length === 0);
     $('blockers').querySelector('.needs-title').textContent = reasons.length ? '시작 전 필요' : '준비 완료';
@@ -61,13 +61,13 @@
     const idle = !state.busy && !state.active && !state.refining;
     $('prepare').disabled = !idle;
     // 회의가 진행 중이면 준비 칸을 접고 회의 전에 적은 내용을 읽기로 보여 준다.
-    setPrep(!state.active && !state.refining);
+    setPrep(!state.active && !state.refining && !state.importing);
     $('start').hidden = state.recording || state.view !== 'new'; $('finish').hidden = !state.recording;
     $('console-heading').textContent = state.recording ? '녹음 중' : state.view === 'records' ? '회의 기록' : '새 회의';
     renderPeople($('people-preview'), Todos.people($('participants').value));
     // 업데이트 설치 확인 화면을 기다리는 동안에는 네이티브도 새 회의를 거절하므로 시작 단추를 잠근다.
     $('start').disabled = !Flow.canStart(snapshot()) || state.update?.status === 'confirming';
-    $('import-audio').disabled = $('start').disabled; $('import-wrap').hidden = state.active || !!state.refining;
+    $('import-audio').disabled = $('start').disabled; $('import-wrap').hidden = state.active || !!state.refining || !!state.importing;
     // 녹음 파일 불러오기는 회의 시작과 같은 조건에서만 누를 수 있고, 녹음·분석 중에는 감춘다.
     $('start-label').textContent = state.active && !state.recording ? '분석 중' : '회의 시작';
     $('finish').disabled = state.busy || !state.recording;
@@ -682,9 +682,6 @@
       const status = await call('status'), meeting = status.meeting;
       if (state.busy && !force) return;
       state.active = status.active; state.recording = status.active && meeting.state === 'recording';
-      if (state.importing && meeting.id) { state.importing = false; clearNewMeeting(); }
-      else if (state.importing && !status.active) state.importing = false;
-      // 녹음 파일 불러오기는 상태에 회의 id가 생기면 회의가 만들어진 것이다. 그 전에 끝났으면 실패한 것이라 칸 값을 지우지 않는다.
       // 받는 동안 녹음·분석이 시작되면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 다시 눌러야 설치한다.
       if (state.active || state.refining) state.updateIntent = false;
       document.body.classList.toggle('recording', state.recording);
@@ -703,6 +700,13 @@
         $('record-state').textContent = meeting.state === 'complete' ? '보관 완료' : '확인 필요';
         $('workflow').textContent = meeting.message || '다음 회의를 준비하세요.'; $('timer').textContent = '00:00';
       }
+      if (state.importing) {
+        const mine = meeting.attemptId === state.importing;
+        if (mine && meeting.id) { state.importing = null; clearNewMeeting(); }
+        else if (mine && !status.active) { state.importing = null; $('workflow').textContent = meeting.message || '녹음 파일을 불러오지 못했습니다. 다시 골라 주세요.'; }
+        else if (!mine) $('workflow').textContent = '녹음 파일을 준비하는 중';
+      }
+      // 녹음 파일 불러오기는 이번 시도 번호가 실린 상태만 본다. 그 상태에 회의 id가 생기면 회의가 만들어진 것이라 칸을 비우고, id 없이 끝나면 실패라 칸 값을 지우지 않는다. 앞선 회의의 상태나 서비스가 아직 시작되지 않은 상태는 준비 중으로 보여 준다.
       const target = state.refining;
       const finishedRefine = !status.active && target && meeting.attemptId === target.attemptId && target.id === meeting.id && target.location === meeting.location && ['complete','failed'].includes(meeting.state);
       const key = `${meeting.id || ''}-${meeting.state || ''}-${meeting.attemptId || ''}`;
@@ -757,12 +761,12 @@
   // 회의가 만들어진 뒤 새 회의 칸을 비운다. 회의 시작은 요청이 끝나면 곧바로, 녹음 파일 불러오기는 서비스가 회의를 만든 것을 상태 조회로 본 뒤에 부른다.
   $('import-audio').onclick = () => task(async () => {
     await flushDraft();
-    const started = await call('importAudio', { date: $('date').value, title: $('title').value.trim(), participants: $('participants').value, notes: $('notes').value, ...formatFields() });
+    const attemptId = crypto.randomUUID();
+    const started = await call('importAudio', { date: $('date').value, title: $('title').value.trim(), participants: $('participants').value, notes: $('notes').value, ...formatFields(), attemptId });
     if (!started || started.cancelled) return;
-    state.importing = true; setPrep(false);
-    state.lastState = 'active'; await poll(true);
+    state.importing = attemptId; setPrep(false); await poll(true);
   });
-  // 파일 선택 창이 열린 동안에는 task가 화면을 잠근다. 칸 값은 회의가 실제로 만들어진 뒤에 비우므로 그 전에 실패하면 적은 값이 그대로 남는다. 서비스가 곧바로 실패해도 첫 상태 조회가 그 안내를 보여 주게 진행 중이었던 것으로 둔다.
+  // 파일 선택 창이 열린 동안에는 task가 화면을 잠그고, 시작된 뒤에는 시도 번호로 이번 불러오기를 따라간다. 칸 값은 회의가 실제로 만들어진 뒤에 비우므로 그 전에 실패하면 적은 값이 그대로 남는다.
   $('finish').onclick = () => task(async () => { await call('finish'); $('workflow').textContent = '녹음을 저장하고 분석합니다.'; });
   $('retry').onclick = () => { if (!todoHolding()) task(async () => {
     if (!Flow.canAnalyze(state.connection)) { openSettings(null, 'ai'); throw new Error(state.connection.accessMode === 'exhausted' ? Flow.EXHAUSTED_MESSAGE : '설정의 AI 연결에서 API 키를 먼저 등록하세요.'); }

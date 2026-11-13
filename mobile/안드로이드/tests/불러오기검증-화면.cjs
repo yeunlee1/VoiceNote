@@ -9,6 +9,9 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
   const workflow = text => until(`document.getElementById('workflow').textContent.includes(${js(text)})`);
   const press = () => evaluate("(()=>{const e=document.getElementById('import-audio');if(e)e.click();return !!e})()");
   // 단추가 없으면 누르지 않는다. 그때는 아래 확인이 실패로 남고 다른 검사는 이어 간다.
+  const attempt = () => evaluate("__mock.calls.filter(c=>c.method==='importAudio').at(-1)?.data?.attemptId||''");
+  const serviceState = async (active, meeting) => evaluate(`__mock.active=${active};__mock.meeting=Object.assign(${js(meeting)},{attemptId:${js(await attempt())},createdAt:Date.now()});true`);
+  // 서비스가 이번 불러오기의 시도 번호를 실은 상태를 내놓는 것을 흉내 낸다.
 
   await viewport(390); await load();
   let s = await buttons();
@@ -30,18 +33,33 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
   await mode('ok'); await press();
   const sent = await until("__mock.calls.filter(c=>c.method==='importAudio').length===3");
   const data = sent ? await evaluate("__mock.calls.filter(c=>c.method==='importAudio').at(-1).data") : {};
-  check('불러오기 요청에 회의명·날짜·참석자·상세 내용·출력 형식을 싣는다', data.title === '거래처 통화' && /^\d{4}-\d{2}-\d{2}$/.test(data.date || '') && data.participants === '김민수, 박서연' && data.notes === '계약 조건 재확인' && data.outputFormat === 'meeting', js(data));
+  check('불러오기 요청에 회의명·날짜·참석자·상세 내용·출력 형식과 시도 번호를 싣는다', data.title === '거래처 통화' && /^\d{4}-\d{2}-\d{2}$/.test(data.date || '') && data.participants === '김민수, 박서연' && data.notes === '계약 조건 재확인' && data.outputFormat === 'meeting' && /^[0-9a-f-]{36}$/.test(data.attemptId || ''), js(data));
   const preparing = await workflow('녹음 파일을 준비하는 중');
   s = await buttons();
   check('시작되면 진행 문구를 보여 주고 불러오기 단추를 감추며, 회의가 만들어지기 전에는 칸 값과 초안을 지우지 않는다', preparing && await fields() === FILLED && !s.shown && await evaluate("__mock.draft.title==='거래처 통화'"), js({ fields: await fields(), s, draft: await evaluate('__mock.draft') }));
   await shot('모바일-390-녹음파일불러오기-준비중.png');
-  await evaluate("__mock.active=false;__mock.meeting={state:'failed',message:'파일을 읽지 못했습니다. 다시 골라 주세요.'};true");
+  await serviceState(false, { state: 'failed', message: '파일을 읽지 못했습니다. 다시 골라 주세요.' });
   check('회의를 만들기 전에 담기가 실패하면 그 안내를 보여 주고 작성한 칸 값을 그대로 돌려준다', await workflow('파일을 읽지 못했습니다') && await until(`${js(FILLED)}===JSON.stringify(['title','participants','notes'].map(id=>document.getElementById(id).value))&&!document.getElementById('import-wrap').hidden`), await fields());
 
   await mode('ok'); await press(); await workflow('녹음 파일을 준비하는 중');
-  await evaluate("__mock.meeting={id:'55555555-5555-4555-8555-555555555555',location:'main',state:'analyzing',message:'음성 저장 완료 · 분석을 시작합니다.',createdAt:Date.now()};__mock.draft={};true");
+  await serviceState(true, { id: '55555555-5555-4555-8555-555555555555', location: 'main', state: 'analyzing', message: '음성 저장 완료 · 분석을 시작합니다.' }); await evaluate('__mock.draft={};true');
   check('회의가 만들어지면 그때 칸을 비운다', await until("['title','participants','notes'].every(id=>document.getElementById(id).value==='')"), await fields());
-  // 서비스가 조각을 다 담아 회의를 만들고(상태에 id가 생김) 네이티브가 초안을 지운 순간을 흉내 낸다.
+  // 서비스가 조각을 다 담아 회의를 만들고(상태에 이번 시도의 id가 생김) 네이티브가 초안을 지운 순간을 흉내 낸다.
+  await evaluate("__mock.active=false;__mock.meeting={};true");
+
+  await load(); await key(); await fill(); await mode('stale'); await press(); await wait(1700);
+  check('시작 직후 상태에 앞선 회의 id가 남아 있어도 이번 회의로 보지 않고 칸 값을 지우지 않는다', await fields() === FILLED, await fields());
+  await serviceState(true, { state: 'analyzing', message: '녹음 파일을 준비하는 중' }); await workflow('녹음 파일을 준비하는 중');
+  await serviceState(false, { state: 'failed', message: '파일을 읽지 못했습니다. 다시 골라 주세요.' });
+  check('앞선 회의 id를 받은 뒤 이번 불러오기가 실패해도 작성한 칸 값을 그대로 돌려준다', await workflow('파일을 읽지 못했습니다') && await fields() === FILLED, await fields());
+
+  await load(); await key(); await fill(); await mode('late'); await press(); await wait(1700);
+  const waiting = await evaluate("({workflow:document.getElementById('workflow').textContent,importHidden:document.getElementById('import-wrap').hidden,start:document.getElementById('start').disabled})");
+  check('서비스가 아직 시작되지 않은 상태를 받아도 불러오기를 끝난 것으로 보지 않고 준비 중으로 보여 준다', waiting.workflow.includes('녹음 파일을 준비하는 중') && waiting.importHidden && waiting.start && await fields() === FILLED, js({ waiting, fields: await fields() }));
+  await serviceState(true, { state: 'analyzing', message: '녹음 파일을 준비하는 중' }); await workflow('녹음 파일을 준비하는 중');
+  await serviceState(true, { id: '66666666-6666-4666-8666-666666666666', location: 'main', state: 'analyzing', message: '음성 저장 완료 · 분석을 시작합니다.' });
+  check('늦게 시작된 서비스가 이번 회의를 만들면 그때 칸을 비운다', await until("['title','participants','notes'].every(id=>document.getElementById(id).value==='')"), await fields());
+  await evaluate("__mock.active=false;__mock.meeting={};true");
 
   await load(); await key(); await fill(); await mode('failFast'); await press();
   check('회의를 만들기 전에 곧바로 실패해도 첫 상태 조회에서 그 안내를 보여 주고 칸 값을 지우지 않는다', await workflow('저장 공간이 부족') && await fields() === FILLED, await evaluate("JSON.stringify([document.getElementById('workflow').textContent,['title','participants','notes'].map(id=>document.getElementById(id).value)])"));
