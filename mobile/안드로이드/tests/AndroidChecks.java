@@ -1,6 +1,12 @@
 // 가상 안드로이드에서 실제 저장 코드와 모의 AI 응답의 분할 복구를 검증한다.
 package kr.local.meetingjournal;
 import android.app.Instrumentation;
+import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
+import android.media.MediaMuxer;
+import android.net.Uri;
 import android.os.Bundle;
 import org.json.*;
 import java.io.*;
@@ -209,6 +215,130 @@ public final class AndroidChecks extends Instrumentation {
             });
         });
         // 설정 편집기의 commit만 바꾼 대리 객체다. 다른 메서드는 실제 설정으로 넘기고, 이어 쓰는 편집기는 대리 객체를 돌려준다.
+    }
+    static void importChecks(Store store)throws Exception{
+        // 휴대폰 녹음 파일 불러오기: 합성 AAC·영상 파일로 그대로 담기, 다시 압축하지 않고 자르기, 거절 문구를 확인한다.
+        android.content.Context context=store.context;File dir=new File(context.getCacheDir(),"불러오기시험-"+UUID.randomUUID());dir.mkdirs();
+        try{
+            File eight=syntheticAac(dir,"eight.m4a",8);
+            List<File> parts=splitFile(eight,new File(dir,"3초"),3_000_000L,Long.MAX_VALUE);
+            expect(parts.size()==3,"8초 파일을 3초로 자르면 조각 3개다");
+            int sum=0;
+            for(File part:parts){MediaExtractor extractor=extractorOf(part);try{
+                expect(extractor.getTrackCount()==1,"조각에는 오디오 트랙 하나만 있다");
+                extractor.selectTrack(0);MediaFormat format=extractor.getTrackFormat(0);
+                expect(extractor.getSampleTime()==0,"조각마다 시간은 0부터 센다");
+                expect(!format.containsKey(MediaFormat.KEY_DURATION)||format.getLong(MediaFormat.KEY_DURATION)<=3_100_000L,"조각 길이는 기준 남짓이다");
+                sum+=samples(extractor);}finally{extractor.release();}}
+            expect(sum==sampleCount(eight),"조각 샘플 수를 더하면 원본 샘플 수와 같다");
+            expect(splitFile(syntheticAac(dir,"ten.m4a",10),new File(dir,"10초"),3_000_000L,Long.MAX_VALUE).size()==4,"10초 파일은 조각 4개이고 마지막 짧은 조각도 남긴다");
+            long limit=eight.length()*2/5;List<File> bySize=splitFile(eight,new File(dir,"크기"),Long.MAX_VALUE,limit);
+            expect(bySize.size()>=3,"크기 기준으로도 나눈다");
+            for(File part:bySize)expect(part.length()<=limit+4096,"조각 크기는 기준과 컨테이너 여유 안이다");
+            Uri eightUri=Uri.fromFile(eight);AudioImport.Inspection small=AudioImport.inspect(context,eightUri);
+            expect(!small.split&&small.size==eight.length()&&small.durationUs>7_000_000L&&AudioImport.AAC.equals(small.mime),"짧은 AAC 파일은 그대로 담을 것으로 판정한다");
+            List<File> stored=AudioImport.store(context,eightUri,small,new File(dir,"그대로"));
+            expect(stored.size()==1&&stored.get(0).getName().equals("원음-001.m4a")&&importDigest(stored.get(0)).equals(importDigest(eight)),"그대로 담으면 원본과 바이트가 같다");
+            importUnreadableCheck(context);
+            File memo=new File(dir,"memo.m4a");Store.write(memo,"음성이 아닌 메모");
+            expectImportError(context,memo,AudioImport.unsupported(null),"ftyp가 없는 파일은 받지 않는다");
+            importVideoTrackCheck(context,dir);
+        }finally{deleteTree(dir);}
+    }
+    static void importUnreadableCheck(android.content.Context context){
+        try{AudioImport.inspect(context,Uri.parse("content://kr.local.meetingjournal.none/없음.m4a"));throw new AssertionError("열 수 없는 주소를 읽었다고 답했습니다.");}
+        catch(IOException ex){expect(AudioImport.UNREADABLE.equals(ex.getMessage()),"열 수 없는 주소는 읽지 못했다고 알린다: "+ex.getMessage());}
+    }
+    static void importVideoTrackCheck(android.content.Context context,File dir)throws Exception{
+        File video=syntheticVideo(dir,"video.mp4",4,true);Uri uri=Uri.fromFile(video);AudioImport.Inspection inspection=AudioImport.inspect(context,uri);
+        expect(!inspection.split,"짧은 영상 파일은 그대로 담는다");
+        expect(importDigest(AudioImport.store(context,uri,inspection,new File(dir,"영상그대로")).get(0)).equals(importDigest(video)),"영상이 든 파일도 원본 그대로 담는다");
+        for(File part:splitFile(video,new File(dir,"영상조각"),3_000_000L,Long.MAX_VALUE)){MediaExtractor extractor=extractorOf(part);try{
+            expect(extractor.getTrackCount()==1&&extractor.getTrackFormat(0).getString(MediaFormat.KEY_MIME).startsWith("audio/"),"영상 파일을 자르면 조각에는 오디오 트랙만 있다");}finally{extractor.release();}}
+        expectImportError(context,syntheticVideo(dir,"video-only.mp4",2,false),AudioImport.unsupported(null),"오디오가 없는 영상은 받지 않는다");
+    }
+    static void expectImportError(android.content.Context context,File file,String message,String label){
+        try{AudioImport.inspect(context,Uri.fromFile(file));throw new AssertionError(label+": 받아들였습니다.");}
+        catch(IOException ex){expect(message.equals(ex.getMessage()),label+": "+ex.getMessage());}
+    }
+    static List<File> splitFile(File source,File dir,long maxUs,long maxBytes)throws Exception{
+        MediaExtractor extractor=extractorOf(source);
+        try{return AudioImport.split(extractor,audioTrack(extractor),dir,maxUs,maxBytes);}finally{extractor.release();}
+    }
+    static MediaExtractor extractorOf(File file)throws IOException{MediaExtractor extractor=new MediaExtractor();extractor.setDataSource(file.getPath());return extractor;}
+    static int audioTrack(MediaExtractor extractor){
+        for(int i=0;i<extractor.getTrackCount();i++)if(extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME).startsWith("audio/"))return i;
+        throw new AssertionError("오디오 트랙이 없습니다.");
+    }
+    static int samples(MediaExtractor extractor){int count=0;java.nio.ByteBuffer buffer=java.nio.ByteBuffer.allocate(1<<20);while(extractor.readSampleData(buffer,0)>=0){count++;extractor.advance();}return count;}
+    static int sampleCount(File file)throws IOException{MediaExtractor extractor=extractorOf(file);try{extractor.selectTrack(audioTrack(extractor));return samples(extractor);}finally{extractor.release();}}
+    static String importDigest(File file)throws Exception{
+        java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
+        try(InputStream in=new FileInputStream(file)){byte[] buffer=new byte[65536];for(int count;(count=in.read(buffer))!=-1;)digest.update(buffer,0,count);}
+        StringBuilder hex=new StringBuilder();for(byte b:digest.digest())hex.append(String.format(Locale.ROOT,"%02x",b&0xff));return hex.toString();
+    }
+    static void deleteTree(File file){File[] children=file.listFiles();if(children!=null)for(File child:children)deleteTree(child);file.delete();}
+    static File syntheticAac(File dir,String name,int seconds)throws Exception{
+        List<Object[]> sound=new ArrayList<>();MediaFormat format=encodeAac(seconds,sound);
+        return mux(new File(dir,name),new MediaFormat[]{format},Collections.singletonList(sound));
+    }
+    static File syntheticVideo(File dir,String name,int seconds,boolean withAudio)throws Exception{
+        List<Object[]> video=new ArrayList<>();MediaFormat videoFormat=encodeAvc(seconds,video);
+        if(!withAudio)return mux(new File(dir,name),new MediaFormat[]{videoFormat},Collections.singletonList(video));
+        List<Object[]> sound=new ArrayList<>();MediaFormat audioFormat=encodeAac(seconds,sound);
+        return mux(new File(dir,name),new MediaFormat[]{videoFormat,audioFormat},Arrays.asList(video,sound));
+    }
+    static File mux(File file,MediaFormat[] formats,List<List<Object[]>> tracks)throws Exception{
+        MediaMuxer muxer=new MediaMuxer(file.getPath(),MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);int[] ids=new int[formats.length];
+        for(int i=0;i<formats.length;i++)ids[i]=muxer.addTrack(formats[i]);muxer.start();
+        List<Object[]> order=new ArrayList<>();for(int i=0;i<formats.length;i++)for(Object[] sample:tracks.get(i))order.add(new Object[]{i,sample});
+        order.sort((a,b)->Long.compare((Long)((Object[])a[1])[1],(Long)((Object[])b[1])[1]));
+        // 트랙을 시간 순서로 섞어 써서 실제 녹음 파일처럼 음성과 영상이 번갈아 담기게 한다.
+        MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
+        for(Object[] item:order){Object[] sample=(Object[])item[1];byte[] data=(byte[])sample[0];info.set(0,data.length,(Long)sample[1],(Integer)sample[2]);muxer.writeSampleData(ids[(Integer)item[0]],java.nio.ByteBuffer.wrap(data),info);}
+        muxer.stop();muxer.release();return file;
+    }
+    static void keep(MediaCodec codec,int out,MediaCodec.BufferInfo info,List<Object[]> samples){
+        if((info.flags&MediaCodec.BUFFER_FLAG_CODEC_CONFIG)==0&&info.size>0){java.nio.ByteBuffer buffer=codec.getOutputBuffer(out);byte[] data=new byte[info.size];buffer.position(info.offset);buffer.get(data);samples.add(new Object[]{data,info.presentationTimeUs,info.flags&MediaCodec.BUFFER_FLAG_KEY_FRAME});}
+        codec.releaseOutputBuffer(out,false);
+    }
+    static MediaFormat encodeAac(int seconds,List<Object[]> samples)throws Exception{
+        // 440Hz 사인파를 앱 녹음과 같은 모노 24kHz 64kbps AAC로 압축한다. 무음만 넣으면 인코더가 빈 프레임을 낼 수 있어 작은 소리를 넣는다.
+        int rate=24000;MediaFormat format=MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,rate,1);
+        format.setInteger(MediaFormat.KEY_AAC_PROFILE,MediaCodecInfo.CodecProfileLevel.AACObjectLC);format.setInteger(MediaFormat.KEY_BIT_RATE,64000);
+        MediaCodec codec=MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC);codec.configure(format,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);codec.start();
+        long total=(long)rate*seconds,fed=0;boolean ended=false;MediaFormat output=null;MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
+        try{
+            while(true){
+                if(!ended){int in=codec.dequeueInputBuffer(10_000);if(in>=0){java.nio.ByteBuffer buffer=codec.getInputBuffer(in);buffer.clear();buffer.order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                    int frames=(int)Math.min(buffer.remaining()/2,total-fed);for(int i=0;i<frames;i++)buffer.putShort((short)(Math.sin(2*Math.PI*440*(fed+i)/rate)*3000));
+                    long pts=fed*1_000_000L/rate;fed+=frames;ended=fed>=total;codec.queueInputBuffer(in,0,frames*2,pts,ended?MediaCodec.BUFFER_FLAG_END_OF_STREAM:0);}}
+                int out=codec.dequeueOutputBuffer(info,10_000);
+                if(out==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED)output=codec.getOutputFormat();
+                else if(out>=0){keep(codec,out,info,samples);if((info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0)break;}
+            }
+        }finally{codec.stop();codec.release();}
+        return output;
+    }
+    static MediaFormat encodeAvc(int seconds,List<Object[]> samples)throws Exception{
+        // 작은 회색 화면을 초당 10장 AVC로 압축한다. 영상이 든 mp4를 흉내 내는 데만 쓴다.
+        int width=176,height=144,fps=10;MediaFormat format=MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC,width,height);
+        format.setInteger(MediaFormat.KEY_COLOR_FORMAT,MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible);format.setInteger(MediaFormat.KEY_BIT_RATE,200_000);
+        format.setInteger(MediaFormat.KEY_FRAME_RATE,fps);format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,1);
+        MediaCodec codec=MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);codec.configure(format,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);codec.start();
+        int frames=seconds*fps,queued=0;MediaFormat output=null;MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
+        try{
+            while(true){
+                if(queued<=frames){int in=codec.dequeueInputBuffer(10_000);if(in>=0){long pts=queued*1_000_000L/fps;
+                    if(queued==frames)codec.queueInputBuffer(in,0,0,pts,MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    else{android.media.Image image=codec.getInputImage(in);for(android.media.Image.Plane plane:image.getPlanes()){java.nio.ByteBuffer buffer=plane.getBuffer();while(buffer.hasRemaining())buffer.put((byte)(64+queued));}codec.queueInputBuffer(in,0,width*height*3/2,pts,0);}
+                    queued++;}}
+                int out=codec.dequeueOutputBuffer(info,10_000);
+                if(out==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED)output=codec.getOutputFormat();
+                else if(out>=0){keep(codec,out,info,samples);if((info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0)break;}
+            }
+        }finally{codec.stop();codec.release();}
+        return output;
     }
     android.content.Context testContext(){
         return new android.content.ContextWrapper(getTargetContext()){
@@ -779,6 +909,7 @@ public final class AndroidChecks extends Instrumentation {
         // 기기 시험 중에는 업데이트 확인이 실제 깃허브나 아래 AI 모의 응답에 닿지 않게 한다.
         Updates.opener=url->{throw new IOException("기기 시험 중에는 업데이트를 확인하지 않습니다.");};
         if(probe.equals("u-e2e")){updateEndToEnd();return;}
+        if(probe.equals("import")){importChecks(new Store(testContext()));result.putString("stream","PASS "+checks+" import checks\n");finish(-1,result);return;}
         if(!probe.isEmpty()&&!probe.startsWith("f-")&&!probe.startsWith("g-")){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
         for(String name:new String[]{"first","open","review","draft","finish","n1new","n1old","n1meta"})regressionCheck(name);
         archiveChecks(new Store(testContext()));
@@ -787,6 +918,7 @@ public final class AndroidChecks extends Instrumentation {
         todoChecks(new Store(testContext()));
         meChecks(new Store(testContext()));
         myNameFailureCheck();
+        importChecks(new Store(testContext()));
         updateChecks();
         URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){protected URLConnection openConnection(URL url){return new HttpURLConnection(url){
             final ByteArrayOutputStream sent=new ByteArrayOutputStream();
