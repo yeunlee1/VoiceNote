@@ -4,6 +4,7 @@ import android.app.*;
 import android.content.*;
 import android.content.pm.ServiceInfo;
 import android.media.MediaRecorder;
+import android.net.Uri;
 import android.os.*;
 import org.json.*;
 import java.io.*;
@@ -27,6 +28,7 @@ public final class MeetingService extends Service {
         try{
             if("finish".equals(action)){if(recorder!=null){stopAudio();analyze();}else if(!active)stopSelf();return START_NOT_STICKY;}
             if(active)return START_NOT_STICKY;
+            if("import".equals(action)){startImport(intent);return START_NOT_STICKY;}
             refining="refine".equals(action);attemptId=refining?intent.getStringExtra("attemptId"):null;
             record=new JSONObject().put("location",intent.getStringExtra("location")).put("id",intent.getStringExtra("id"));
             record=store.load(intent.getStringExtra("location"),intent.getStringExtra("id"));analyzing=refining||"analyze".equals(action);active=true;
@@ -62,6 +64,29 @@ public final class MeetingService extends Service {
         analyzing=true;show("회의록 분석 중",false);status("analyzing","음성 저장 완료 · 분석을 시작합니다.");
         worker.submit(()->{try{new Ai(store,message->{status("analyzing",message);show(message,false);}).run(record);snapshot=record.toString();}catch(Exception ex){try{status("failed",safeMessage(ex));}catch(Exception ignored){}}finally{active=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}});
     }
+    static final String PREPARING="녹음 파일을 준비하는 중";
+    private void startImport(Intent intent)throws Exception {
+        // 고른 녹음 파일을 앱 안 임시 폴더에 담고, 다 담은 뒤에만 회의를 만들어 지금의 분석으로 넘긴다. 담는 동안은 회의 기록이 없어 진행 문구를 서비스 상태로만 알린다.
+        Uri uri=intent.getData();String input=intent.getStringExtra("input");
+        if(uri==null||input==null)throw new IOException(AudioImport.UNREADABLE);
+        JSONObject fields=new JSONObject(input);
+        refining=false;attemptId=null;record=null;analyzing=true;active=true;
+        snapshot=new JSONObject().put("state","analyzing").put("message",PREPARING).put("createdAt",System.currentTimeMillis()).toString();
+        show(PREPARING,false);
+        wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"MeetingJournal:work");wake.acquire(4*60*60*1000L);
+        worker.submit(()->importAudio(uri,fields));
+    }
+    private void importAudio(Uri uri,JSONObject fields){
+        File temp=new File(AudioImport.tempRoot(this),UUID.randomUUID().toString());
+        try{
+            List<File> parts=AudioImport.store(this,uri,AudioImport.inspect(this,uri),temp);
+            if(parts.size()>1){String message="녹음 파일을 "+parts.size()+"개로 나눴습니다";snapshot=new JSONObject(snapshot).put("message",message).toString();show(message,false);}
+            record=store.createImported(fields,parts);
+            analyze();
+        }catch(Exception ex){fail(ex);}
+        finally{AudioImport.cleanTemp(this);}
+        // 화면에서 확인한 뒤 파일이 바뀌었을 수 있어 서비스에서도 다시 판정한다. 남은 임시 폴더는 성공·실패와 관계없이 지운다.
+    }
     private void refine(String resultId,String feedback)throws Exception {
         show("의견 반영 중",false);status("analyzing","저장된 전사로 의견을 반영합니다.");
         worker.submit(()->{try{new Ai(store,message->{status("analyzing",message);show(message,false);}).refine(record,resultId,feedback);publish();}catch(Exception ex){try{status("failed",safeMessage(ex));}catch(Exception ignored){}}finally{active=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}});
@@ -72,7 +97,8 @@ public final class MeetingService extends Service {
         if(ex instanceof javax.net.ssl.SSLException)return "보안 연결을 만들지 못했습니다. 네트워크를 바꿔 다시 분석하세요. 녹음은 저장되어 있습니다.";
         return ex instanceof IOException?ex.getMessage():"처리를 완료하지 못했습니다. 저장된 자료를 확인한 뒤 다시 시도하세요.";
     }
-    private void fail(Exception ex){try{if(recorder!=null)stopAudio();}catch(Exception ignored){}try{if(record!=null)status("failed",safeMessage(ex));}catch(Exception ignored){}active=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}
+    private void fail(Exception ex){try{if(recorder!=null)stopAudio();}catch(Exception ignored){}try{if(record!=null)status("failed",safeMessage(ex));else snapshot=new JSONObject().put("state","failed").put("message",safeMessage(ex)).toString();}catch(Exception ignored){}active=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}
+    // 녹음 파일을 담다가 회의를 만들기 전에 실패하면 회의 기록이 없으므로 서비스 상태에만 실패 안내를 싣는다.
     @Override public void onTimeout(int startId,int type){fail(new IOException("백그라운드 작업 시간이 끝났습니다. 저장된 자료에서 다시 분석하세요."));}
     @Override public void onDestroy(){try{if(recorder!=null){stopAudio();status("interrupted","녹음이 중단되었습니다. 저장된 음성으로 다시 분석할 수 있습니다.");}}catch(Exception ignored){}worker.shutdownNow();if(wake!=null&&wake.isHeld())wake.release();active=false;super.onDestroy();}
 }

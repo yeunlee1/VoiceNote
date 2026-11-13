@@ -243,7 +243,38 @@ public final class AndroidChecks extends Instrumentation {
             File memo=new File(dir,"memo.m4a");Store.write(memo,"음성이 아닌 메모");
             expectImportError(context,memo,AudioImport.unsupported(null),"ftyp가 없는 파일은 받지 않는다");
             importVideoTrackCheck(context,dir);
+            importStoreChecks(store);
+            importTempCleanupCheck(store);
         }finally{deleteTree(dir);}
+    }
+    static void importStoreChecks(Store store)throws Exception{
+        // 담아 둔 조각으로 회의를 만들고, 틀린 입력과 옮기기 실패에는 회의 폴더를 남기지 않는지 본다.
+        android.content.Context context=store.context;File source=new File(context.getCacheDir(),"조각원본-"+UUID.randomUUID());source.mkdirs();
+        try{
+            File first=syntheticAac(source,"통화 원본-김민수-1.m4a",2),second=syntheticAac(source,"통화 원본-김민수-2.m4a",2);
+            String firstDigest=importDigest(first),secondDigest=importDigest(second);int before=meetingDirs(store);
+            JSONObject record=store.createImported(new JSONObject().put("date","2099-06-01").put("title","불러온 통화").put("participants","김민수, 박서연").put("notes","").put("outputFormat","meeting"),Arrays.asList(first,second));
+            File dir=store.directory("main",record.getString("id"));JSONArray audio=record.getJSONArray("audio");
+            expect(audio.length()==2&&"원음-001.m4a".equals(audio.getString(0))&&"원음-002.m4a".equals(audio.getString(1)),"불러온 조각을 원음-001부터 차례로 적는다");
+            expect(importDigest(new File(dir,"원음-001.m4a")).equals(firstDigest)&&importDigest(new File(dir,"원음-002.m4a")).equals(secondDigest),"조각을 바이트 그대로 회의 폴더로 옮긴다");
+            JSONObject saved=store.load("main",record.getString("id"));
+            expect("saved".equals(saved.getString("state"))&&"녹음 파일을 불러왔습니다.".equals(saved.getString("message")),"불러온 회의는 분석을 기다리는 상태로 저장한다");
+            expect(!Store.read(new File(dir,"회의정보.json")).contains("통화 원본"),"원본 파일 이름을 회의 기록에 남기지 않는다");
+            expect(meetingDirs(store)==before+1,"회의는 하나만 만든다");
+            try{store.createImported(new JSONObject().put("date","2099-6-1").put("title","날짜 틀림"),Collections.singletonList(syntheticAac(source,"date.m4a",1)));throw new AssertionError("틀린 날짜로 회의를 만들었습니다.");}
+            catch(IOException ex){expect(ex.getMessage().contains("회의 날짜"),"틀린 날짜는 회의를 만들기 전에 막는다");}
+            expect(meetingDirs(store)==before+1,"틀린 날짜는 회의 폴더를 만들지 않는다");
+            try{store.createImported(new JSONObject().put("date","2099-06-02").put("title","옮기기 실패"),Arrays.asList(syntheticAac(source,"ok.m4a",1),new File(source,"없는 조각.m4a")));throw new AssertionError("없는 조각으로 회의를 만들었습니다.");}
+            catch(IOException ex){expect(meetingDirs(store)==before+1,"조각을 옮기다 실패하면 만든 회의 폴더를 지운다");}
+        }finally{deleteTree(source);}
+    }
+    static int meetingDirs(Store store){File[] dirs=store.locationDirectory("main").listFiles(File::isDirectory);return dirs==null?0:dirs.length;}
+    static void importTempCleanupCheck(Store store)throws Exception{
+        android.content.Context context=store.context;File left=new File(AudioImport.tempRoot(context),UUID.randomUUID().toString());left.mkdirs();Store.write(new File(left,"원음-001.m4a"),"남은 조각");
+        int before=store.history().getJSONArray("meetings").length();
+        AudioImport.cleanTemp(context);
+        expect(!AudioImport.tempRoot(context).exists(),"앱을 다시 열면 남은 불러오기 임시 폴더를 지운다");
+        expect(store.history().getJSONArray("meetings").length()==before,"임시 폴더를 지워도 회의 목록은 그대로다");
     }
     static void importUnreadableCheck(android.content.Context context){
         try{AudioImport.inspect(context,Uri.parse("content://kr.local.meetingjournal.none/없음.m4a"));throw new AssertionError("열 수 없는 주소를 읽었다고 답했습니다.");}

@@ -123,16 +123,23 @@ final class Store {
             record.put("location",location);write(new File(dir,"회의정보.json"),record.toString(2));
         }
     }
+    static void checkNew(JSONObject input)throws IOException {
+        // 새 회의를 만들기 전에 보관함·날짜·출력 형식을 확인한다. 녹음 시작과 녹음 파일 불러오기가 회의를 만들기 전에 함께 쓴다.
+        if(input.has("location")&&!"main".equals(input.optString("location")))throw new IOException("새 녹음은 기본 보관함에만 만들 수 있습니다.");
+        if(!input.optString("date").matches("\\d{4}-\\d{2}-\\d{2}"))throw new IOException("회의 날짜를 확인하세요.");
+        if(!input.has("outputFormat"))return;
+        String format=input.optString("outputFormat");
+        if(!SettingsFile.OUTPUT_FORMATS.contains(format)&&!"custom".equals(format))throw new IOException("출력 형식을 다시 선택하세요.");
+        if("custom".equals(format)){if(!input.has("customFormat"))throw new IOException("내 형식 내용을 확인하세요.");CustomFormat.parse(String.valueOf(input.opt("customFormat")));}
+        // 출력 형식을 비워 보내면 설정의 기본 형식을 쓰므로 여기서는 보내온 값만 본다.
+    }
     JSONObject create(JSONObject input)throws Exception {
         synchronized(Store.class){
-            if(input.has("location")&&!"main".equals(input.optString("location")))throw new IOException("새 녹음은 기본 보관함에만 만들 수 있습니다.");
-            String date=input.optString("date");if(!date.matches("\\d{4}-\\d{2}-\\d{2}"))throw new IOException("회의 날짜를 확인하세요.");
-            String format=input.optString("outputFormat",defaultOutputFormat());
-            if(!SettingsFile.OUTPUT_FORMATS.contains(format)&&!"custom".equals(format))throw new IOException("출력 형식을 다시 선택하세요.");
+            checkNew(input);
+            String date=input.optString("date"),format=input.optString("outputFormat",defaultOutputFormat());
             JSONObject custom=null;
             if("custom".equals(format)){
                 if(input.has("customFormat"))custom=new JSONObject(CustomFormat.parse(String.valueOf(input.opt("customFormat"))).json());
-                else if(input.has("outputFormat"))throw new IOException("내 형식 내용을 확인하세요.");
                 else{custom=customFormat();if(custom==null)format="meeting";}
             }
             int sequence=1;File[] dirs=locationDirectory("main").listFiles(File::isDirectory);
@@ -143,6 +150,23 @@ final class Store {
             if(custom!=null)record.put("customFormat",custom);save(record);return record;
         }
     }
+    JSONObject createImported(JSONObject input,List<File> parts)throws Exception {
+        // 다 담아 둔 녹음 조각으로 새 회의를 만든다. 조각을 회의 폴더의 원음-001.m4a부터 옮기고, 옮기다 실패하면 만든 회의 폴더를 지운다.
+        JSONObject record=create(input);File dir=directory("main",record.getString("id"));
+        try{
+            JSONArray audio=record.getJSONArray("audio");
+            for(int i=0;i<parts.size();i++){
+                String name=String.format(Locale.ROOT,"원음-%03d.m4a",i+1);File part=parts.get(i),target=new File(dir,name);
+                if(!part.renameTo(target)){copyBytes(part,target);part.delete();}
+                audio.put(name);
+            }
+            record.put("state","saved").put("message","녹음 파일을 불러왔습니다.");save(record);return record;
+        }catch(Exception ex){removeTree(dir);throw ex;}
+    }
+    private static void copyBytes(File from,File to)throws IOException {
+        try(InputStream in=new FileInputStream(from);OutputStream out=new FileOutputStream(to)){byte[] b=new byte[65536];for(int n;(n=in.read(b))!=-1;)out.write(b,0,n);}
+    }
+    private static void removeTree(File file){File[] children=file.listFiles();if(children!=null)for(File child:children)removeTree(child);file.delete();}
     String defaultOutputFormat(){String value=context.getSharedPreferences("connection",0).getString("defaultOutputFormat","meeting");return SettingsFile.OUTPUT_FORMATS.contains(value)?value:"meeting";}
     JSONObject history()throws Exception {
         List<JSONObject> records=new ArrayList<>();int skipped=0;String myName=myName();
