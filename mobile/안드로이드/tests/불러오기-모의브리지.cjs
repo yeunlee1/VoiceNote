@@ -1,0 +1,17 @@
+// 휴대폰 녹음 파일 불러오기 요청(importAudio)의 합성 응답을 기존 화면 시험 브리지에 덧붙인다.
+module.exports = '(' + function () {
+  const m = window.__mock, previous = window.Native.request.bind(window.Native);
+  m.importMode = 'ok'; m.importDelay = 0;
+  window.Native.request = function (id, method, json) {
+    if (method !== 'importAudio') return previous(id, method, json);
+    const d = JSON.parse(json); m.calls.push({ method, data: d });
+    const reply = (value, error) => setTimeout(() => window.receive(id, { value, error }), m.importDelay || 0);
+    if (m.importMode === 'cancel') return reply({ cancelled: true }, null);
+    if (m.importMode === 'reject') return reply(null, '‘메모.m4a’ 파일은 불러올 수 없습니다. m4a 녹음 파일만 불러올 수 있습니다.');
+    // ok는 서비스가 담기를 시작한 상태, failFast는 회의를 만들기 전에 곧바로 실패해 첫 상태 조회부터 끝나 있는 상태다.
+    if (m.importMode === 'failFast') { m.active = false; m.meeting = { state: 'failed', message: '휴대폰 저장 공간이 부족해 파일을 불러오지 못했습니다.' }; }
+    else { m.active = true; m.meeting = { state: 'analyzing', message: '녹음 파일을 준비하는 중', createdAt: Date.now() }; }
+    m.draft = {};
+    reply({ id: null, started: true }, null);
+  };
+} + ')();';

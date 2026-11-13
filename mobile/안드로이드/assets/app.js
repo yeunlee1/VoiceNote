@@ -67,6 +67,8 @@
     renderPeople($('people-preview'), Todos.people($('participants').value));
     // 업데이트 설치 확인 화면을 기다리는 동안에는 네이티브도 새 회의를 거절하므로 시작 단추를 잠근다.
     $('start').disabled = !Flow.canStart(snapshot()) || state.update?.status === 'confirming';
+    $('import-audio').disabled = $('start').disabled; $('import-wrap').hidden = state.active || !!state.refining;
+    // 녹음 파일 불러오기는 회의 시작과 같은 조건에서만 누를 수 있고, 녹음·분석 중에는 감춘다.
     $('start-label').textContent = state.active && !state.recording ? '분석 중' : '회의 시작';
     $('finish').disabled = state.busy || !state.recording;
     $('retry').disabled = !idle || !state.opened;
@@ -746,6 +748,16 @@
     for (const id of ['title', 'participants', 'notes']) $(id).value = '';
     state.formatChosen = false; $('output-format').value = newMeetingFormat(); setPrep(false); await poll(true);
   });
+  $('import-audio').onclick = () => task(async () => {
+    await flushDraft();
+    const started = await call('importAudio', { date: $('date').value, title: $('title').value.trim(), participants: $('participants').value, notes: $('notes').value, ...formatFields() });
+    if (!started || started.cancelled) return;
+    clearTimeout(draftTimer); draftTimer = 0;
+    for (const id of ['title', 'participants', 'notes']) $(id).value = '';
+    state.formatChosen = false; $('output-format').value = newMeetingFormat(); setPrep(false);
+    state.lastState = 'active'; await poll(true);
+  });
+  // 파일 선택 창이 열린 동안에는 task가 화면을 잠근다. 서비스가 회의를 만들기 전에 곧바로 실패해도 첫 상태 조회가 그 안내를 보여 주게 진행 중이었던 것으로 둔다.
   $('finish').onclick = () => task(async () => { await call('finish'); $('workflow').textContent = '녹음을 저장하고 분석합니다.'; });
   $('retry').onclick = () => { if (!todoHolding()) task(async () => {
     if (!Flow.canAnalyze(state.connection)) { openSettings(null, 'ai'); throw new Error(state.connection.accessMode === 'exhausted' ? Flow.EXHAUSTED_MESSAGE : '설정의 AI 연결에서 API 키를 먼저 등록하세요.'); }
