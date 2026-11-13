@@ -696,6 +696,12 @@ public final class AndroidChecks extends Instrumentation {
             expect(store.loadReview("main",id,old).getString("comment").equals("앞선 결과에서 저장한 의견")&&store.load("main",id).getString("resultId").equals(latest)&&store.load("main",id).getString("state").equals("complete"),"T5 서비스 실패 상태에도 앞선 평가와 저장된 완료 결과는 그대로다");
         }finally{MeetingService.snapshot=before;}
     }
+    boolean mainShown;
+    void showMain(){
+        // 서비스를 앞 화면에서 시작하도록 앱 화면을 이 시험 실행에서 한 번만 띄운다. 이미 떠 있는 화면에 다시 보내면 Android가 새 화면을 만들지 않아 startActivitySync가 끝나지 않는다.
+        if(mainShown)return;
+        startActivitySync(new android.content.Intent(getTargetContext(),MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));mainShown=true;
+    }
     void serviceAttemptChecks()throws Exception{
         Store store=new Store(getTargetContext());String previousKey=Store.sessionKey,previousSnapshot=MeetingService.snapshot;
         JSONObject record=store.create(new JSONObject().put("date","2099-06-01").put("title","합성 즉시 실패 경계"));String id=record.getString("id");File dir=store.directory("main",id);
@@ -703,7 +709,7 @@ public final class AndroidChecks extends Instrumentation {
         String original=Store.read(new File(dir,"결과-"+old+".json")),review=Store.read(new File(dir,"평가-"+old+".json"));
         try{
             Store.sessionKey="sk-test-00000000000000000000";code=500;
-            startActivitySync(new android.content.Intent(getTargetContext(),MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            showMain();
             for(int index=1;index<=2;index++){
                 final String attempt="합성시도-"+index;replies.add("{}");
                 final android.content.Intent request=new android.content.Intent(getTargetContext(),MeetingService.class).setAction("refine").putExtra("location","main").putExtra("id",id).putExtra("resultId",old).putExtra("feedback","보존할 의견").putExtra("attemptId",attempt);
@@ -721,7 +727,7 @@ public final class AndroidChecks extends Instrumentation {
         File source=new File(context.getCacheDir(),"서비스불러오기-"+UUID.randomUUID());source.mkdirs();
         try{
             Store.sessionKey="sk-test-00000000000000000000";MeetingService.startingAt=System.currentTimeMillis();
-            startActivitySync(new android.content.Intent(context,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            showMain();
             // 화면이 열리며 남은 임시 폴더를 지우는 일이 이번 불러오기와 겹치지 않게 시작 중 표시를 먼저 켠다. 서비스가 요청을 받으면 지운다.
             for(String outcome:new String[]{"complete","failed"}){
                 final String attempt="합성불러오기-"+outcome;
