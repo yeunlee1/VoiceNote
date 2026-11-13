@@ -42,13 +42,15 @@ DefaultKeyFile의 기본값은 빈값이므로 지정하지 않으면 키가 들
 
 정리본에서 별점 1~5와 1,000자 이하 의견을 평가로 저장합니다. 평가 저장에는 요금이 들지 않습니다. 의견 반영은 평가를 먼저 저장한 뒤 저장된 전사로 요약만 다시 요청하므로 요약 요금이 추가로 듭니다. 전사가 없으면 안내하고 멈춥니다. 성공하면 새 결과 버전이 생기며 '결과 버전'에서 앞선 결과와 그 평가를 다시 엽니다. 새 결과에는 '의견 반영본'을 표시하고 그 결과의 평가는 새로 남깁니다.
 
+새 회의 화면의 '녹음 파일 불러오기'는 통화 녹음 같은 m4a(MP4 계열) 파일 하나를 Android 문서 선택 창으로 골라, 녹음한 회의처럼 전사·정리합니다. 회의명·날짜·참석자·출력 형식·상세 내용은 '회의 시작'과 같은 칸 값을 쓰고 같은 조건에서만 누를 수 있습니다. 파일 이름이 아니라 앞부분(ftyp)과 오디오 트랙으로 판정합니다. 20분과 22MB 안이면 원본 바이트 그대로, 넘으면 MediaExtractor·MediaMuxer로 다시 압축하지 않고 20분이나 약 20MB마다 잘라 원음-001.m4a부터 담습니다. 4시간이 넘는 파일, 남은 공간이 파일 크기와 50MB를 더한 것보다 적은 경우, 20분(22MB)이 넘는데 AAC가 아닌 파일은 받지 않고 그 이유를 알립니다. 녹음 서비스가 알림을 띄운 채 앱 안 임시 폴더(불러오기-임시)에 다 담은 뒤에만 회의를 만들고 지금의 분석으로 넘깁니다. 담다가 실패하거나 앱이 끝나면 임시 폴더만 지우고 회의는 만들지 않습니다. 원본은 읽기만 하고 원본 파일 이름은 회의 기록에 저장하지 않습니다.
+
 설정 파일은 voicenote-settings, version 2로 요약 모델·기본 출력 형식·내 형식만 옮깁니다. Android는 저장 위치를 내보내지 않고 Windows 파일의 저장 위치도 적용하지 않습니다. API 키·체험 기록·회의 자료는 포함하지 않습니다. 128KiB 이하 UTF-8 파일을 먼저 검증하고 미리보기에서 확인한 토큰으로 적용합니다. 취소하면 유지하고 저장 중 실패하면 이전 설정을 복구합니다. 1판 프로젝트 설정 파일은 이유를 알리고 거절합니다.
 
 검증
 
 - node --test mobile/안드로이드/tests/*.test.cjs
 - node mobile/안드로이드/tests/화면검증-브라우저.cjs <캡처폴더>
-- JVM 단독 시험 9종은 TextChunksTest·TrialAccessTest·AiUsageTest·UpdateRulesTest·AiResponseModelTest·SettingsFileTest·AiFeedbackTest·CopyFilesTest·TextFileNameTest입니다. 새 DebugBuild의 stage-debug/classes와 android-36/android.jar를 classpath로 따로 컴파일해 실행합니다. android.jar의 org.json은 JVM에서 Stub 예외가 나므로 Store·Ai 저장 동작은 기기 시험이 맡습니다.
+- JVM 단독 시험 10종은 TextChunksTest·TrialAccessTest·AiUsageTest·UpdateRulesTest·AiResponseModelTest·SettingsFileTest·AiFeedbackTest·CopyFilesTest·TextFileNameTest·AudioImportTest입니다. 새 DebugBuild의 stage-debug/classes와 android-36/android.jar를 classpath로 따로 컴파일해 실행합니다. android.jar의 org.json은 JVM에서 Stub 예외가 나므로 Store·Ai 저장 동작은 기기 시험이 맡습니다.
 - AndroidChecks는 DebugBuild에만 들어갑니다. 검증 전용 가상기기에 설치한 뒤 다음을 실행합니다.
 
   adb -s emulator-5554 install -r <검증용 APK>

@@ -18,7 +18,9 @@ import java.util.zip.*;
 public final class MainActivity extends Activity {
     private WebView view; private Store store; private String permissionId; private JSONObject permissionInput;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
-    private static final int EXPORT_SETTINGS=21,IMPORT_SETTINGS=22,PICK_FOLDER=23,SAVE_TEXT=24;
+    private static final int EXPORT_SETTINGS=21,IMPORT_SETTINGS=22,PICK_FOLDER=23,SAVE_TEXT=24,IMPORT_AUDIO=25;
+    // 녹음 파일을 고르는 동안 들고 있는 화면 칸 값이다. 고른 뒤 녹음 서비스의 불러오기에 넘긴다.
+    private volatile JSONObject importInput;
     private static final String UPDATE_WAIT="업데이트 설치 확인 화면을 먼저 마치거나 취소하세요.";
     private volatile String folderKind;
     // 파일 선택 창이 열린 요청, 내보낼 내용, 확인을 기다리는 불러온 설정이다. 확인 전에는 아무것도 저장하지 않는다.
@@ -38,6 +40,8 @@ public final class MainActivity extends Activity {
                 if("app.meeting.local".equals(uri.getHost())&&("/index.html".equals(file)||"/app.js".equals(file)||"/flow.js".equals(file)||"/formats.js".equals(file)||"/todos.js".equals(file)||"/release-notes.js".equals(file)||"/app.css".equals(file))){try{return new WebResourceResponse(file.endsWith(".css")?"text/css":file.endsWith(".js")?"application/javascript":"text/html","UTF-8",getAssets().open(file.substring(1)));}catch(IOException ignored){}}
                 return new WebResourceResponse("text/plain","UTF-8",403,"Forbidden",Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));
             }});view.loadUrl("https://app.meeting.local/index.html");
+        worker.submit(()->{if(!MeetingService.active&&!MeetingService.starting())AudioImport.cleanTemp(this);});
+        // 녹음 파일을 담다가 앱이 끝났으면 남은 임시 폴더를 지운다. 회의는 다 담은 뒤에만 만들므로 지워도 회의 목록은 그대로다.
     }
     private void answer(String id,Object value,String error){runOnUiThread(()->{if(isDestroyed())return;try{JSONObject payload=new JSONObject().put("value",value==null?JSONObject.NULL:value).put("error",error==null?JSONObject.NULL:error);view.evaluateJavascript("window.receive("+JSONObject.quote(id)+","+payload.toString()+")",null);}catch(Exception ignored){}});}
     private final class Bridge {
@@ -135,6 +139,16 @@ public final class MainActivity extends Activity {
                     permissionId=id;permissionInput=data;
                     runOnUiThread(()->requestPermissions(Build.VERSION.SDK_INT>=33?new String[]{Manifest.permission.RECORD_AUDIO,Manifest.permission.POST_NOTIFICATIONS}:new String[]{Manifest.permission.RECORD_AUDIO},12));return;}
                 begin(id,data);break;
+            case "importAudio":
+                // 회의 시작과 같은 막힘을 본 뒤 문서 선택 창으로 녹음 파일 하나를 고르게 한다. 답은 고른 뒤 audioResult에서 한다.
+                if(MeetingService.active)throw new IOException("이미 진행 중인 회의가 있습니다.");
+                if(Updates.installing())throw new IOException(UPDATE_WAIT);
+                fileIdle();store.requireAccess();Store.notes(data);Store.checkNew(data);
+                {String attempt=data.optString("attemptId");if(attempt.isEmpty()||attempt.length()>128)throw new IOException("불러오기 시도를 확인할 수 없습니다. 다시 시도하세요.");}
+                // 화면은 이 시도 번호가 실린 상태만 이번 불러오기의 것으로 본다.
+                importInput=data;fileRequest=id;
+                runOnUiThread(()->{try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*").putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"audio/*","video/mp4"}),IMPORT_AUDIO);}
+                    catch(Exception ex){fileRequest=null;importInput=null;answer(id,null,"파일 선택 창을 열지 못했습니다.");}});break;
             case "finish": runOnUiThread(()->startService(new Intent(this,MeetingService.class).setAction("finish")));answer(id,true,null);break;
             case "analyze":{
                 if(MeetingService.active)throw new IOException("진행 중인 회의가 있습니다.");
@@ -214,6 +228,7 @@ public final class MainActivity extends Activity {
         super.onActivityResult(code,result,intent);
         if(code==PICK_FOLDER){folderResult(result,intent);return;}
         if(code==SAVE_TEXT){textResult(result,intent);return;}
+        if(code==IMPORT_AUDIO){audioResult(result,intent);return;}
         if(code!=EXPORT_SETTINGS&&code!=IMPORT_SETTINGS)return;
         String id=fileRequest;byte[] bytes=exportBytes;Uri uri=result==RESULT_OK&&intent!=null?intent.getData():null;
         if(id==null)return;
@@ -244,6 +259,22 @@ public final class MainActivity extends Activity {
             answer(id,new JSONObject().put("saved",true).put("file",displayName(uri)),null);
         }catch(Exception ex){answer(id,null,"텍스트 파일을 저장하지 못했습니다. 다른 위치를 골라 다시 시도하세요.");}
         finally{fileRequest=null;textBytes=null;}});
+    }
+    private void audioResult(int result,Intent intent){
+        // 고른 녹음 파일을 빠르게 판정한 뒤 녹음 서비스의 불러오기로 넘긴다. 취소하면 아무것도 바꾸지 않고, 어느 경우든 다음 파일 요청이 막히지 않게 상태를 비운다.
+        String id=fileRequest;JSONObject input=importInput;Uri uri=result==RESULT_OK&&intent!=null?intent.getData():null;
+        if(id==null)return;
+        worker.submit(()->{try{
+            if(uri==null){answer(id,new JSONObject().put("cancelled",true),null);return;}
+            if(!ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())||input==null)throw new IOException("문서 선택 창에서 고른 파일만 사용할 수 있습니다.");
+            AudioImport.inspect(this,uri);
+            if(MeetingService.active||MeetingService.starting())throw new IOException("이미 진행 중인 회의가 있습니다.");
+            if(Updates.installing())throw new IOException(UPDATE_WAIT);
+            MeetingService.startingAt=System.currentTimeMillis();
+            Intent request=new Intent(this,MeetingService.class).setAction("import").setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra("input",input.toString()).putExtra("attemptId",input.optString("attemptId"));
+            runOnUiThread(()->{try{startForegroundService(request);answer(id,new JSONObject().put("id",JSONObject.NULL).put("started",true),null);}catch(Exception ex){MeetingService.startingAt=0;answer(id,null,"녹음 파일 불러오기를 시작하지 못했습니다. 다시 시도하세요.");}});
+        }catch(Exception ex){answer(id,null,ex instanceof IOException?ex.getMessage():"고른 파일을 처리하지 못했습니다. 다시 골라 주세요.");}
+        finally{fileRequest=null;importInput=null;}});
     }
     private void folderResult(int result,Intent intent){
         String id=fileRequest,kind=folderKind;if(id==null||kind==null)return;Uri uri=result==RESULT_OK&&intent!=null?intent.getData():null;

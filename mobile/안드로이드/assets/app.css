@@ -107,6 +107,9 @@ legend { padding: 0; margin-bottom: 4px; font-size: 13px; font-weight: 600; colo
 .needs.ready .needs-title { color: var(--teal-deep); }
 .needs-actions { display: flex; flex-wrap: wrap; gap: 0 16px; margin-left: -8px; }
 .needs-actions:not(:has(button:not([hidden]))) { display: none; }
+.import-wrap { display: grid; gap: 6px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.import-wrap .button { width: 100%; }
+.import-wrap[hidden] { display: none; }
 
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--tap); padding: 10px 16px; border: 1px solid var(--rule-strong); border-radius: var(--radius-s); background: var(--sheet); font-size: 15px; font-weight: 600; color: var(--ink); }
 .button:disabled { opacity: .5; }

@@ -1,6 +1,12 @@
 // 가상 안드로이드에서 실제 저장 코드와 모의 AI 응답의 분할 복구를 검증한다.
 package kr.local.meetingjournal;
 import android.app.Instrumentation;
+import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
+import android.media.MediaMuxer;
+import android.net.Uri;
 import android.os.Bundle;
 import org.json.*;
 import java.io.*;
@@ -209,6 +215,172 @@ public final class AndroidChecks extends Instrumentation {
             });
         });
         // 설정 편집기의 commit만 바꾼 대리 객체다. 다른 메서드는 실제 설정으로 넘기고, 이어 쓰는 편집기는 대리 객체를 돌려준다.
+    }
+    static void importChecks(Store store)throws Exception{
+        // 휴대폰 녹음 파일 불러오기: 합성 AAC·영상 파일로 그대로 담기, 다시 압축하지 않고 자르기, 거절 문구를 확인한다.
+        android.content.Context context=store.context;File dir=new File(context.getCacheDir(),"불러오기시험-"+UUID.randomUUID());dir.mkdirs();
+        try{
+            File eight=syntheticAac(dir,"eight.m4a",8);
+            List<File> parts=splitFile(eight,new File(dir,"3초"),3_000_000L,Long.MAX_VALUE);
+            expect(parts.size()==3,"8초 파일을 3초로 자르면 조각 3개다");
+            int sum=0;
+            for(File part:parts){MediaExtractor extractor=extractorOf(part);try{
+                expect(extractor.getTrackCount()==1,"조각에는 오디오 트랙 하나만 있다");
+                extractor.selectTrack(0);MediaFormat format=extractor.getTrackFormat(0);
+                expect(extractor.getSampleTime()==0,"조각마다 시간은 0부터 센다");
+                expect(!format.containsKey(MediaFormat.KEY_DURATION)||format.getLong(MediaFormat.KEY_DURATION)<=3_100_000L,"조각 길이는 기준 남짓이다");
+                sum+=samples(extractor);}finally{extractor.release();}}
+            expect(sum==sampleCount(eight),"조각 샘플 수를 더하면 원본 샘플 수와 같다");
+            expect(splitFile(syntheticAac(dir,"ten.m4a",10),new File(dir,"10초"),3_000_000L,Long.MAX_VALUE).size()==4,"10초 파일은 조각 4개이고 마지막 짧은 조각도 남긴다");
+            long limit=eight.length()*2/5;List<File> bySize=splitFile(eight,new File(dir,"크기"),Long.MAX_VALUE,limit);
+            expect(bySize.size()>=3,"크기 기준으로도 나눈다");
+            for(File part:bySize)expect(part.length()<=limit+4096,"조각 크기는 기준과 컨테이너 여유 안이다");
+            Uri eightUri=Uri.fromFile(eight);AudioImport.Inspection small=AudioImport.inspect(context,eightUri);
+            expect(!small.split&&small.size==eight.length()&&small.durationUs>7_000_000L&&AudioImport.AAC.equals(small.mime),"짧은 AAC 파일은 그대로 담을 것으로 판정한다");
+            List<File> stored=AudioImport.store(context,eightUri,small,new File(dir,"그대로"));
+            expect(stored.size()==1&&stored.get(0).getName().equals("원음-001.m4a")&&importDigest(stored.get(0)).equals(importDigest(eight)),"그대로 담으면 원본과 바이트가 같다");
+            importUnreadableCheck(context);
+            File memo=new File(dir,"memo.m4a");Store.write(memo,"음성이 아닌 메모");
+            expectImportError(context,memo,AudioImport.unsupported(null),"ftyp가 없는 파일은 받지 않는다");
+            importVideoTrackCheck(context,dir);
+            importStoreChecks(store);
+            importStageCheck(store);
+            importTempCleanupCheck(store);
+        }finally{deleteTree(dir);}
+    }
+    static void importStoreChecks(Store store)throws Exception{
+        // 담아 둔 조각으로 회의를 만들고, 틀린 입력과 옮기기 실패에는 회의 폴더를 남기지 않는지 본다.
+        android.content.Context context=store.context;File source=new File(context.getCacheDir(),"조각원본-"+UUID.randomUUID());source.mkdirs();
+        try{
+            File first=syntheticAac(source,"통화 원본-김민수-1.m4a",2),second=syntheticAac(source,"통화 원본-김민수-2.m4a",2);
+            String firstDigest=importDigest(first),secondDigest=importDigest(second);int before=meetingDirs(store);
+            JSONObject record=store.createImported(new JSONObject().put("date","2099-06-01").put("title","불러온 통화").put("participants","김민수, 박서연").put("notes","").put("outputFormat","meeting"),Arrays.asList(first,second));
+            File dir=store.directory("main",record.getString("id"));JSONArray audio=record.getJSONArray("audio");
+            expect(audio.length()==2&&"원음-001.m4a".equals(audio.getString(0))&&"원음-002.m4a".equals(audio.getString(1)),"불러온 조각을 원음-001부터 차례로 적는다");
+            expect(importDigest(new File(dir,"원음-001.m4a")).equals(firstDigest)&&importDigest(new File(dir,"원음-002.m4a")).equals(secondDigest),"조각을 바이트 그대로 회의 폴더로 옮긴다");
+            JSONObject saved=store.load("main",record.getString("id"));
+            expect("saved".equals(saved.getString("state"))&&"녹음 파일을 불러왔습니다.".equals(saved.getString("message")),"불러온 회의는 분석을 기다리는 상태로 저장한다");
+            expect(!Store.read(new File(dir,"회의정보.json")).contains("통화 원본"),"원본 파일 이름을 회의 기록에 남기지 않는다");
+            expect(meetingDirs(store)==before+1,"회의는 하나만 만든다");
+            try{store.createImported(new JSONObject().put("date","2099-6-1").put("title","날짜 틀림"),Collections.singletonList(syntheticAac(source,"date.m4a",1)));throw new AssertionError("틀린 날짜로 회의를 만들었습니다.");}
+            catch(IOException ex){expect(ex.getMessage().contains("회의 날짜"),"틀린 날짜는 회의를 만들기 전에 막는다");}
+            expect(meetingDirs(store)==before+1,"틀린 날짜는 회의 폴더를 만들지 않는다");
+            try{store.createImported(new JSONObject().put("date","2099-06-02").put("title","옮기기 실패"),Arrays.asList(syntheticAac(source,"ok.m4a",1),new File(source,"없는 조각.m4a")));throw new AssertionError("없는 조각으로 회의를 만들었습니다.");}
+            catch(IOException ex){expect(meetingDirs(store)==before+1,"조각을 옮기다 실패하면 만든 회의 폴더를 지운다");}
+        }finally{deleteTree(source);}
+    }
+    static void importStageCheck(Store store)throws Exception{
+        // 조각과 회의정보를 다 담아도 공개(폴더 이름 바꾸기) 전에는 목록에 보이지 않고, 그 상태에서 앱이 끝나 임시 폴더를 지우면 회의가 남지 않는다.
+        android.content.Context context=store.context;File source=new File(AudioImport.tempRoot(context),"단계시험-"+UUID.randomUUID());source.mkdirs();
+        int before=meetingDirs(store),listed=store.history().getJSONArray("meetings").length();File staging=new File(source,"회의");
+        JSONObject staged=store.stageImported(new JSONObject().put("date","2099-06-03").put("title","공개 전 종료"),Arrays.asList(syntheticAac(source,"a.m4a",1),syntheticAac(source,"b.m4a",1)),staging);
+        expect(new File(staging,"회의정보.json").isFile()&&new File(staging,"원음-002.m4a").isFile()&&staged.getJSONArray("audio").length()==2,"공개 전 준비 폴더에 조각과 회의정보를 다 담는다");
+        expect(meetingDirs(store)==before&&store.history().getJSONArray("meetings").length()==listed,"공개 전에는 회의 목록에 보이지 않는다");
+        AudioImport.cleanTemp(context);
+        expect(!source.exists()&&meetingDirs(store)==before&&store.history().getJSONArray("meetings").length()==listed,"공개 전에 앱이 끝나 임시 폴더를 지우면 회의가 남지 않는다");
+    }
+    static int meetingDirs(Store store){File[] dirs=store.locationDirectory("main").listFiles(File::isDirectory);return dirs==null?0:dirs.length;}
+    static void importTempCleanupCheck(Store store)throws Exception{
+        android.content.Context context=store.context;File left=new File(AudioImport.tempRoot(context),UUID.randomUUID().toString());left.mkdirs();Store.write(new File(left,"원음-001.m4a"),"남은 조각");
+        int before=store.history().getJSONArray("meetings").length();
+        AudioImport.cleanTemp(context);
+        expect(!AudioImport.tempRoot(context).exists(),"앱을 다시 열면 남은 불러오기 임시 폴더를 지운다");
+        expect(store.history().getJSONArray("meetings").length()==before,"임시 폴더를 지워도 회의 목록은 그대로다");
+    }
+    static void importUnreadableCheck(android.content.Context context){
+        try{AudioImport.inspect(context,Uri.parse("content://kr.local.meetingjournal.none/없음.m4a"));throw new AssertionError("열 수 없는 주소를 읽었다고 답했습니다.");}
+        catch(IOException ex){expect(AudioImport.UNREADABLE.equals(ex.getMessage()),"열 수 없는 주소는 읽지 못했다고 알린다: "+ex.getMessage());}
+    }
+    static void importVideoTrackCheck(android.content.Context context,File dir)throws Exception{
+        File video=syntheticVideo(dir,"video.mp4",4,true);Uri uri=Uri.fromFile(video);AudioImport.Inspection inspection=AudioImport.inspect(context,uri);
+        expect(!inspection.split,"짧은 영상 파일은 그대로 담는다");
+        expect(importDigest(AudioImport.store(context,uri,inspection,new File(dir,"영상그대로")).get(0)).equals(importDigest(video)),"영상이 든 파일도 원본 그대로 담는다");
+        for(File part:splitFile(video,new File(dir,"영상조각"),3_000_000L,Long.MAX_VALUE)){MediaExtractor extractor=extractorOf(part);try{
+            expect(extractor.getTrackCount()==1&&extractor.getTrackFormat(0).getString(MediaFormat.KEY_MIME).startsWith("audio/"),"영상 파일을 자르면 조각에는 오디오 트랙만 있다");}finally{extractor.release();}}
+        expectImportError(context,syntheticVideo(dir,"video-only.mp4",2,false),AudioImport.unsupported(null),"오디오가 없는 영상은 받지 않는다");
+    }
+    static void expectImportError(android.content.Context context,File file,String message,String label){
+        try{AudioImport.inspect(context,Uri.fromFile(file));throw new AssertionError(label+": 받아들였습니다.");}
+        catch(IOException ex){expect(message.equals(ex.getMessage()),label+": "+ex.getMessage());}
+    }
+    static List<File> splitFile(File source,File dir,long maxUs,long maxBytes)throws Exception{
+        MediaExtractor extractor=extractorOf(source);
+        try{return AudioImport.split(extractor,audioTrack(extractor),dir,maxUs,maxBytes);}finally{extractor.release();}
+    }
+    static MediaExtractor extractorOf(File file)throws IOException{MediaExtractor extractor=new MediaExtractor();extractor.setDataSource(file.getPath());return extractor;}
+    static int audioTrack(MediaExtractor extractor){
+        for(int i=0;i<extractor.getTrackCount();i++)if(extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME).startsWith("audio/"))return i;
+        throw new AssertionError("오디오 트랙이 없습니다.");
+    }
+    static int samples(MediaExtractor extractor){int count=0;java.nio.ByteBuffer buffer=java.nio.ByteBuffer.allocate(1<<20);while(extractor.readSampleData(buffer,0)>=0){count++;extractor.advance();}return count;}
+    static int sampleCount(File file)throws IOException{MediaExtractor extractor=extractorOf(file);try{extractor.selectTrack(audioTrack(extractor));return samples(extractor);}finally{extractor.release();}}
+    static String importDigest(File file)throws Exception{
+        java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
+        try(InputStream in=new FileInputStream(file)){byte[] buffer=new byte[65536];for(int count;(count=in.read(buffer))!=-1;)digest.update(buffer,0,count);}
+        StringBuilder hex=new StringBuilder();for(byte b:digest.digest())hex.append(String.format(Locale.ROOT,"%02x",b&0xff));return hex.toString();
+    }
+    static void deleteTree(File file){File[] children=file.listFiles();if(children!=null)for(File child:children)deleteTree(child);file.delete();}
+    static File syntheticAac(File dir,String name,int seconds)throws Exception{
+        List<Object[]> sound=new ArrayList<>();MediaFormat format=encodeAac(seconds,sound);
+        return mux(new File(dir,name),new MediaFormat[]{format},Collections.singletonList(sound));
+    }
+    static File syntheticVideo(File dir,String name,int seconds,boolean withAudio)throws Exception{
+        List<Object[]> video=new ArrayList<>();MediaFormat videoFormat=encodeAvc(seconds,video);
+        if(!withAudio)return mux(new File(dir,name),new MediaFormat[]{videoFormat},Collections.singletonList(video));
+        List<Object[]> sound=new ArrayList<>();MediaFormat audioFormat=encodeAac(seconds,sound);
+        return mux(new File(dir,name),new MediaFormat[]{videoFormat,audioFormat},Arrays.asList(video,sound));
+    }
+    static File mux(File file,MediaFormat[] formats,List<List<Object[]>> tracks)throws Exception{
+        MediaMuxer muxer=new MediaMuxer(file.getPath(),MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);int[] ids=new int[formats.length];
+        for(int i=0;i<formats.length;i++)ids[i]=muxer.addTrack(formats[i]);muxer.start();
+        List<Object[]> order=new ArrayList<>();for(int i=0;i<formats.length;i++)for(Object[] sample:tracks.get(i))order.add(new Object[]{i,sample});
+        order.sort((a,b)->Long.compare((Long)((Object[])a[1])[1],(Long)((Object[])b[1])[1]));
+        // 트랙을 시간 순서로 섞어 써서 실제 녹음 파일처럼 음성과 영상이 번갈아 담기게 한다.
+        MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
+        for(Object[] item:order){Object[] sample=(Object[])item[1];byte[] data=(byte[])sample[0];info.set(0,data.length,(Long)sample[1],(Integer)sample[2]);muxer.writeSampleData(ids[(Integer)item[0]],java.nio.ByteBuffer.wrap(data),info);}
+        muxer.stop();muxer.release();return file;
+    }
+    static void keep(MediaCodec codec,int out,MediaCodec.BufferInfo info,List<Object[]> samples){
+        if((info.flags&MediaCodec.BUFFER_FLAG_CODEC_CONFIG)==0&&info.size>0){java.nio.ByteBuffer buffer=codec.getOutputBuffer(out);byte[] data=new byte[info.size];buffer.position(info.offset);buffer.get(data);samples.add(new Object[]{data,info.presentationTimeUs,info.flags&MediaCodec.BUFFER_FLAG_KEY_FRAME});}
+        codec.releaseOutputBuffer(out,false);
+    }
+    static MediaFormat encodeAac(int seconds,List<Object[]> samples)throws Exception{
+        // 440Hz 사인파를 앱 녹음과 같은 모노 24kHz 64kbps AAC로 압축한다. 무음만 넣으면 인코더가 빈 프레임을 낼 수 있어 작은 소리를 넣는다.
+        int rate=24000;MediaFormat format=MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,rate,1);
+        format.setInteger(MediaFormat.KEY_AAC_PROFILE,MediaCodecInfo.CodecProfileLevel.AACObjectLC);format.setInteger(MediaFormat.KEY_BIT_RATE,64000);
+        MediaCodec codec=MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC);codec.configure(format,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);codec.start();
+        long total=(long)rate*seconds,fed=0;boolean ended=false;MediaFormat output=null;MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
+        try{
+            while(true){
+                if(!ended){int in=codec.dequeueInputBuffer(10_000);if(in>=0){java.nio.ByteBuffer buffer=codec.getInputBuffer(in);buffer.clear();buffer.order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                    int frames=(int)Math.min(buffer.remaining()/2,total-fed);for(int i=0;i<frames;i++)buffer.putShort((short)(Math.sin(2*Math.PI*440*(fed+i)/rate)*3000));
+                    long pts=fed*1_000_000L/rate;fed+=frames;ended=fed>=total;codec.queueInputBuffer(in,0,frames*2,pts,ended?MediaCodec.BUFFER_FLAG_END_OF_STREAM:0);}}
+                int out=codec.dequeueOutputBuffer(info,10_000);
+                if(out==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED)output=codec.getOutputFormat();
+                else if(out>=0){keep(codec,out,info,samples);if((info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0)break;}
+            }
+        }finally{codec.stop();codec.release();}
+        return output;
+    }
+    static MediaFormat encodeAvc(int seconds,List<Object[]> samples)throws Exception{
+        // 작은 회색 화면을 초당 10장 AVC로 압축한다. 영상이 든 mp4를 흉내 내는 데만 쓴다.
+        int width=176,height=144,fps=10;MediaFormat format=MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC,width,height);
+        format.setInteger(MediaFormat.KEY_COLOR_FORMAT,MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible);format.setInteger(MediaFormat.KEY_BIT_RATE,200_000);
+        format.setInteger(MediaFormat.KEY_FRAME_RATE,fps);format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,1);
+        MediaCodec codec=MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);codec.configure(format,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);codec.start();
+        int frames=seconds*fps,queued=0;MediaFormat output=null;MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
+        try{
+            while(true){
+                if(queued<=frames){int in=codec.dequeueInputBuffer(10_000);if(in>=0){long pts=queued*1_000_000L/fps;
+                    if(queued==frames)codec.queueInputBuffer(in,0,0,pts,MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    else{android.media.Image image=codec.getInputImage(in);for(android.media.Image.Plane plane:image.getPlanes()){java.nio.ByteBuffer buffer=plane.getBuffer();while(buffer.hasRemaining())buffer.put((byte)(64+queued));}codec.queueInputBuffer(in,0,width*height*3/2,pts,0);}
+                    queued++;}}
+                int out=codec.dequeueOutputBuffer(info,10_000);
+                if(out==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED)output=codec.getOutputFormat();
+                else if(out>=0){keep(codec,out,info,samples);if((info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0)break;}
+            }
+        }finally{codec.stop();codec.release();}
+        return output;
     }
     android.content.Context testContext(){
         return new android.content.ContextWrapper(getTargetContext()){
@@ -524,6 +696,12 @@ public final class AndroidChecks extends Instrumentation {
             expect(store.loadReview("main",id,old).getString("comment").equals("앞선 결과에서 저장한 의견")&&store.load("main",id).getString("resultId").equals(latest)&&store.load("main",id).getString("state").equals("complete"),"T5 서비스 실패 상태에도 앞선 평가와 저장된 완료 결과는 그대로다");
         }finally{MeetingService.snapshot=before;}
     }
+    boolean mainShown;
+    void showMain(){
+        // 서비스를 앞 화면에서 시작하도록 앱 화면을 이 시험 실행에서 한 번만 띄운다. 이미 떠 있는 화면에 다시 보내면 Android가 새 화면을 만들지 않아 startActivitySync가 끝나지 않는다.
+        if(mainShown)return;
+        startActivitySync(new android.content.Intent(getTargetContext(),MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));mainShown=true;
+    }
     void serviceAttemptChecks()throws Exception{
         Store store=new Store(getTargetContext());String previousKey=Store.sessionKey,previousSnapshot=MeetingService.snapshot;
         JSONObject record=store.create(new JSONObject().put("date","2099-06-01").put("title","합성 즉시 실패 경계"));String id=record.getString("id");File dir=store.directory("main",id);
@@ -531,7 +709,7 @@ public final class AndroidChecks extends Instrumentation {
         String original=Store.read(new File(dir,"결과-"+old+".json")),review=Store.read(new File(dir,"평가-"+old+".json"));
         try{
             Store.sessionKey="sk-test-00000000000000000000";code=500;
-            startActivitySync(new android.content.Intent(getTargetContext(),MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            showMain();
             for(int index=1;index<=2;index++){
                 final String attempt="합성시도-"+index;replies.add("{}");
                 final android.content.Intent request=new android.content.Intent(getTargetContext(),MeetingService.class).setAction("refine").putExtra("location","main").putExtra("id",id).putExtra("resultId",old).putExtra("feedback","보존할 의견").putExtra("attemptId",attempt);
@@ -542,6 +720,41 @@ public final class AndroidChecks extends Instrumentation {
                 JSONObject saved=store.load("main",id);expect(saved.getString("state").equals("complete")&&saved.getString("resultId").equals(old)&&!saved.has("attemptId")&&Store.read(new File(dir,"결과-"+old+".json")).equals(original)&&Store.read(new File(dir,"평가-"+old+".json")).equals(review),"연속 서비스 실패에도 결과·평가 원문과 완료 포인터를 보존하고 시도 표지는 저장하지 않는다");waitForIdleSync();Thread.sleep(100);
             }
         }finally{code=200;Store.sessionKey=previousKey;MeetingService.snapshot=previousSnapshot;}
+    }
+    void serviceImportChecks()throws Exception{
+        // 실제 녹음 서비스로 합성 녹음 파일을 불러와 분석까지 끝내고, 성공·실패로 끝난 상태에도 이번 시도 번호가 남는지 본다. 화면은 이 번호로 이번 불러오기의 끝을 알아본다.
+        android.content.Context context=getTargetContext();Store store=new Store(context);String previousKey=Store.sessionKey,previousSnapshot=MeetingService.snapshot;
+        File source=new File(context.getCacheDir(),"서비스불러오기-"+UUID.randomUUID());source.mkdirs();
+        try{
+            Store.sessionKey="sk-test-00000000000000000000";MeetingService.startingAt=System.currentTimeMillis();
+            showMain();
+            // 화면이 열리며 남은 임시 폴더를 지우는 일이 이번 불러오기와 겹치지 않게 시작 중 표시를 먼저 켠다. 서비스가 요청을 받으면 지운다.
+            for(String outcome:new String[]{"complete","failed"}){
+                final String attempt="합성불러오기-"+outcome;
+                if(outcome.equals("complete")){replies.add("{\"text\":\"합성 전사\"}");replies.add(completed());}else{code=500;replies.add("{}");}
+                JSONObject input=new JSONObject().put("date","2099-06-04").put("title","합성 불러오기 "+outcome).put("participants","김민수").put("notes","").put("outputFormat","meeting").put("attemptId",attempt);
+                final android.content.Intent request=new android.content.Intent(context,MeetingService.class).setAction("import").setData(Uri.fromFile(syntheticAac(source,outcome+".m4a",2))).putExtra("input",input.toString()).putExtra("attemptId",attempt);
+                MeetingService.startingAt=System.currentTimeMillis();runOnMainSync(()->context.startForegroundService(request));
+                long deadline=System.currentTimeMillis()+15000;JSONObject event;
+                do{Thread.sleep(20);event=new JSONObject(MeetingService.snapshot);}while(System.currentTimeMillis()<deadline&&(MeetingService.active||!outcome.equals(event.optString("state"))));
+                expect(!MeetingService.active&&outcome.equals(event.optString("state"))&&!event.optString("id").isEmpty()&&attempt.equals(event.optString("attemptId")),"불러온 회의의 분석이 "+(outcome.equals("complete")?"성공":"실패")+"으로 끝난 상태에도 이번 시도 번호가 남는다");
+                expect(!store.load("main",event.getString("id")).has("attemptId"),"시도 번호는 회의 기록에 저장하지 않는다");
+                code=200;waitForIdleSync();Thread.sleep(100);
+            }
+        }finally{code=200;replies.clear();Store.sessionKey=previousKey;MeetingService.snapshot=previousSnapshot;MeetingService.startingAt=0;deleteTree(source);}
+    }
+    void sampleFiles()throws Exception{
+        // 문서 선택 창 확인용 합성 통화 녹음(30초, 25분)을 공용 다운로드의 VoiceNote합성 폴더에 만든다. 440Hz 소리만 담은 합성 파일이고 실제 녹음이나 회의 자료는 쓰지 않는다.
+        android.content.Context context=getTargetContext();android.content.ContentResolver resolver=context.getContentResolver();File dir=new File(context.getCacheDir(),"선택창표본-"+UUID.randomUUID());dir.mkdirs();
+        try{
+            for(Object[] sample:new Object[][]{{"합성 통화 30초.m4a",30},{"합성 통화 25분.m4a",1500}}){
+                String name=(String)sample[0];File file=syntheticAac(dir,name,(Integer)sample[1]);
+                android.content.ContentValues values=new android.content.ContentValues();
+                values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,name);values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"audio/mp4");values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,android.os.Environment.DIRECTORY_DOWNLOADS+"/VoiceNote합성");
+                Uri uri=resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);expect(uri!=null,name+" 파일을 다운로드 폴더에 만든다");
+                try(OutputStream out=resolver.openOutputStream(uri);InputStream in=new FileInputStream(file)){byte[] buffer=new byte[65536];for(int read;(read=in.read(buffer))>0;)out.write(buffer,0,read);}
+            }
+        }finally{deleteTree(dir);}
     }
     void dispatchFCopyChecks()throws Exception{
         JSONArray failures=new JSONArray();String[] kinds={"transcript","summaryMd","summaryTxt","transcript","audio"},messages={"폴더 없음.","권한 없음.","폴더 없음","폴더 없음.","권한 없음"};
@@ -779,6 +992,9 @@ public final class AndroidChecks extends Instrumentation {
         // 기기 시험 중에는 업데이트 확인이 실제 깃허브나 아래 AI 모의 응답에 닿지 않게 한다.
         Updates.opener=url->{throw new IOException("기기 시험 중에는 업데이트를 확인하지 않습니다.");};
         if(probe.equals("u-e2e")){updateEndToEnd();return;}
+        if(probe.equals("samples")){sampleFiles();result.putString("stream","PASS "+checks+" sample files\n");finish(-1,result);return;}
+        // 문서 선택 창 확인용 합성 파일만 만들고 끝낸다. 시험 결과를 바꾸지 않는다.
+        if(probe.equals("import")){importChecks(new Store(testContext()));result.putString("stream","PASS "+checks+" import checks\n");finish(-1,result);return;}
         if(!probe.isEmpty()&&!probe.startsWith("f-")&&!probe.startsWith("g-")){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
         for(String name:new String[]{"first","open","review","draft","finish","n1new","n1old","n1meta"})regressionCheck(name);
         archiveChecks(new Store(testContext()));
@@ -787,6 +1003,7 @@ public final class AndroidChecks extends Instrumentation {
         todoChecks(new Store(testContext()));
         meChecks(new Store(testContext()));
         myNameFailureCheck();
+        importChecks(new Store(testContext()));
         updateChecks();
         URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){protected URLConnection openConnection(URL url){return new HttpURLConnection(url){
             final ByteArrayOutputStream sent=new ByteArrayOutputStream();
@@ -797,7 +1014,7 @@ public final class AndroidChecks extends Instrumentation {
             public InputStream getInputStream()throws IOException{requests.add(new String(sent.toByteArray(),StandardCharsets.UTF_8));routes.add(url.getPath());auths.add(lastAuth);String next=replies.poll();if(next==null)throw new IOException("Unexpected network request");return new ByteArrayInputStream(next.getBytes(StandardCharsets.UTF_8));}
             public InputStream getErrorStream(){try{return getInputStream();}catch(IOException ex){throw new RuntimeException(ex);}}
         };}}:null);
-        if(probe.startsWith("f-")){if(probe.equals("f-attempt"))serviceAttemptChecks();else dispatchFCopyChecks();result.putString("stream","PASS "+checks+" Dispatch F checks: "+probe+"\n");finish(-1,result);return;}
+        if(probe.startsWith("f-")){if(probe.equals("f-attempt"))serviceAttemptChecks();else if(probe.equals("f-import"))serviceImportChecks();else dispatchFCopyChecks();result.putString("stream","PASS "+checks+" Dispatch F checks: "+probe+"\n");finish(-1,result);return;}
         if(probe.startsWith("g-")){copyInspectionChecks(new Store(testContext()),probe.equals("g-file"));result.putString("stream","PASS "+checks+" Dispatch G checks\n");finish(-1,result);return;}
         Store store=new Store(testContext());
         String previousModel=store.summaryModel();store.summaryModel(null);
@@ -861,7 +1078,7 @@ public final class AndroidChecks extends Instrumentation {
         missingFolderCheck(new Store(testContext()));
         copyRecoveryCheck(new Store(testContext()));
         serviceRefineFailureCheck(new Store(testContext()));
-        dispatchFCopyChecks();serviceAttemptChecks();
+        dispatchFCopyChecks();serviceAttemptChecks();serviceImportChecks();
         copyInspectionChecks(new Store(testContext()),false);
         store.summaryModel(previousModel);
         result.putString("stream","PASS "+checks+" native storage and recovery checks; real API calls=0\n");finish(-1,result);
