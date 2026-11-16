@@ -15,6 +15,10 @@
   const KEYS = Object.freeze(['overview', 'topics', 'decisions', 'actions', 'openQuestions']);
   const KEY_LABELS = Object.freeze({ overview: '핵심 요약', topics: '주요 내용', decisions: '결정 사항', actions: '할 일', openQuestions: '확인 필요' });
   const LIMITS = Object.freeze({ name: 30, title: 30, instruction: 1000 });
+  const OVERVIEW_LABELS = Object.freeze(['전체 방향', '주요 결정', '다음 할 일', '남은 쟁점']);
+  // 회의록형 핵심 요약의 머리말이다. 옛 결과의 '머리말 | 내용' 줄은 이 넷으로 시작할 때만 머리말과 하위 항목으로 나눈다.
+  const ITEM_LIMITS = Object.freeze({ text: 1000, detail: 1000, details: 8, overview: 12 });
+  // AI 응답 검사의 항목 한도다. 저장된 옛 결과를 읽을 때는 쓰지 않는다.
   // 결과 문서의 목표 글자 수다. 휴대폰 SummaryRules.java와 같은 값을 쓴다.
   const LENGTH_GOALS = Object.freeze({ meeting: 3000, summary: 1000, tasks: 2000, custom: 3000 });
   // 예시 화면에만 쓰는 가상의 회의 결과다. 실제 회의 내용과 관계없다.
@@ -101,13 +105,73 @@
   }
 
   function minutesLengths(minutes) {
-    // 줄일 수 있는 본문(overview·topics)과 그대로 둘 목록(결정·할 일·미확정)의 글자 수를 따로 센다. 휴대폰 Ai.java도 같은 항목을 센다.
+    // 줄일 수 있는 본문(overview·topics)과 그대로 둘 목록(결정·할 일·미확정)의 글자 수를 따로 센다. 휴대폰 MinutesItems.java도 같은 항목을 센다.
     const m = minutes || {};
     const size = list => (list || []).reduce((sum, value) => sum + String(value ?? '').length, 0);
+    const field = value => typeof value === 'string' ? value.length
+      : Array.isArray(value) ? value.reduce((sum, entry) => sum + (plain(entry) ? String(entry.text ?? '').length + size(entry.details) : String(entry ?? '').length), 0) : 0;
+    // 옛 문자열은 지금처럼 원래 길이를, 항목은 본문과 하위 항목의 글자 수를 센다.
     return {
-      body: String(m.overview || '').length + (m.topics || []).reduce((sum, topic) => sum + String(topic.title || '').length + size(topic.points), 0),
-      kept: size(m.decisions) + size(m.openQuestions) + (m.actions || []).reduce((sum, action) => sum + size([action.task, action.owner, action.due]), 0),
+      body: field(m.overview) + (m.topics || []).reduce((sum, topic) => sum + String(topic.title || '').length + field(topic.points), 0),
+      kept: field(m.decisions) + field(m.openQuestions) + (m.actions || []).reduce((sum, action) => sum + size([action.task, action.owner, action.due]), 0),
     };
+  }
+
+  const BULLETS = /^(?:[-•·*](?:\s+|$))+/;
+  // 글 맨 앞의 글머리표 묶음이다. 기호 뒤에 공백이나 글 끝이 올 때만 떼므로 '-5도' 같은 글은 그대로 둔다.
+  const clean = value => typeof value === 'string' ? value.trim().replace(BULLETS, '').trim() : '';
+  const LABEL_LINE = new RegExp(`^(${OVERVIEW_LABELS.join('|')})\\s*\\|(.*)$`);
+
+  function item(value) {
+    // 문자열이나 항목 하나를 앞뒤 공백과 앞 글머리표를 뗀 항목으로 바꾼다. 빈 하위 항목은 버리고, 본문이 비면 첫 하위 항목을 올리며, 둘 다 비면 null이다.
+    if (typeof value === 'string') { const text = clean(value); return text ? { text, details: [] } : null; }
+    if (!plain(value)) return null;
+    const details = (Array.isArray(value.details) ? value.details : []).map(clean).filter(Boolean);
+    const text = clean(value.text);
+    if (text) return { text, details };
+    return details.length ? { text: details[0], details: details.slice(1) } : null;
+  }
+
+  function items(value) {
+    // 없는 칸·문자열 하나·문자열 배열·항목 배열을 모두 항목 배열로 바꾼다. 옛 문단은 길이와 관계없이 항목 하나가 된다.
+    if (typeof value === 'string') { const one = item(value); return one ? [one] : []; }
+    return Array.isArray(value) ? value.map(item).filter(Boolean) : [];
+  }
+
+  function overviewItems(value) {
+    // 옛 핵심 요약 문자열은 줄마다 항목 하나로, 알려진 머리말 줄은 첫 구분자에서 나눠 머리말과 하위 항목으로 바꾼다. 새 구조는 items와 같다.
+    if (typeof value !== 'string') return items(value);
+    return value.split(/\r?\n/).map(line => {
+      const text = clean(line), label = text.match(LABEL_LINE);
+      if (!label) return text ? { text, details: [] } : null;
+      const detail = clean(label[2]);
+      return { text: label[1], details: detail ? [detail] : [] };
+    }).filter(Boolean);
+  }
+
+  function normalizeMinutes(minutes) {
+    // 저장 원본은 바꾸지 않고, 핵심 요약·주제 항목·결정·미확정만 항목 배열로 바꾼 새 객체를 돌려준다. 할 일과 제목은 그대로 둔다.
+    if (!plain(minutes)) return minutes;
+    return {
+      ...minutes,
+      overview: overviewItems(minutes.overview),
+      topics: (Array.isArray(minutes.topics) ? minutes.topics : []).map(topic => ({ ...topic, points: items(topic?.points) })),
+      decisions: items(minutes.decisions),
+      openQuestions: items(minutes.openQuestions),
+    };
+  }
+  const pruneMinutes = normalizeMinutes;
+  // 새 구조 AI 응답의 빈 값 정리는 item 규칙과 같으므로 같은 함수를 쓴다.
+
+  function itemLines(list, marker = '- ') {
+    // 항목은 기호와 본문 첫 줄로 쓰고, 이어지는 줄은 기호 폭만큼 들여 쓴다. 하위 항목은 두 칸 들여 '- '로 쓴다.
+    const indent = ' '.repeat(marker.length);
+    const block = (text, first, rest) => {
+      const [head, ...tail] = String(text).split(/\r?\n/);
+      return [first + head.trim(), ...tail.map(clean).filter(Boolean).map(line => rest + line)];
+    };
+    // 이어지는 줄은 앞 기호를 떼고 빈 줄을 버려 하위 항목처럼 보이지 않게 한다.
+    return items(list).flatMap(entry => [...block(entry.text, marker, indent), ...entry.details.flatMap(detail => block(detail, '  - ', '    '))]);
   }
 
   function compactTarget(minutes, outputFormat) {
@@ -149,5 +213,5 @@
     return result;
   }
 
-  return { LABELS, DESCRIPTIONS, KEYS, KEY_LABELS, LIMITS, LENGTH_GOALS, SAMPLE, format, validateCustom, customInstruction, actionLine, customSections, customText, defaultCustom, minutesLengths, compactTarget, participantKeywords, withoutForeignText, withoutForeignScript };
+  return { LABELS, DESCRIPTIONS, KEYS, KEY_LABELS, LIMITS, LENGTH_GOALS, SAMPLE, OVERVIEW_LABELS, ITEM_LIMITS, format, validateCustom, customInstruction, actionLine, customSections, customText, defaultCustom, minutesLengths, compactTarget, participantKeywords, withoutForeignText, withoutForeignScript, item, items, overviewItems, normalizeMinutes, pruneMinutes, itemLines };
 });

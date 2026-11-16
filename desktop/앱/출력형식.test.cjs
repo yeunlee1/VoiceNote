@@ -91,3 +91,45 @@ test('녹음·회의 기록·목록·파일 출력에 형식을 보존하고 형
   assert.equal((await request(`/api/meetings/main/${tasks.body.meeting.id}`)).body.meeting.outputFormat, 'tasks');
   assert.equal((await request(`/api/meetings/main/${meeting.body.meeting.id}`)).body.meeting.outputFormat, 'meeting');
 });
+
+// 회의 결과 항목 규칙(옛 결과 바꾸기·빈 값 정리·목록 줄·길이 계산)을 두 앱 공통 예시로 확인한다.
+const formats = require('./출력형식.js');
+const itemExamples = require('../tests/fixtures/회의결과-항목-예시.json');
+
+test('옛·새 결과 칸을 공통 예시대로 항목으로 바꾼다', () => {
+  for (const c of itemExamples.normalize) assert.deepEqual(c.field === 'overview' ? formats.overviewItems(c.input) : formats.items(c.input), c.expected, c.name);
+});
+
+test('빈 값 정리를 공통 예시대로 한다', () => {
+  for (const c of itemExamples.prune) assert.deepEqual(formats.pruneMinutes(c.input), c.expected, c.name);
+});
+
+test('목록 줄을 공통 예시대로 만든다', () => {
+  for (const c of itemExamples.lines) assert.deepEqual(formats.itemLines(c.items, c.marker), c.expected, c.name);
+});
+
+test('normalizeMinutes는 입력을 바꾸지 않고 두 번 넣어도 같으며 할 일은 그대로 둔다', () => {
+  const old = { suggestedTitle: '합성', overview: '전체 방향 | 먼저 진행\n주요 결정 | 시안 A', topics: [{ title: '주제', points: ['설명 하나', ''] }], decisions: ['- 결정'], actions: [{ task: '정리하기', owner: null, due: null }], openQuestions: ['미정'] };
+  const before = JSON.stringify(old);
+  const once = formats.normalizeMinutes(old);
+  assert.equal(JSON.stringify(old), before);
+  assert.deepEqual(formats.normalizeMinutes(once), once);
+  assert.equal(once.actions, old.actions);
+  assert.deepEqual(once.overview, [{ text: '전체 방향', details: ['먼저 진행'] }, { text: '주요 결정', details: ['시안 A'] }]);
+  assert.deepEqual(once.topics, [{ title: '주제', points: [{ text: '설명 하나', details: [] }] }]);
+  assert.deepEqual(once.decisions, [{ text: '결정', details: [] }]);
+  assert.equal(once.suggestedTitle, '합성');
+});
+
+test('minutesLengths는 옛 문자열은 지금 길이 그대로, 항목은 본문과 하위 항목을 함께 센다', () => {
+  const old = { overview: '가나다', topics: [{ title: '주제', points: ['라마'] }], decisions: ['바'], actions: [{ task: '사', owner: '아', due: null }], openQuestions: ['자차'] };
+  assert.deepEqual(formats.minutesLengths(old), { body: 3 + 2 + 2, kept: 1 + 2 + 2 });
+  const fresh = { overview: [{ text: '가나다', details: ['카'] }], topics: [{ title: '주제', points: [{ text: '라마', details: ['타파'] }] }], decisions: [{ text: '바', details: ['하'] }], actions: [{ task: '사', owner: '아', due: null }], openQuestions: [{ text: '자차', details: [] }] };
+  assert.deepEqual(formats.minutesLengths(fresh), { body: 3 + 1 + 2 + 2 + 2, kept: 1 + 1 + 2 + 2 });
+});
+
+test('항목 규칙 상수를 내보낸다', () => {
+  assert.deepEqual(formats.OVERVIEW_LABELS, ['전체 방향', '주요 결정', '다음 할 일', '남은 쟁점']);
+  assert.deepEqual(formats.ITEM_LIMITS, { text: 1000, detail: 1000, details: 8, overview: 12 });
+  assert.ok(Object.isFrozen(formats.OVERVIEW_LABELS) && Object.isFrozen(formats.ITEM_LIMITS));
+});
