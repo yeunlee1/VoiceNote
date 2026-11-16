@@ -85,7 +85,8 @@
   function customSections(minutes, custom) {
     const m = minutes || {};
     return custom.sections.map(({ key, title }) => {
-      if (key === 'overview') return { type: 'overview', title, text: String(m.overview || '') };
+      if (key === 'overview') return { type: 'overview', title, text: typeof m.overview === 'string' ? m.overview : '', items: overviewItems(m.overview) };
+      // text는 옛 문자열을 그대로 그리는 화면용이고, items는 항목 구조로 그리는 화면용이다. 목록 칸은 받은 값을 그대로 넘긴다.
       if (key === 'topics') return { type: 'topics', title, topics: m.topics || [] };
       return { type: 'list', key, title, items: key === 'actions' ? (m.actions || []).map(actionLine) : (m[key] || []) };
     });
@@ -169,9 +170,10 @@
     const indent = ' '.repeat(marker.length);
     const block = (text, first, rest) => {
       const [head, ...tail] = String(text).split(/\r?\n/);
-      return [first + head.trim(), ...tail.map(line => line.trim()).map(line => line ? rest + line : '')];
+      return [first + head.trim(), ...tail.map(clean).map(line => line ? rest + line : '')];
     };
-    // 이어지는 줄은 앞뒤 공백만 떼고 내용과 빈 줄은 그대로 둔다. 줄 안의 기호(예: '- 5도')도 원문 글자이므로 지우지 않는다.
+    // 이어지는 줄은 빈 줄을 그대로 두고, 첫머리 글머리표 묶음만 떼어 실제 하위 항목('  - ')과 다른 모양으로 쓴다.
+    // 기호 뒤에 공백이 없는 '-5도' 같은 글은 그대로다. 원문 글자는 저장 원본·JSON 내보내기·화면에 그대로 남는다.
     return items(list).flatMap(entry => [...block(entry.text, marker, indent), ...entry.details.flatMap(detail => block(detail, '  - ', '    '))]);
   }
 

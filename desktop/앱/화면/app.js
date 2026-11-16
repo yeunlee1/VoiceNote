@@ -1334,6 +1334,43 @@
     parent.append(section);
   }
 
+  function renderItems(parent, items, labels = false) {
+    // 항목은 ul > li, 하위 항목은 그 li 안의 ul > li로 그린다. 여러 줄 본문은 li의 pre-wrap으로 같은 항목 안에서 줄을 바꾼다.
+    const list = element("ul", "", "minutes-items");
+    for (const item of items) {
+      const entry = document.createElement("li");
+      entry.append(element("span", item.text, labels && Formats.OVERVIEW_LABELS.includes(item.text) ? "item-text item-label" : "item-text"));
+      // 회의록형 핵심 요약의 머리말 넷(전체 방향 등)만 굵게 써서 그 아래 하위 항목의 제목으로 보이게 한다.
+      if (item.details.length) {
+        const details = element("ul", "", "item-details");
+        item.details.forEach((detail) => details.append(element("li", detail)));
+        entry.append(details);
+      }
+      list.append(entry);
+    }
+    parent.append(list);
+  }
+
+  function renderItemSection(parent, title, items, className = "") {
+    // 항목 목록 절이다. 비어 있으면 기록 없음으로 남긴다. 핵심 요약 절(summary-overview)만 머리말을 굵게 쓴다.
+    const section = document.createElement("section");
+    if (className) section.className = className;
+    section.append(element("h3", title));
+    if (items.length) renderItems(section, items, className === "summary-overview");
+    else section.append(element("p", "기록 없음", "muted"));
+    parent.append(section);
+  }
+
+  function renderTopicGroups(parent, topics, heading) {
+    // 주제마다 제목과 항목 목록을 묶어 그린다.
+    for (const topic of topics) {
+      const group = element("div", "", "topic-group");
+      group.append(element(heading, topic.title));
+      if (topic.points.length) renderItems(group, topic.points);
+      parent.append(group);
+    }
+  }
+
   function renderUsage() {
     ui.usage.replaceChildren();
     const entries = usageTools().normalize(state.usage);
@@ -1781,39 +1818,33 @@
 
   function renderMinutesInto(target, minutes, format, custom, renderActions = null) {
     // 결과 창에서는 할 일을 고칠 수 있게 그리고, 형식 예시에서는 읽기용 목록으로 그린다.
+    minutes = Formats.normalizeMinutes(minutes);
+    // 옛 문자열 결과도 항목 구조로 바꾼 값으로 그린다. 저장된 원본(state.minutes)은 바꾸지 않는다.
     const actionBlock = (title, formatItem) => (renderActions && minutes.actions?.length ? renderActions(target, title, format === "tasks") : renderList(target, title, minutes.actions, formatItem));
     if (format === "custom" && !custom) format = "meeting";
     if (format === "custom" && custom) {
       // 내 형식은 사용자가 고른 항목만 고른 순서와 이름으로 보여 준다.
       for (const section of Formats.customSections(minutes, custom)) {
         if (section.type === "list" && section.key === "actions" && renderActions && minutes.actions?.length) { renderActions(target, section.title); continue; }
-        if (section.type === "list") { renderList(target, section.title, section.items); continue; }
+        if (section.type === "list" && section.key === "actions") { renderList(target, section.title, section.items); continue; }
+        if (section.type !== "topics") { renderItemSection(target, section.title, section.items, section.type === "overview" ? "summary-overview" : ""); continue; }
         const block = document.createElement("section");
         block.append(element("h3", section.title));
-        if (section.type === "overview") { block.className = "summary-overview"; block.append(element("p", section.text)); }
-        else if (!section.topics.length) block.append(element("p", "기록 없음", "muted"));
-        else section.topics.forEach((topic) => { block.append(element("h4", topic.title)); topic.points?.forEach((point) => block.append(element("p", point))); });
+        if (!section.topics.length) block.append(element("p", "기록 없음", "muted"));
+        else renderTopicGroups(block, section.topics, "h4");
         target.append(block);
       }
       return;
     }
     if (format !== "meeting") {
       // 핵심 요약형과 업무 정리형은 회의록형 절 제목을 그대로 붙이지 않고 내용이 있는 절만 보여 준다.
-      const overview = document.createElement("section");
-      overview.className = "summary-overview";
-      overview.append(element("h3", format === "tasks" ? "업무 요약" : "핵심 요약"), element("p", minutes.overview));
+      renderItemSection(target, format === "tasks" ? "업무 요약" : "핵심 요약", minutes.overview, "summary-overview");
       const topics = document.createElement("section");
-      minutes.topics?.forEach((topic) => {
-        const group = document.createElement("div");
-        group.append(element("h3", topic.title));
-        topic.points?.forEach((point) => group.append(element("p", point)));
-        topics.append(group);
-      });
+      renderTopicGroups(topics, minutes.topics, "h3");
       const action = (item) => format === "tasks"
         ? [item.task, `담당 ${item.owner || "미정"}`, `기한 ${item.due || "미정"}`].join(" · ")
         : [item.task, item.owner && `담당 ${item.owner}`, item.due && `기한 ${item.due}`].filter(Boolean).join(" · ");
-      const optional = (title, items, formatItem) => { if (items?.length) renderList(target, title, items, formatItem); };
-      target.append(overview);
+      const optional = (title, items) => { if (items.length) renderItemSection(target, title, items); };
       if (format === "tasks") {
         actionBlock("할 일", action);
         optional("미확정 항목", minutes.openQuestions);
@@ -1827,31 +1858,19 @@
       }
       return;
     }
-    const overview = document.createElement("section");
-    overview.className = "summary-overview";
-    overview.append(element("h3", "핵심 요약"), element("p", minutes.overview));
-    target.append(overview);
+    renderItemSection(target, "핵심 요약", minutes.overview, "summary-overview");
     actionBlock("다음 할 일", (action) =>
       [action.task, action.owner && `담당 ${action.owner}`, action.due && `기한 ${action.due}`]
         .filter(Boolean)
         .join(" · "),
     );
     target.append(element("h3", "상세 회의 내용"));
-    const decisions = document.createElement("section");
-    decisions.append(element("h3", "합의된 방향"));
-    if (!minutes.decisions?.length) decisions.append(element("p", "기록 없음", "muted"));
-    minutes.decisions?.forEach((decision) => decisions.append(element("p", decision)));
-    target.append(decisions);
+    renderItemSection(target, "합의된 방향", minutes.decisions);
     const topics = document.createElement("section");
-    if (!minutes.topics?.length) topics.append(element("p", "기록 없음", "muted"));
-    minutes.topics?.forEach((topic) => {
-      const group = document.createElement("div");
-      group.append(element("h3", topic.title));
-      topic.points?.forEach((point) => group.append(element("p", point)));
-      topics.append(group);
-    });
+    if (!minutes.topics.length) topics.append(element("p", "기록 없음", "muted"));
+    renderTopicGroups(topics, minutes.topics, "h3");
     target.append(topics);
-    renderList(target, "미확정 사항", minutes.openQuestions);
+    renderItemSection(target, "미확정 사항", minutes.openQuestions);
   }
 
   function resultLabel() {
@@ -2049,7 +2068,9 @@
 
   function lines() {
     const data = exportDocument();
-    const minutes = data.minutes;
+    const minutes = Formats.normalizeMinutes(data.minutes);
+    // 저장·복사 글은 옛 결과도 항목 구조로 바꿔 회의문서.cjs와 같은 목록 모양으로 쓴다. JSON 저장(exportDocument)은 원본 그대로다.
+    const items = (list) => Formats.itemLines(list);
     const head = [
       `# ${data.title || "회의록"}`,
       "",
@@ -2059,20 +2080,21 @@
       "",
     ];
     const action = (item) => `- ${item.task} · 담당 ${item.owner || "미정"} · 기한 ${item.due || "미정"}`;
-    const list = (title, items, format = (item) => `- ${item}`) => (items?.length ? [`## ${title}`, ...items.map(format), ""] : []);
-    const topics = (title) => (minutes.topics?.length
-      ? [`## ${title}`, "", ...minutes.topics.flatMap((topic) => [`### ${topic.title}`, "", ...topic.points.flatMap((point) => [point, ""])])] : []);
+    const list = (title, entries) => (entries.length ? [`## ${title}`, ...entries, ""] : []);
+    // 목록 기호는 itemLines와 할 일 줄에서 한 번만 붙인다.
+    const topics = (title) => (minutes.topics.length
+      ? [`## ${title}`, "", ...minutes.topics.flatMap((topic) => [`### ${topic.title}`, "", ...items(topic.points), ""])] : []);
     if (data.outputFormat === "custom" && data.customFormat) return [...head, ...Formats.customText(minutes, data.customFormat)];
     if (data.outputFormat === "summary")
-      return [...head, "## 핵심 요약", minutes.overview, "", ...topics("주요 내용"), ...list("결정 사항", minutes.decisions),
-        ...list("후속 작업", minutes.actions, action), ...list("확인 필요", minutes.openQuestions)];
+      return [...head, "## 핵심 요약", ...items(minutes.overview), "", ...topics("주요 내용"), ...list("결정 사항", items(minutes.decisions)),
+        ...list("후속 작업", (minutes.actions || []).map(action)), ...list("확인 필요", items(minutes.openQuestions))];
     if (data.outputFormat === "tasks")
-      return [...head, "## 업무 요약", minutes.overview, "", "## 할 일", ...(minutes.actions?.length ? minutes.actions.map(action) : ["- 확인된 할 일 없음"]), "",
-        ...list("미확정 항목", minutes.openQuestions), ...list("결정 사항", minutes.decisions), ...topics("참고 내용")];
+      return [...head, "## 업무 요약", ...items(minutes.overview), "", "## 할 일", ...(minutes.actions?.length ? minutes.actions.map(action) : ["- 확인된 할 일 없음"]), "",
+        ...list("미확정 항목", items(minutes.openQuestions)), ...list("결정 사항", items(minutes.decisions)), ...topics("참고 내용")];
     return [
       ...head,
       "## 핵심 요약",
-      minutes.overview,
+      ...items(minutes.overview),
       "",
       "## 다음 할 일",
       ...(minutes.actions || []).map(
@@ -2083,15 +2105,11 @@
       "## 상세 회의 내용",
       "",
       "## 합의된 방향",
-      ...(minutes.decisions || []).flatMap((item) => [item, ""]),
-      ...(minutes.topics || []).flatMap((topic) => [
-        `## ${topic.title}`,
-        "",
-        ...topic.points.flatMap((point) => [point, ""]),
-        "",
-      ]),
+      ...items(minutes.decisions),
+      "",
+      ...minutes.topics.flatMap((topic) => [`## ${topic.title}`, "", ...items(topic.points), ""]),
       "## 미확정 사항",
-      ...(minutes.openQuestions || []).map((item) => `- ${item}`),
+      ...items(minutes.openQuestions),
       "",
     ];
   }

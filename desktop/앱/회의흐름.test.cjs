@@ -6,7 +6,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 function fixture(summaryResponse, responses = {}, extra = {}) {
-  const element = () => ({ value: '', checked: true, hidden: false, disabled: false, open: false, textContent: '', dataset: {}, style: {}, children: [],
+  const element = (tag = '') => ({ tagName: String(tag).toUpperCase(), value: '', checked: true, hidden: false, disabled: false, open: false, textContent: '', dataset: {}, style: {}, children: [],
     classList: { add() {}, remove() {} }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
     addEventListener() {}, setAttribute() {}, removeAttribute() {}, querySelectorAll() { return []; }, querySelector() { return null; },
     focus() {}, show() { this.open = true; }, showModal() { this.open = true; }, close() { this.open = false; } });
@@ -35,7 +35,7 @@ function fixture(summaryResponse, responses = {}, extra = {}) {
   Object.assign(sandbox, { ...extra, window: sandbox.window });
   // 시험마다 필요한 브라우저 기능(예: 가짜 마이크)을 더한다. window는 이미 있는 내용에 합친다.
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
-  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, loadHistory, openMeeting, importAudio, finishMeeting, clearLocal, archiveResult, startRecording };\n})();');
+  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, renderMinutesInto, plainText, loadHistory, openMeeting, importAudio, finishMeeting, clearLocal, archiveResult, startRecording };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const { state, ui } = sandbox.review;
@@ -565,4 +565,76 @@ test('참석자가 없으면 힌트를 보내지 않는다', async () => {
   await summarize();
   const sent = requests.find(request => request.url === '/api/transcribe');
   assert.equal('X-Transcribe-Keywords' in sent.headers, false);
+});
+
+const I = (text, details = []) => ({ text, details });
+const walk = node => [node, ...(node.children || []).flatMap(walk)];
+const rendered = (renderMinutesInto, minutes, format, custom) => {
+  const root = { children: [], append(...items) { this.children.push(...items); } };
+  renderMinutesInto(root, minutes, format, custom);
+  return walk(root);
+};
+const itemTrees = nodes => nodes.filter(node => node.tagName === 'UL' && node.className === 'minutes-items').flatMap(list => list.children.map(li => {
+  assert.equal(li.tagName, 'LI');
+  const [text, details] = li.children;
+  if (details) { assert.equal(details.tagName, 'UL'); for (const detail of details.children) assert.equal(detail.tagName, 'LI'); }
+  return I(text.textContent, (details?.children || []).map(detail => detail.textContent));
+}));
+const itemMinutes = { suggestedTitle: '합성', overview: [I('전체 방향', ['공통 양식부터 정리함']), I('주요 결정', ['시안 A 사용'])],
+  topics: [{ title: '양식', points: [I('공통 양식 쓰기로 함', ['이유: 서식 혼선'])] }], decisions: [I('양식 — 공통 양식 사용', ['적용: 모든 부서'])],
+  actions: [{ task: '초안 만들기', owner: '김민수', due: '11월 20일' }], openQuestions: [I('배포 시점', ['정해지지 않음'])] };
+const oldMinutes = { overview: Array.from({ length: 13 }, (_, i) => `줄 ${i + 1}`).join('\n'), topics: [{ title: '긴 내용', points: ['가'.repeat(2000)] }],
+  decisions: ['- 결정'], actions: [{ task: '정리하기', owner: '박서연', due: '금요일' }], openQuestions: ['미정'] };
+const itemCustom = { name: '주간', sections: [{ key: 'overview', title: '요약' }, { key: 'decisions', title: '결정' }, { key: 'topics', title: '논의' }, { key: 'openQuestions', title: '남은 것' }, { key: 'actions', title: '할 일' }], instruction: '' };
+
+test('세 형식과 내 형식이 핵심 요약·주제·결정·미확정을 ul/li와 그 li 안의 ul로 그린다', () => {
+  const { renderMinutesInto } = fixture();
+  for (const [format, custom] of [['meeting'], ['summary'], ['tasks'], ['custom', itemCustom]]) {
+    const nodes = rendered(renderMinutesInto, itemMinutes, format, custom);
+    const trees = itemTrees(nodes);
+    for (const expected of [I('전체 방향', ['공통 양식부터 정리함']), I('공통 양식 쓰기로 함', ['이유: 서식 혼선']), I('양식 — 공통 양식 사용', ['적용: 모든 부서']), I('배포 시점', ['정해지지 않음'])])
+      assert.ok(trees.some(tree => JSON.stringify(tree) === JSON.stringify(expected)), `${format}: ${expected.text}`);
+    assert.equal(nodes.some(node => node.tagName === 'P' && /공통 양식|배포 시점|전체 방향/.test(node.textContent)), false, `${format}: 결과를 문단으로 그리면 안 됨`);
+  }
+});
+
+test('옛 문자열 결과도 항목 하나씩 li로 그린다(13줄 핵심 요약은 13개, 2000자 문단은 자르지 않음)', () => {
+  const { renderMinutesInto } = fixture();
+  const trees = itemTrees(rendered(renderMinutesInto, oldMinutes, 'meeting'));
+  for (let i = 1; i <= 13; i++) assert.ok(trees.some(tree => tree.text === `줄 ${i}`), `줄 ${i}`);
+  assert.ok(trees.some(tree => tree.text === '가'.repeat(2000)));
+  assert.ok(trees.some(tree => tree.text === '결정'), '앞 글머리표는 떼고 그린다');
+  assert.ok(trees.some(tree => tree.text === '미정'));
+});
+
+test('위쪽 복사 글은 항목을 •, 하위 항목을 두 칸 들인 - 로 쓰고 여러 줄 본문의 이어지는 줄은 항목 깊이로 들여 쓴다', () => {
+  const { state, lines, plainText } = fixture();
+  state.minutes = { ...itemMinutes, decisions: [I('여러 줄 결정\n이어지는 줄', ['하위'])] };
+  const text = plainText(lines());
+  assert.match(text, /^• 여러 줄 결정$/m);
+  assert.match(text, /^ {2}이어지는 줄$/m);
+  assert.match(text, /^ {2}- 하위$/m);
+  assert.match(text, /^• 배포 시점$/m);
+  assert.doesNotMatch(text, /^(?:• |- | {2}- )이어지는 줄$/m);
+});
+
+test('아래쪽 md 저장 글은 같은 기록의 회의문서.cjs markdown과 같다(네 형식, 옛·새 구조)', () => {
+  const { markdown } = require('./회의문서.cjs');
+  for (const minutes of [itemMinutes, oldMinutes]) for (const format of ['meeting', 'summary', 'tasks', 'custom']) {
+    const { state, ui, lines } = fixture();
+    ui['output-format'].value = format;
+    if (format === 'custom') state.customFormat = itemCustom;
+    ui.participants.value = '김민수';
+    state.dailySequence = 1;
+    state.minutes = minutes;
+    const record = { title: ui.title.value, date: ui.date.value, dailySequence: 1, participants: '김민수', outputFormat: format, ...(format === 'custom' ? { customFormat: itemCustom } : {}), minutes };
+    assert.equal(lines().join('\n'), markdown(record), `${format} ${minutes === oldMinutes ? '옛 구조' : '새 구조'}`);
+  }
+});
+
+test('JSON 저장은 옛 결과도 원본 그대로 낸다', () => {
+  const { state, exportDocument } = fixture();
+  state.minutes = oldMinutes;
+  assert.deepEqual(exportDocument().minutes, oldMinutes);
+  assert.equal(typeof exportDocument().minutes.overview, 'string');
 });

@@ -133,3 +133,11 @@ test('항목 규칙 상수를 내보낸다', () => {
   assert.deepEqual(formats.ITEM_LIMITS, { text: 1000, detail: 1000, details: 8, overview: 12 });
   assert.ok(Object.isFrozen(formats.OVERVIEW_LABELS) && Object.isFrozen(formats.ITEM_LIMITS));
 });
+
+test('본문의 이어지는 줄과 실제 하위 항목은 목록 줄 모양이 다르다', () => {
+  const body = formats.itemLines([{ text: '첫 줄\n- 둘째 줄', details: [] }]);
+  const detail = formats.itemLines([{ text: '첫 줄', details: ['둘째 줄'] }]);
+  assert.notDeepEqual(body, detail);
+  assert.deepEqual(detail, ['- 첫 줄', '  - 둘째 줄']);
+  assert.ok(body.slice(1).every(line => !/^\s*[-•·*]\s/.test(line)), JSON.stringify(body));
+});
