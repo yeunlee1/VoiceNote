@@ -632,9 +632,14 @@ test('아래쪽 md 저장 글은 같은 기록의 회의문서.cjs markdown과 �
   }
 });
 
-test('JSON 저장은 옛 결과도 원본 그대로 낸다', () => {
-  const { state, exportDocument } = fixture();
-  state.minutes = oldMinutes;
-  assert.deepEqual(exportDocument().minutes, oldMinutes);
+test('JSON 저장은 옛 결과도 원본 그대로 내고 화면 그리기·복사 글 만들기도 원본을 바꾸지 않는다', () => {
+  const { state, exportDocument, lines, plainText, renderMinutesInto } = fixture();
+  const snapshot = JSON.stringify(oldMinutes);
+  state.minutes = JSON.parse(snapshot);
+  // 기대값은 호출 전에 글로 고정한다. 상태와 같은 객체를 기대값으로 쓰면 원본을 바꾸는 구현도 통과한다(짝보고 8).
+  rendered(renderMinutesInto, state.minutes, 'meeting');
+  plainText(lines());
+  assert.equal(JSON.stringify(exportDocument().minutes), snapshot);
+  assert.equal(JSON.stringify(state.minutes), snapshot);
   assert.equal(typeof exportDocument().minutes.overview, 'string');
 });
