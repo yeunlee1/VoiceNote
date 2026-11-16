@@ -20024,13 +20024,17 @@ function compactMessages(input2) {
     }
   ];
 }
-function mergeCompact(before, after) {
-  // 더 짧아지지 않았거나 있던 핵심 요약·주제를 비운 답은 버리고 원래 결과를 쓴다. 두 결과 모두 항목 구조다.
+function mergeCompact(original, after) {
+  // 더 짧아지지 않았거나 있던 핵심 요약·주제를 비운 답은 버리고 받은 원본을 그대로 쓴다. 비교는 항목 구조로 바꾼 값으로 한다.
+  const before = meetingFormats.normalizeMinutes(original);
   const hollow = (items) => items.every((item) => !item.details.length && meetingFormats.OVERVIEW_LABELS.includes(item.text));
   // 핵심 요약에 회의록형 머리말만 남고 내용이 모두 빠졌으면 비운 것과 같게 본다.
   const shorter = meetingFormats.minutesLengths(after).body < meetingFormats.minutesLengths(before).body;
-  if (!shorter || before.overview.length && !hollow(before.overview) && hollow(after.overview) || before.topics.length && !after.topics.length) return before;
-  return { ...before, overview: after.overview, topics: after.topics };
+  if (!shorter || before.overview.length && !hollow(before.overview) && hollow(after.overview) || before.topics.length && !after.topics.length) return original;
+  const merged = { ...(Array.isArray(original.overview) ? original : before), overview: after.overview, topics: after.topics };
+  // 제목·결정·할 일·미확정은 받은 원본 글자 그대로 되붙인다. 옛 구조 원본만 항목으로 바꾼 값을 붙여 새 구조 하나로 맞춘다.
+  return minutesSchema.safeParse(merged).success ? merged : original;
+  // 합친 결과가 저장 검사를 통과하지 못하면(새 항목 한도보다 긴 옛 결정 등) 줄이기를 받지 않는다.
 }
 // 회의록형은 위 기본 지침을 그대로 쓰고, 나머지 출력 형식은 같은 JSON 구조 안에서 강조할 항목만 바꾼다.
 var summaryFormatInstructions = {
@@ -20199,12 +20203,11 @@ openQuestions는 '미확정 사항'입니다. 다음 회의에서 실제로 확�
     if (!minutes.success) throw malformed();
     const cleaned = meetingFormats.pruneMinutes(meetingFormats.withoutForeignScript(minutes.data));
     // 글자를 지운 뒤 비게 된 하위 항목은 버리고, 본문이 빈 항목은 첫 하위 항목을 올리며, 둘 다 빈 항목은 버린다.
-    const before = compact ? meetingFormats.normalizeMinutes(input2.minutes) : void 0;
-    const merged = compact ? mergeCompact(before, cleaned) : cleaned;
+    const merged = compact ? mergeCompact(input2.originalMinutes, cleaned) : cleaned;
     return {
-      minutes: compact && merged === before ? input2.originalMinutes : merged,
-      // 줄이기를 받지 않으면 바꾼 값이 아니라 받은 원본을 그대로 돌려준다.
-      ...compact ? { shortened: merged !== before } : {},
+      minutes: merged,
+      ...compact ? { shortened: merged !== input2.originalMinutes } : {},
+      // 줄이기를 받지 않으면 mergeCompact가 받은 원본 객체를 그대로 돌려주므로 같은 객체인지로 판단한다.
       model: modelOptions.model,
       maxOutputTokens: modelOptions.max_output_tokens,
       usage: call.usage,

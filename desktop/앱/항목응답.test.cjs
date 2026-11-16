@@ -148,3 +148,34 @@ test('네 출력 형식과 줄이기 지시에 개조식 규칙이 있고 문장
   assert.match(systemsOf(calls[0]), /확정된 내용 없음/);
   assert.match(systemsOf(calls[4]), /머리말만 남기고 내용을 모두 지우지 않습니다/);
 });
+
+test('줄이기를 받으면 제목·결정·할 일·미확정은 받은 원본 글자 그대로 되붙인다', async t => {
+  const before = fresh({ decisions: [I('  결정  ', ['  조건  '])], openQuestions: [I('  미정  ', ['  영향  '])], topics: [{ title: '양식', points: [I('공통 양식 쓰기로 함', ['가'.repeat(400)])] }] });
+  const { post } = await start(t, () => completed({ overview: before.overview, topics: [{ title: '양식', points: [I('공통 양식 쓰기로 함', ['줄인 이유'])] }] }));
+  const result = await post('/api/summary/compact', compact({ minutes: before }));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.shortened, true);
+  for (const key of ['suggestedTitle', 'decisions', 'actions', 'openQuestions']) assert.deepEqual(result.body.minutes[key], before[key], key);
+});
+
+test('옛 구조를 줄여 받으면 새 구조 하나로 돌려주고 그 결과를 저장할 수 있다', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'voicenote-items-test-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const old = { suggestedTitle: '합성', overview: `전체 방향 | ${'가'.repeat(600)}`, topics: [{ title: '양식', points: ['나'.repeat(800)] }], decisions: ['- 양식 — 공통 양식'], actions: [], openQuestions: ['기한'] };
+  const { post } = await start(t, () => completed({ overview: [I('전체 방향', ['짧게'])], topics: [{ title: '양식', points: [I('짧게')] }] }), dir);
+  const result = await post('/api/summary/compact', compact({ minutes: old }));
+  assert.equal(result.body.shortened, true);
+  assert.deepEqual(result.body.minutes.decisions, [I('양식 — 공통 양식')]);
+  assert.deepEqual(result.body.minutes.openQuestions, [I('기한')]);
+  const record = { id: randomUUID(), title: '합성 회의', date: '2026-11-16', participants: '김민수', transcript: '합성 전사', minutes: result.body.minutes };
+  assert.equal((await post('/api/meetings/main', record)).status, 200);
+});
+
+test('옛 결정 글이 새 항목 한도보다 길어 합친 결과를 저장할 수 없으면 줄이기를 받지 않는다', async t => {
+  const old = { suggestedTitle: '합성', overview: `전체 방향 | ${'가'.repeat(600)}`, topics: [{ title: '양식', points: ['나'.repeat(800)] }], decisions: ['다'.repeat(1500)], actions: [], openQuestions: [] };
+  const { post } = await start(t, () => completed({ overview: [I('전체 방향', ['짧게'])], topics: [{ title: '양식', points: [I('짧게')] }] }));
+  const result = await post('/api/summary/compact', compact({ minutes: old }));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.shortened, false);
+  assert.deepEqual(result.body.minutes, old);
+});
