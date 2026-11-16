@@ -636,6 +636,16 @@ public final class AndroidChecks extends Instrumentation {
         JSONObject previous=user(requests.get(sent)).getJSONObject("previousMinutes");
         expect(previous.get("overview") instanceof JSONArray&&previous.getJSONArray("overview").getJSONObject(0).getString("text").equals("전체 방향")&&previous.getJSONArray("decisions").getJSONObject(0).getString("text").equals("기존 DB 활용"),"캐시에서 읽은 옛 구조 앞 구간도 항목 구조로 바꿔 보낸다");
     }
+    static void itemScreenSeed(Store store)throws Exception{
+        // 디버그 빌드 전용이다. 화면에서 새 구조·옛 구조 결과가 목록으로 보이는지 사람이 확인하도록 가상의 회의 두 개를 저장한다.
+        JSONObject fresh=store.create(new JSONObject().put("date","2099-02-01").put("title","합성 새 구조 회의").put("participants","김민수, 박서연"));
+        Store.write(new File(store.directory("main",fresh.getString("id")),"전사.txt"),"합성 전사");
+        JSONObject now=minutes().put("suggestedTitle","합성 새 구조 회의").put("topics",new JSONArray().put(new JSONObject().put("title","양식").put("points",new JSONArray().put(item("공통 양식 쓰기로 함","이유: 부서마다 서식이 달라 혼선","적용: 다음 달 보고서부터")).put(item("옛 양식은 보관만 함\n새로 만들지는 않음")))));
+        store.finish(fresh,now,null);expect(store.load("main",fresh.getString("id")).getString("state").equals("complete"),"새 구조 합성 회의 저장");
+        JSONObject old=store.create(new JSONObject().put("date","2099-02-02").put("title","합성 옛 구조 회의").put("participants","이도현"));
+        Store.write(new File(store.directory("main",old.getString("id")),"전사.txt"),"합성 전사");
+        store.finish(old,oldMinutes().put("suggestedTitle","합성 옛 구조 회의"),null);expect(store.load("main",old.getString("id")).getString("state").equals("complete"),"옛 구조 합성 회의 저장");
+    }
     static void documentChecks(Store store)throws Exception{
         JSONArray cases=store.asset("meeting-document-cases.json").getJSONArray("cases");
         for(int i=0;i<cases.length();i++){
@@ -1056,6 +1066,8 @@ public final class AndroidChecks extends Instrumentation {
         if(probe.equals("samples")){sampleFiles();result.putString("stream","PASS "+checks+" sample files\n");finish(-1,result);return;}
         // 문서 선택 창 확인용 합성 파일만 만들고 끝낸다. 시험 결과를 바꾸지 않는다.
         if(probe.equals("import")){importChecks(new Store(testContext()));result.putString("stream","PASS "+checks+" import checks\n");finish(-1,result);return;}
+        if(probe.equals("m-items")){itemScreenSeed(new Store(getTargetContext()));result.putString("stream","PASS "+checks+" item screen seeds\n");finish(-1,result);return;}
+        // 가상기기 화면 확인용으로 새 구조·옛 구조 합성 회의를 앱 저장소에 만들고 끝낸다. 실제 AI는 부르지 않는다.
         if(!probe.isEmpty()&&!probe.startsWith("f-")&&!probe.startsWith("g-")){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
         for(String name:new String[]{"first","open","review","draft","finish","n1new","n1old","n1meta"})regressionCheck(name);
         archiveChecks(new Store(testContext()));
