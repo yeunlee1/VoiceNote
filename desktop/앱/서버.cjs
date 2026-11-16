@@ -19740,27 +19740,54 @@ var malformed = () => new MeetingError(
   "AI \uC751\uB2F5 \uD615\uC2DD\uC744 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uBA74 \uBE44\uC6A9\uC774 \uBC1C\uC0DD\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.",
   503
 );
-var minutesSchema = external_exports.strictObject({
+var actionSchema = external_exports.strictObject({
+  task: external_exports.string().max(2e3),
+  owner: external_exports.string().max(200).nullable(),
+  due: external_exports.string().max(200).nullable()
+});
+var legacyMinutesSchema = external_exports.strictObject({
   suggestedTitle: external_exports.string().min(1).max(120).optional(),
   overview: external_exports.string().max(8e3),
   topics: external_exports.array(
     external_exports.strictObject({ title: external_exports.string().max(500), points: external_exports.array(external_exports.string().max(2e3)).max(30) })
   ).max(30),
   decisions: external_exports.array(external_exports.string().max(2e3)).max(40),
-  actions: external_exports.array(
-    external_exports.strictObject({
-      task: external_exports.string().max(2e3),
-      owner: external_exports.string().max(200).nullable(),
-      due: external_exports.string().max(200).nullable()
-    })
-  ).max(40),
+  actions: external_exports.array(actionSchema).max(40),
   openQuestions: external_exports.array(external_exports.string().max(2e3)).max(40)
 });
+// 개조식 이전의 문장형 결과 구조다. 저장된 옛 회의를 열거나 다시 보낼 때만 받고, 새 AI 응답에는 쓰지 않는다.
+var itemSchema = external_exports.strictObject({
+  text: external_exports.string().min(1).max(1e3),
+  details: external_exports.array(external_exports.string().min(1).max(1e3)).max(8)
+});
+var minutesSchema = external_exports.strictObject({
+  suggestedTitle: external_exports.string().min(1).max(120).optional(),
+  overview: external_exports.array(itemSchema).max(12),
+  topics: external_exports.array(
+    external_exports.strictObject({ title: external_exports.string().max(500), points: external_exports.array(itemSchema).max(30) })
+  ).max(30),
+  decisions: external_exports.array(itemSchema).max(40),
+  actions: external_exports.array(actionSchema).max(40),
+  openQuestions: external_exports.array(itemSchema).max(40)
+});
+// 새 AI 응답은 항목(text)과 하위 항목(details) 구조만 받는다. 옛 문자열 구조로 돌아오면 형식 오류다.
+var storedMinutesSchema = external_exports.union([minutesSchema, legacyMinutesSchema]);
+// 저장된 결과는 새 구조와 옛 구조를 모두 받고 받은 모양 그대로 돌려준다.
+var itemJsonSchema = {
+  type: "object",
+  properties: {
+    text: { type: "string", minLength: 1, maxLength: 1000 },
+    details: { type: "array", maxItems: 8, items: { type: "string", minLength: 1, maxLength: 1000 } }
+  },
+  required: ["text", "details"],
+  additionalProperties: false
+};
+// 항목 하나의 AI 응답 틀이다. 하위 항목(details)은 한 단계 문자열 목록만 받는다.
 var minutesJsonSchema = {
   type: "object",
   properties: {
     suggestedTitle: { type: "string", minLength: 1, maxLength: 120 },
-    overview: { type: "string", maxLength: 8000 },
+    overview: { type: "array", maxItems: 12, items: itemJsonSchema },
     topics: {
       type: "array",
       maxItems: 30,
@@ -19768,13 +19795,13 @@ var minutesJsonSchema = {
         type: "object",
         properties: {
           title: { type: "string", maxLength: 500 },
-          points: { type: "array", maxItems: 30, items: { type: "string", maxLength: 2000 } }
+          points: { type: "array", maxItems: 30, items: itemJsonSchema }
         },
         required: ["title", "points"],
         additionalProperties: false
       }
     },
-    decisions: { type: "array", maxItems: 40, items: { type: "string", maxLength: 2000 } },
+    decisions: { type: "array", maxItems: 40, items: itemJsonSchema },
     actions: {
       type: "array",
       maxItems: 40,
@@ -19789,7 +19816,7 @@ var minutesJsonSchema = {
         additionalProperties: false
       }
     },
-    openQuestions: { type: "array", maxItems: 40, items: { type: "string", maxLength: 2000 } }
+    openQuestions: { type: "array", maxItems: 40, items: itemJsonSchema }
   },
   required: ["suggestedTitle", "overview", "topics", "decisions", "actions", "openQuestions"],
   additionalProperties: false
@@ -19991,9 +20018,11 @@ function compactMessages(input2) {
   ];
 }
 function mergeCompact(before, after) {
-  // 더 짧아지지 않았거나 있던 핵심 요약·주제를 비운 답은 버리고 원래 결과를 쓴다.
+  // 더 짧아지지 않았거나 있던 핵심 요약·주제를 비운 답은 버리고 원래 결과를 쓴다. 두 결과 모두 항목 구조다.
+  const hollow = (items) => items.every((item) => !item.details.length && meetingFormats.OVERVIEW_LABELS.includes(item.text));
+  // 핵심 요약에 회의록형 머리말만 남고 내용이 모두 빠졌으면 비운 것과 같게 본다.
   const shorter = meetingFormats.minutesLengths(after).body < meetingFormats.minutesLengths(before).body;
-  if (!shorter || before.overview.trim() && !after.overview.trim() || before.topics.length && !after.topics.length) return before;
+  if (!shorter || before.overview.length && !hollow(before.overview) && hollow(after.overview) || before.topics.length && !after.topics.length) return before;
   return { ...before, overview: after.overview, topics: after.topics };
 }
 // 회의록형은 위 기본 지침을 그대로 쓰고, 나머지 출력 형식은 같은 JSON 구조 안에서 강조할 항목만 바꾼다.
@@ -20018,14 +20047,16 @@ decisions에는 작업의 전제가 되는 확정 결정만 짧게 넣습니다.
 };
 function previousMinutes(value) {
   if (value === void 0 || value === null) return void 0;
-  const result = minutesSchema.safeParse(value);
+  const result = storedMinutesSchema.safeParse(value);
   if (!result.success || JSON.stringify(result.data).length > 64e3) throw invalid();
-  return result.data;
+  return meetingFormats.normalizeMinutes(result.data);
+  // 앞 구간·줄이기 입력은 저장 결과처럼 옛 구조도 받고, AI에 보내기 전에 항목 구조로 바꾼다.
 }
 async function summarizeMeeting(input2, apiKey, apiFetch, signal, call = {}) {
   const compact = input2.compact === true;
   if (!compact && (!input2.text.trim() || input2.text.length > 32e3)) throw invalid();
-  const previous = compact ? void 0 : previousMinutes(input2.previousMinutes);
+  const previous = compact ? void 0 : input2.previousMinutes;
+  // 앞 구간은 요청 검사(summaryInput)에서 이미 검사하고 항목 구조로 바꿨다. 바꾼 값을 새 AI 응답 한도로 다시 검사하면 허용된 긴 옛 문단이 막힌다.
   const modelOptions = aiModels.requestOptions(input2.model ?? aiModels.DEFAULT_SUMMARY_MODEL);
   if (!modelOptions) throw invalid();
   const controller = new AbortController();
@@ -20156,11 +20187,14 @@ openQuestions는 '미확정 사항'입니다. 다음 회의에서 실제로 확�
     }
     const minutes = (compact ? compactSchema : minutesSchema).safeParse(parsed);
     if (!minutes.success) throw malformed();
-    const cleaned = meetingFormats.withoutForeignScript(minutes.data);
-    const merged = compact ? mergeCompact(input2.minutes, cleaned) : cleaned;
+    const cleaned = meetingFormats.pruneMinutes(meetingFormats.withoutForeignScript(minutes.data));
+    // 글자를 지운 뒤 비게 된 하위 항목은 버리고, 본문이 빈 항목은 첫 하위 항목을 올리며, 둘 다 빈 항목은 버린다.
+    const before = compact ? meetingFormats.normalizeMinutes(input2.minutes) : void 0;
+    const merged = compact ? mergeCompact(before, cleaned) : cleaned;
     return {
-      minutes: merged,
-      ...compact ? { shortened: merged !== input2.minutes } : {},
+      minutes: compact && merged === before ? input2.originalMinutes : merged,
+      // 줄이기를 받지 않으면 바꾼 값이 아니라 받은 원본을 그대로 돌려준다.
+      ...compact ? { shortened: merged !== before } : {},
       model: modelOptions.model,
       maxOutputTokens: modelOptions.max_output_tokens,
       usage: call.usage,
@@ -20260,7 +20294,8 @@ function compactInput(data) {
     throw fail("INVALID_INPUT", "줄일 목표 글자 수를 확인해 주세요.", 400);
   const minutes = previousMinutes(data.minutes);
   if (!minutes) throw fail("INVALID_INPUT", "줄일 회의 결과가 없습니다.", 400);
-  return { compact: true, ...summaryOptions(data), title, date: date5, participants, targetCharacters, minutes };
+  return { compact: true, ...summaryOptions(data), title, date: date5, participants, targetCharacters, minutes, originalMinutes: data.minutes };
+  // minutes는 AI에 보내고 비교할 항목 구조, originalMinutes는 줄이기를 받지 않을 때 그대로 돌려줄 받은 원본이다.
 }
 function requestKeywords(request) {
   // 화면이 참석자 칸에서 만든 전사 힌트 단어다. 깨진 값은 버리고 힌트 없이 전사한다.
@@ -20299,7 +20334,7 @@ function createMeetingServer(options = {}) {
   const meetingStore = require("./회의보관.cjs").createMeetingStore(
     options.dataDir ?? (0, import_node_path.join)(__dirname, "회의자료"),
     (value) => {
-      const result = minutesSchema.safeParse(value);
+      const result = storedMinutesSchema.safeParse(value);
       if (!result.success) throw Object.assign(new Error("회의록 형식을 확인하세요."), { status: 400 });
       return result.data;
     },

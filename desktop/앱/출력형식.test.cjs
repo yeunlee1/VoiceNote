@@ -6,7 +6,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createMeetingServer } = require('./서버.cjs');
-const minutes = { overview: '요약', topics: [{ title: '주제', points: ['설명'] }], decisions: [], actions: [{ task: '양식 초안 작성', owner: null, due: null }], openQuestions: ['기한 미정'] };
+const minutes = { overview: [{ text: '요약', details: [] }], topics: [{ title: '주제', points: [{ text: '설명', details: [] }] }], decisions: [], actions: [{ task: '양식 초안 작성', owner: null, due: null }], openQuestions: [{ text: '기한 미정', details: [] }] };
 
 async function start(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'voicenote-format-test-'));

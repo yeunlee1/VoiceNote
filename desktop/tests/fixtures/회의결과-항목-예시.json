@@ -69,6 +69,46 @@
       ]
     },
     {
+      "name": "가운뎃점 기호만 있는 글은 버림",
+      "field": "items",
+      "input": "·",
+      "expected": []
+    },
+    {
+      "name": "별표 기호를 뗌",
+      "field": "items",
+      "input": "* 별표 기호",
+      "expected": [
+        {
+          "text": "별표 기호",
+          "details": []
+        }
+      ]
+    },
+    {
+      "name": "섞인 기호 묶음을 뗌",
+      "field": "items",
+      "input": "• - · 섞인 기호",
+      "expected": [
+        {
+          "text": "섞인 기호",
+          "details": []
+        }
+      ]
+    },
+    {
+      "name": "빼기 기호 하나만 있는 글은 버림",
+      "field": "items",
+      "input": "-",
+      "expected": []
+    },
+    {
+      "name": "겹친 기호와 공백만 있는 글은 버림",
+      "field": "items",
+      "input": " - - • ",
+      "expected": []
+    },
+    {
       "name": "여러 줄 문단은 항목 하나",
       "field": "items",
       "input": "첫 줄 내용\n둘째 줄 내용",

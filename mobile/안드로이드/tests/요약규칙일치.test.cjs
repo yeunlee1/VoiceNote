@@ -60,9 +60,9 @@ test('빌드가 데스크톱 서버에서 줄이기 지시문을 뽑는다', () 
     assert.deepEqual(meeting.text.format.schema.required, ['suggestedTitle', 'overview', 'topics', 'decisions', 'actions', 'openQuestions']);
     const fields = meeting.text.format.schema.properties;
     assert.deepEqual([fields.topics.maxItems, fields.topics.items.properties.points.maxItems, fields.decisions.maxItems, fields.actions.maxItems, fields.openQuestions.maxItems], [30, 30, 40, 40, 40]);
-    assert.deepEqual([fields.overview.maxLength, fields.topics.items.properties.points.items.maxLength, fields.actions.items.properties.owner.maxLength], [8000, 2000, 200]);
+    assert.deepEqual([fields.overview.maxItems, fields.overview.items.properties.text.maxLength, fields.topics.items.properties.points.items.properties.text.maxLength, fields.decisions.items.properties.details.maxItems, fields.actions.items.properties.owner.maxLength], [12, 1000, 1000, 8, 200]);
     assert.equal(asset.text.format.schema.properties.topics.maxItems, 30);
-    assert.equal(asset.text.format.schema.properties.overview.maxLength, 8000);
+    assert.deepEqual(asset.text.format.schema.properties.overview.items.required, ['text', 'details']);
   } finally {
     fs.rmSync(destination, { recursive: true, force: true });
   }

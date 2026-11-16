@@ -12,7 +12,7 @@ trialModule.isUnlockCode = text => (typeof text === 'string' && text.trim() === 
 const { createMeetingServer } = require('./서버.cjs');
 const DEFAULT_KEY = 'sk-default-PACKAGE-never-shown-123';
 const PERSONAL_KEY = 'sk-personal-never-shown-456';
-const minutes = { overview: '요약', topics: [], decisions: [], actions: [], openQuestions: [] };
+const minutes = { overview: [{ text: '요약', details: [] }], topics: [], decisions: [], actions: [], openQuestions: [] };
 
 async function start(t, { fail = () => false, defaultKey = true } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'voicenote-trial-test-'));

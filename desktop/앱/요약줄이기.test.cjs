@@ -6,16 +6,26 @@ const { createMeetingServer } = require('./서버.cjs');
 const formats = require('./출력형식.js');
 
 const text = count => '가'.repeat(count);
+const I = (value, details = []) => ({ text: value, details });
 const shaped = (body, kept = 0) => ({ overview: text(body), topics: [], decisions: kept ? [text(kept)] : [], actions: [], openQuestions: [] });
 const completed = value => ({ status: 'completed', usage: { input_tokens: 10, output_tokens: 5 },
   output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify(value) }] }] });
-const source = {
+const legacySource = {
   suggestedTitle: '표준화 회의',
   overview: `전체 방향 | ${text(500)}`,
   topics: [{ title: '양식', points: [text(800), text(800)] }, { title: '일정', points: [text(800)] }],
   decisions: ['양식 — 공통 양식을 씁니다.'],
   actions: [{ task: '초안 작성', owner: '김과장', due: null }],
   openQuestions: ['기한 미정'],
+};
+// 개조식 이전의 문장형 결과다. 저장된 옛 결과처럼 받는지 확인할 때만 쓴다.
+const source = {
+  suggestedTitle: '표준화 회의',
+  overview: [I('전체 방향', [text(500)])],
+  topics: [{ title: '양식', points: [I(text(800)), I(text(800))] }, { title: '일정', points: [I(text(800))] }],
+  decisions: [I('양식 — 공통 양식 사용', ['이유: 서식 혼선'])],
+  actions: [{ task: '초안 작성', owner: '김과장', due: null }],
+  openQuestions: [I('기한 미정')],
 };
 const request = extra => ({ title: '표준화 회의', date: '2026-11-05', participants: '김과장, 이대리', targetCharacters: 1500, minutes: source, ...extra });
 
@@ -88,7 +98,7 @@ test('힌트 단어는 20개까지이고 30자를 넘는 단어는 뺀다', () =
 });
 
 test('overview와 topics만 줄이고 제목·결정·할 일·미확정은 원문 그대로 되붙인다', async t => {
-  const shorter = { overview: '전체 방향 | 짧게 씁니다.', topics: [{ title: '양식과 일정', points: ['합쳐서 씁니다.'] }] };
+  const shorter = { overview: [I('전체 방향', ['짧게 씀'])], topics: [{ title: '양식과 일정', points: [I('합쳐서 씀')] }] };
   const server = await start(t, () => [200, completed(shorter)]);
   const result = await server.post('/api/summary/compact', request());
   assert.equal(result.status, 200);
@@ -115,15 +125,15 @@ test('overview와 topics만 줄이고 제목·결정·할 일·미확정은 원�
 });
 
 test('모델이 결정이나 할 일까지 돌려주면 형식 오류로 처리한다', async t => {
-  const server = await start(t, () => [200, completed({ overview: '짧게', topics: [], decisions: [] })]);
+  const server = await start(t, () => [200, completed({ overview: [I('짧게')], topics: [], decisions: [] })]);
   const result = await server.post('/api/summary/compact', request());
   assert.equal(result.body.error.code, 'AI_RESPONSE_INVALID');
 });
 
 for (const [name, answer] of [
-  ['더 길면', { overview: text(4000), topics: [] }],
-  ['핵심 요약이 비면', { overview: ' ', topics: [{ title: '양식', points: ['짧게'] }] }],
-  ['주제를 모두 지우면', { overview: '짧게', topics: [] }],
+  ['더 길면', { overview: [I(text(1000), [text(1000), text(1000)])], topics: [{ title: '양식', points: [I('짧게')] }] }],
+  ['핵심 요약이 비면', { overview: [], topics: [{ title: '양식', points: [I('짧게')] }] }],
+  ['주제를 모두 지우면', { overview: [I('짧게')], topics: [] }],
 ]) {
   test(`${name} 원래 결과를 돌려준다`, async t => {
     const server = await start(t, () => [200, completed(answer)]);
@@ -136,14 +146,14 @@ for (const [name, answer] of [
 
 test('앞선 결과에 주제가 없으면 주제 없는 답도 받아들인다', async t => {
   const plain = { ...source, topics: [] };
-  const server = await start(t, () => [200, completed({ overview: '짧게', topics: [] })]);
+  const server = await start(t, () => [200, completed({ overview: [I('짧게')], topics: [] })]);
   const result = await server.post('/api/summary/compact', request({ minutes: plain }));
-  assert.equal(result.body.minutes.overview, '짧게');
+  assert.deepEqual(result.body.minutes.overview, [I('짧게')]);
 });
 
 test('내 형식의 지시를 함께 보내고 의견은 사용자 메시지 끝에 넣는다', async t => {
   const custom = { name: '주간', sections: [{ key: 'overview', title: '요약' }, { key: 'topics', title: '내용' }], instruction: '부서별로' };
-  const server = await start(t, () => [200, completed({ overview: '짧게', topics: [{ title: '양식', points: ['짧게'] }] })]);
+  const server = await start(t, () => [200, completed({ overview: [I('짧게')], topics: [{ title: '양식', points: [I('짧게')] }] })]);
   const result = await server.post('/api/summary/compact', request({ outputFormat: 'custom', customFormat: custom, feedback: '일정을 자세히' }));
   assert.equal(result.status, 200);
   const body = server.calls[0].body;
@@ -163,10 +173,10 @@ for (const [name, extra] of [
   ['목표가 소수면', { targetCharacters: 1500.5 }],
   ['모르는 형식이면', { outputFormat: 'report' }],
   ['의견이 길면', { feedback: text(1001) }],
-  ['결과가 너무 길면', { minutes: { ...source, overview: text(8001) } }],
+  ['결과가 너무 길면', { minutes: { ...legacySource, overview: text(8001) } }],
 ]) {
   test(`${name} OpenAI를 부르지 않고 거절한다`, async t => {
-    const server = await start(t, () => [200, completed({ overview: '짧게', topics: [] })]);
+    const server = await start(t, () => [200, completed({ overview: [I('짧게')], topics: [] })]);
     const result = await server.post('/api/summary/compact', request(extra));
     assert.equal(result.status, 400);
     assert.equal(server.calls.length, 0);
@@ -180,7 +190,7 @@ test('출력 한도 오류는 그대로 알린다', async t => {
 });
 
 test('일반 요약은 말한 사람을 추측하지 말고 이름과 담당을 명단 표기로 맞추라고 지시한다', async t => {
-  const server = await start(t, () => [200, completed({ overview: '회의', topics: [], decisions: [], actions: [], openQuestions: [] })]);
+  const server = await start(t, () => [200, completed(emptyMinutes)]);
   const result = await server.post('/api/summary', { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '김과장' });
   assert.equal(result.status, 200);
   const systems = server.calls[0].body.input.filter(item => item.role === 'system').map(item => item.content).join('\n');
@@ -191,7 +201,7 @@ test('일반 요약은 말한 사람을 추측하지 말고 이름과 담당을 
 });
 
 test('회의록은 결정을 할 일로 되풀이하지 않되 합의한 일은 담당이 없어도 남기라고 지시한다', async t => {
-  const server = await start(t, () => [200, completed({ overview: '회의', topics: [], decisions: [], actions: [], openQuestions: [] })]);
+  const server = await start(t, () => [200, completed(emptyMinutes)]);
   await server.post('/api/summary', { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '김과장' });
   const systems = server.calls[0].body.input.filter(item => item.role === 'system').map(item => item.content).join('\n');
   assert.match(systems, /decisions에 쓴 결정을 '적용합니다'나 '반영합니다'로 바꿔 되풀이하지/);
@@ -207,23 +217,26 @@ test('회의록은 결정을 할 일로 되풀이하지 않되 합의한 일은 
   assert.doesNotMatch(systems, /적용 범위는 전사 표현을 따르고/);
 });
 
-const emptyMinutes = { suggestedTitle: '회의', overview: '회의', topics: [], decisions: [], actions: [], openQuestions: [] };
+const emptyMinutes = { suggestedTitle: '회의', overview: [I('회의')], topics: [], decisions: [], actions: [], openQuestions: [] };
 const listLimits = [
   ['주제 수', schema => schema.properties.topics.maxItems, count => ({ topics: Array.from({ length: count }, () => ({ title: '주제', points: [] })) })],
-  ['주제별 문단 수', schema => schema.properties.topics.items.properties.points.maxItems, count => ({ topics: [{ title: '주제', points: Array(count).fill('문단') }] })],
-  ['결정 수', schema => schema.properties.decisions.maxItems, count => ({ decisions: Array(count).fill('결정') })],
+  ['주제별 항목 수', schema => schema.properties.topics.items.properties.points.maxItems, count => ({ topics: [{ title: '주제', points: Array(count).fill(I('항목')) }] })],
+  ['핵심 요약 항목 수', schema => schema.properties.overview.maxItems, count => ({ overview: Array(count).fill(I('요약')) })],
+  ['결정 수', schema => schema.properties.decisions.maxItems, count => ({ decisions: Array(count).fill(I('결정')) })],
+  ['하위 항목 수', schema => schema.properties.decisions.items.properties.details.maxItems, count => ({ decisions: [I('결정', Array(count).fill('이유'))] })],
   ['할 일 수', schema => schema.properties.actions.maxItems, count => ({ actions: Array.from({ length: count }, () => ({ task: '할 일', owner: null, due: null })) })],
-  ['미확정 수', schema => schema.properties.openQuestions.maxItems, count => ({ openQuestions: Array(count).fill('미정') })],
+  ['미확정 수', schema => schema.properties.openQuestions.maxItems, count => ({ openQuestions: Array(count).fill(I('미정')) })],
 ];
 const textLimits = [
-  ['개요 길이', schema => schema.properties.overview.maxLength, length => ({ overview: text(length) })],
+  ['핵심 요약 항목 길이', schema => schema.properties.overview.items.properties.text.maxLength, length => ({ overview: [I(text(length))] })],
   ['주제 제목 길이', schema => schema.properties.topics.items.properties.title.maxLength, length => ({ topics: [{ title: text(length), points: [] }] })],
-  ['주제 문단 길이', schema => schema.properties.topics.items.properties.points.items.maxLength, length => ({ topics: [{ title: '주제', points: [text(length)] }] })],
-  ['결정 길이', schema => schema.properties.decisions.items.maxLength, length => ({ decisions: [text(length)] })],
+  ['주제 항목 길이', schema => schema.properties.topics.items.properties.points.items.properties.text.maxLength, length => ({ topics: [{ title: '주제', points: [I(text(length))] }] })],
+  ['결정 길이', schema => schema.properties.decisions.items.properties.text.maxLength, length => ({ decisions: [I(text(length))] })],
+  ['하위 항목 길이', schema => schema.properties.decisions.items.properties.details.items.maxLength, length => ({ decisions: [I('결정', [text(length)])] })],
   ['할 일 길이', schema => schema.properties.actions.items.properties.task.maxLength, length => ({ actions: [{ task: text(length), owner: null, due: null }] })],
   ['담당 길이', schema => schema.properties.actions.items.properties.owner.maxLength, length => ({ actions: [{ task: '할 일', owner: text(length), due: null }] })],
   ['기한 길이', schema => schema.properties.actions.items.properties.due.maxLength, length => ({ actions: [{ task: '할 일', owner: null, due: text(length) }] })],
-  ['미확정 길이', schema => schema.properties.openQuestions.items.maxLength, length => ({ openQuestions: [text(length)] })],
+  ['미확정 길이', schema => schema.properties.openQuestions.items.properties.text.maxLength, length => ({ openQuestions: [I(text(length))] })],
 ];
 
 // 앱이 받는 한도와 AI에 알리는 한도가 다르면, 한도를 넘긴 유료 응답을 통째로 버리게 된다.
@@ -242,15 +255,17 @@ for (const [name, limitOf, listOf] of [...listLimits, ...textLimits]) {
   });
 }
 
-test('줄이기 요청도 개요·주제·문단 한도를 AI에 알린다', async t => {
-  const server = await start(t, () => [200, completed({ overview: '짧게', topics: [{ title: '양식', points: ['짧게'] }] })]);
+test('줄이기 요청도 핵심 요약·주제·항목 한도를 AI에 알린다', async t => {
+  const server = await start(t, () => [200, completed({ overview: [I('짧게')], topics: [{ title: '양식', points: [I('짧게')] }] })]);
   assert.equal((await server.post('/api/summary/compact', request())).status, 200);
   const { properties } = server.calls[0].body.text.format.schema;
   assert.equal(properties.topics.maxItems, 30);
   assert.equal(properties.topics.items.properties.points.maxItems, 30);
-  assert.equal(properties.overview.maxLength, 8000);
+  assert.equal(properties.overview.maxItems, 12);
+  assert.equal(properties.overview.items.properties.text.maxLength, 1000);
   assert.equal(properties.topics.items.properties.title.maxLength, 500);
-  assert.equal(properties.topics.items.properties.points.items.maxLength, 2000);
+  assert.equal(properties.topics.items.properties.points.items.properties.text.maxLength, 1000);
+  assert.equal(properties.topics.items.properties.points.items.properties.details.maxItems, 8);
 });
 
 for (const outputFormat of ['meeting', 'summary', 'tasks']) {
@@ -267,7 +282,7 @@ for (const outputFormat of ['meeting', 'summary', 'tasks']) {
 
 test('전체 결과가 64000자를 넘으면 형식 오류가 아니라 출력 한도로 알려 나눠 처리하게 한다', async t => {
   let count = 33;
-  const server = await start(t, () => [200, completed({ ...emptyMinutes, decisions: Array(count).fill(text(1900)) })]);
+  const server = await start(t, () => [200, completed({ ...emptyMinutes, decisions: Array(count).fill(I(text(1000), [text(900)])) })]);
   const meeting = { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '' };
   assert.equal((await server.post('/api/summary', meeting)).status, 200);
   count = 34;
@@ -287,26 +302,26 @@ test('할 일만 고른 내 형식에는 세부 내용을 topics로 옮기라고
 });
 
 test('요약과 줄이기 모두 일본어·중국어 글자를 섞지 말라고 지시한다', async t => {
-  const server = await start(t, (count) => [200, completed(count === 1 ? emptyMinutes : { overview: '짧게', topics: [{ title: '양식', points: ['짧게'] }] })]);
+  const server = await start(t, (count) => [200, completed(count === 1 ? emptyMinutes : { overview: [I('짧게')], topics: [{ title: '양식', points: [I('짧게')] }] })]);
   await server.post('/api/summary', { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '' });
   await server.post('/api/summary/compact', request());
   for (const call of server.calls) assert.match(call.body.input.filter(item => item.role === 'system').map(item => item.content).join('\n'), /일본어·중국어 글자를 섞지/);
 });
 
 test('AI 결과에 섞인 일본어·중국어 글자를 지우고 나머지 글은 그대로 둔다', async t => {
-  const mixed = { suggestedTitle: '基準', overview: '문제を 기준표', topics: [{ title: '양식', points: ['이력·表示·입력', 'A・B 그대로'] }], decisions: ['QR 코드로 통일'], actions: [{ task: '필터と 월말 보고', owner: '李明 과장', due: null }], openQuestions: ['스ーパー 확인'] };
+  const mixed = { suggestedTitle: '基準', overview: [I('문제を 기준표')], topics: [{ title: '양식', points: [I('이력·表示·입력'), I('A・B 그대로')] }], decisions: [I('QR 코드로 통일')], actions: [{ task: '필터と 월말 보고', owner: '李明 과장', due: null }], openQuestions: [I('스ーパー 확인')] };
   const server = await start(t, () => [200, completed(mixed)]);
   const result = await server.post('/api/summary', { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '' });
   assert.equal(result.status, 200);
-  assert.deepEqual(result.body.minutes, { overview: '문제 기준표', topics: [{ title: '양식', points: ['이력·입력', 'A・B 그대로'] }], decisions: ['QR 코드로 통일'], actions: [{ task: '필터 월말 보고', owner: '과장', due: null }], openQuestions: ['스 확인'] });
+  assert.deepEqual(result.body.minutes, { overview: [I('문제 기준표')], topics: [{ title: '양식', points: [I('이력·입력'), I('A・B 그대로')] }], decisions: [I('QR 코드로 통일')], actions: [{ task: '필터 월말 보고', owner: '과장', due: null }], openQuestions: [I('스 확인')] });
 });
 
 test('줄이기 결과에 섞인 일본어·중국어 글자도 지운다', async t => {
-  const server = await start(t, () => [200, completed({ overview: '전체 방향 | 짧게 씁니다を.', topics: [{ title: '양식', points: ['합쳐서 씁니다表示.'] }] })]);
+  const server = await start(t, () => [200, completed({ overview: [I('전체 방향', ['짧게 씀を.'])], topics: [{ title: '양식', points: [I('합쳐서 씀表示.')] }] })]);
   const result = await server.post('/api/summary/compact', request());
   assert.equal(result.status, 200);
-  assert.equal(result.body.minutes.overview, '전체 방향 | 짧게 씁니다.');
-  assert.deepEqual(result.body.minutes.topics, [{ title: '양식', points: ['합쳐서 씁니다.'] }]);
+  assert.deepEqual(result.body.minutes.overview, [I('전체 방향', ['짧게 씀.'])]);
+  assert.deepEqual(result.body.minutes.topics, [{ title: '양식', points: [I('합쳐서 씀.')] }]);
 });
 
 const audio = new Uint8Array([26, 69, 223, 163, 0, 0, 0, 0, 0, 0, 0, 0]);
