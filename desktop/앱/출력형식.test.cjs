@@ -36,7 +36,7 @@ test('세 형식은 같은 스키마·32000토큰·공통 사실 보존 지침�
   const [omitted, meeting, summary, tasks] = server.calls;
   assert.deepEqual(omitted, meeting);
   assert.match(meeting.input[0].content, /^회의록 작성 양식과 품질 기준을 따르세요\./);
-  assert.match(meeting.input[0].content, /'전체 방향 \| 무엇을 왜 먼저 하는지/);
+  assert.match(meeting.input[0].content, /'전체 방향' — 무엇을 왜 먼저 하는지/);
   assert.match(summary.input[0].content, /^핵심 요약형 양식/);
   assert.match(summary.input[0].content, /overview와 topics를 중심/);
   assert.match(tasks.input[0].content, /^업무 정리형 양식/);

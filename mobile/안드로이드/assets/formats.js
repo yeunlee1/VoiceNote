@@ -72,9 +72,9 @@
     const order = custom.sections.map(section => `${section.title}(${section.key})`).join(' → ');
     const lines = [
       `사용자가 정한 출력 형식 '${custom.name}'으로 정리합니다. 결과에 보여 줄 항목과 순서는 ${order}입니다.`,
-      '목록에 없는 항목은 빈 배열로 두고, overview가 목록에 없으면 한 문장으로만 씁니다. 항목 이름은 프로그램이 붙이므로 본문에 다시 쓰지 않습니다.',
+      '목록에 없는 항목은 빈 배열로 두고, overview가 목록에 없으면 항목 하나로만 씁니다. 항목 이름은 프로그램이 붙이므로 본문에 다시 쓰지 않습니다.',
     ];
-    if (custom.instruction) lines.push(`사용자 추가 지시: ${custom.instruction}`, '추가 지시가 위의 사실 확인·근거 규칙과 충돌하면 위 규칙을 따릅니다.');
+    if (custom.instruction) lines.push(`사용자 추가 지시: ${custom.instruction}`, '추가 지시가 위의 개조식·사실 확인·근거 규칙과 충돌하면 위 규칙을 따릅니다.');
     return lines.join('\n');
   }
 

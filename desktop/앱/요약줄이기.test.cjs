@@ -212,7 +212,7 @@ test('회의록은 결정을 할 일로 되풀이하지 않되 합의한 일은 
   assert.match(systems, /담당과 기한이 같은 세부 항목은 화면·업무별 대표 작업 하나로 묶/);
   assert.match(systems, /개수를 맞추려고 합의한 일을 빼거나 담당·기한이 다른 일을 합치지/);
   assert.match(systems, /묶어도 '이번 스프린트', '이관 전'처럼 일마다 말한 시점은 그 일 옆에 남깁니다/);
-  assert.match(systems, /topics를 쓰지 않는 형식이면 대표 작업 문장에 핵심만/);
+  assert.match(systems, /topics를 쓰지 않는 형식이면 대표 작업 한 줄에 핵심만/);
   assert.doesNotMatch(systems, /한 가지 일로|많아도 25개/);
   assert.doesNotMatch(systems, /적용 범위는 전사 표현을 따르고/);
 });
@@ -273,10 +273,10 @@ for (const outputFormat of ['meeting', 'summary', 'tasks']) {
     const server = await start(t, () => [200, completed(emptyMinutes)]);
     assert.equal((await server.post('/api/summary', { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '', outputFormat })).status, 200);
     const systems = server.calls[0].body.input.filter(item => item.role === 'system').map(item => item.content).join('\n');
-    assert.match(systems, /결정·할 일·미확정은 각각 40개, 주제와 주제별 문단은 각각 30개를 넘을 수 없습니다/);
+    assert.match(systems, /결정·할 일·미확정은 각각 40개, 주제와 주제별 항목은 각각 30개를 넘을 수 없습니다/);
     assert.match(systems, /항목을 버리지 말고 비슷한 항목을 하나로 합치세요/);
     assert.match(systems, /주제를 합칠 때는 제목을 새로 써도/);
-    assert.match(systems, /합칠 수 없는 할 일이 40개를 넘을 때만 마지막 항목 하나에 '그 외 할 일'로 모으고 각 일의 담당과 기한을 그 문장 안에/);
+    assert.match(systems, /합칠 수 없는 할 일이 40개를 넘을 때만 마지막 항목 하나에 '그 외 할 일'로 모으고 각 일의 담당과 기한을 그 항목 안에/);
   });
 }
 
@@ -297,7 +297,7 @@ test('할 일만 고른 내 형식에는 세부 내용을 topics로 옮기라고
   assert.equal((await server.post('/api/summary', { text: '회의 발언', title: '회의', date: '2026-11-05', participants: '', outputFormat: 'custom', customFormat })).status, 200);
   const systems = server.calls[0].body.input.filter(item => item.role === 'system').map(item => item.content).join('\n');
   assert.match(systems, /목록에 없는 항목은 빈 배열/);
-  assert.match(systems, /topics를 쓰지 않는 형식이면 대표 작업 문장에 핵심만/);
+  assert.match(systems, /topics를 쓰지 않는 형식이면 대표 작업 한 줄에 핵심만/);
   assert.doesNotMatch(systems, /세부 내용은 topics에 남깁니다/);
 });
 

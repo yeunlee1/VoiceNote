@@ -123,3 +123,28 @@ test('줄이기를 받지 않으면 옛 구조로 받은 원래 결과를 그대
   assert.equal(result.body.shortened, false);
   assert.deepEqual(result.body.minutes, old);
 });
+
+const STYLE = [/항목 하나에 내용 하나/, /details에/, /글머리표 기호/];
+const PROSE = ['2~4문장의 문단', '이어지는 문단', '짧은 문단', '완전한 문장', '한 문장으로만', '글머리표나 키워드만 출력하지 마세요', '3~6문장', '2~4문장', '한 문장으로 씁니다', '짧은 문장으로'];
+const systemsOf = call => call.input.filter(item => item.role === 'system').map(item => item.content).join('\n');
+
+test('네 출력 형식과 줄이기 지시에 개조식 규칙이 있고 문장형 요구가 남지 않았다', async t => {
+  const { calls, post } = await start(t, n => completed(n <= 4 ? fresh() : { overview: [I('전체 방향')], topics: [] }));
+  const custom = { name: '주간', sections: [{ key: 'actions', title: '할 일' }, { key: 'decisions', title: '결정' }], instruction: '결정은 자세히' };
+  for (const outputFormat of ['meeting', 'summary', 'tasks']) assert.equal((await post('/api/summary', summary({ outputFormat }))).status, 200);
+  assert.equal((await post('/api/summary', summary({ outputFormat: 'custom', customFormat: custom }))).status, 200);
+  await post('/api/summary/compact', compact());
+  assert.equal(calls.length, 5);
+  for (const call of calls) {
+    const systems = systemsOf(call);
+    for (const rule of STYLE) assert.match(systems, rule);
+    for (const prose of PROSE) assert.equal(systems.includes(prose), false, `문장형 요구가 남음: ${prose}`);
+  }
+  assert.match(systemsOf(calls[3]), /overview가 목록에 없으면 항목 하나로만/);
+  assert.match(systemsOf(calls[3]), /개조식·사실 확인·근거 규칙/);
+  for (const call of calls.slice(0, 4)) assert.match(systemsOf(call), /모순되지 않는지 검토/);
+  // 사실 보존 규칙(확정 여부·담당·기한의 모순 검토)은 개조식으로 바꿔도 네 형식에 그대로 남는다.
+  assert.match(systemsOf(calls[0]), /'전체 방향', '주요 결정', '다음 할 일', '남은 쟁점'/);
+  assert.match(systemsOf(calls[0]), /확정된 내용 없음/);
+  assert.match(systemsOf(calls[4]), /머리말만 남기고 내용을 모두 지우지 않습니다/);
+});
