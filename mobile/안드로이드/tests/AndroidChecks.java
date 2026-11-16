@@ -598,20 +598,28 @@ public final class AndroidChecks extends Instrumentation {
 
         JSONObject before=minutes().put("topics",new JSONArray().put(new JSONObject().put("title","양식").put("points",new JSONArray().put(item("공통 양식 쓰기로 함",repeated(400,'가'))))));
         JSONObject detailsOnly=new JSONObject().put("overview",before.getJSONArray("overview")).put("topics",new JSONArray().put(new JSONObject().put("title","양식").put("points",new JSONArray().put(item("공통 양식 쓰기로 함","줄인 이유")))));
-        JSONObject merged=Ai.mergeCompact(before,MinutesItems.prune(detailsOnly));
+        String beforeText=before.toString();
+        // 기대값은 호출 전에 글로 고정한다. 호출 뒤 원본과 비교하면 원본을 함께 바꾸는 구현도 통과한다(짝보고 9).
+        JSONObject merged=Ai.mergeCompact(before,MinutesItems.prune(detailsOnly)),frozen=new JSONObject(beforeText);
         expect(merged!=before&&merged.getJSONArray("topics").getJSONObject(0).getJSONArray("points").getJSONObject(0).getJSONArray("details").getString(0).equals("줄인 이유")
-            &&merged.getJSONArray("decisions").toString().equals(before.getJSONArray("decisions").toString())&&merged.getJSONArray("openQuestions").toString().equals(before.getJSONArray("openQuestions").toString()),"하위 항목만 줄어든 답은 받고 결정·미확정은 그대로 둔다");
+            &&merged.getJSONArray("decisions").toString().equals(frozen.getJSONArray("decisions").toString())&&merged.getJSONArray("openQuestions").toString().equals(frozen.getJSONArray("openQuestions").toString())
+            &&merged.getJSONArray("actions").toString().equals(frozen.getJSONArray("actions").toString())&&merged.getString("suggestedTitle").equals(frozen.getString("suggestedTitle"))&&before.toString().equals(beforeText),"하위 항목만 줄어든 답은 받고 제목·결정·할 일·미확정과 받은 원본은 그대로 둔다");
         JSONObject labeled=minutes().put("overview",new JSONArray().put(item("전체 방향",repeated(300,'가'))).put(item("주요 결정",repeated(300,'나'))));
         JSONObject labelsOnly=new JSONObject().put("overview",new JSONArray().put(item("전체 방향")).put(item("주요 결정"))).put("topics",labeled.getJSONArray("topics"));
-        expect(Ai.mergeCompact(labeled,MinutesItems.prune(labelsOnly))==labeled,"머리말만 남은 핵심 요약 답은 받지 않고 원래 결과를 쓴다");
+        String labeledText=labeled.toString();
+        expect(Ai.mergeCompact(labeled,MinutesItems.prune(labelsOnly))==labeled&&labeled.toString().equals(labeledText),"머리말만 남은 핵심 요약 답은 받지 않고 원래 결과를 그대로 쓴다");
         JSONObject spaced=minutes().put("decisions",new JSONArray().put(item("  결정  ","  조건  "))).put("topics",before.getJSONArray("topics"));
+        String spacedText=spaced.toString();
         JSONObject kept=Ai.mergeCompact(spaced,MinutesItems.prune(detailsOnly));
-        expect(kept!=spaced&&kept.getJSONArray("decisions").toString().equals(spaced.getJSONArray("decisions").toString()),"줄이기를 받으면 결정은 받은 원본 글자 그대로 되붙인다");
+        expect(kept!=spaced&&kept.getJSONArray("decisions").toString().equals(new JSONObject(spacedText).getJSONArray("decisions").toString())&&spaced.toString().equals(spacedText),"줄이기를 받으면 결정은 받은 원본 글자(앞뒤 공백 포함) 그대로 되붙이고 원본은 바꾸지 않는다");
         JSONObject old=oldMinutes().put("topics",new JSONArray().put(new JSONObject().put("title","양식").put("points",new JSONArray().put(repeated(800,'나')))));
-        JSONObject fromOld=Ai.mergeCompact(old,MinutesItems.prune(detailsOnly));
-        expect(fromOld!=old&&fromOld.getJSONArray("decisions").getJSONObject(0).getString("text").equals("기존 DB 활용")&&fromOld.getJSONArray("overview").length()==2,"옛 구조를 줄여 받으면 새 구조 하나로 돌려준다");
+        String oldText=old.toString();
+        JSONObject fromOld=Ai.mergeCompact(old,MinutesItems.prune(detailsOnly)),converted=MinutesItems.normalize(new JSONObject(oldText));
+        expect(fromOld!=old&&fromOld.getJSONArray("decisions").toString().equals(converted.getJSONArray("decisions").toString())&&fromOld.getJSONArray("openQuestions").toString().equals(converted.getJSONArray("openQuestions").toString())
+            &&fromOld.getJSONArray("overview").length()==2&&old.toString().equals(oldText),"옛 구조를 줄여 받으면 새 구조 하나로 돌려주고 받은 옛 원본은 그대로 둔다");
         JSONObject tooLong=oldMinutes().put("topics",old.getJSONArray("topics")).put("decisions",new JSONArray().put(repeated(1500,'다')));
-        expect(Ai.mergeCompact(tooLong,MinutesItems.prune(detailsOnly))==tooLong,"새 항목 한도보다 긴 옛 결정이 있으면 줄이기를 받지 않는다");
+        String tooLongText=tooLong.toString();
+        expect(Ai.mergeCompact(tooLong,MinutesItems.prune(detailsOnly))==tooLong&&tooLong.toString().equals(tooLongText),"새 항목 한도보다 긴 옛 결정이 있으면 줄이기를 받지 않고 원본을 그대로 둔다");
 
         JSONObject record=analyzable(store,"항목 구조 회의");File dir=store.directory("main",record.getString("id")),caches=new File(dir,"중간요약");
         replies.add(replyWith(oldMinutes()));
