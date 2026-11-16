@@ -471,7 +471,18 @@
   function todoHolding() { if (!state.todoEditing && !state.todoPending) return false; message(state.todoEditing ? TODO_NOTICES.editing : TODO_NOTICES.saving); return true; }
   // 막을 이유가 없어졌으면 안내를 남겨 두지 않는다. 저장 실패처럼 다른 안내는 그대로 둔다.
   function clearTodoNotice() { if (state.todoEditing || state.todoPending || !Object.values(TODO_NOTICES).includes($('message').textContent)) return; clearTimeout(message.timer); $('message').hidden = true; }
-  function list(title, items, host = $('minutes')) { if (!items?.length) return; host.append(node('h3', title)); const ul = node('ul'); for (const item of items) ul.append(node('li', item)); host.append(ul); }
+  function renderItems(host, items, labels = false) {
+    // 항목은 ul > li, 하위 항목은 그 li 안의 ul > li로 그린다. 여러 줄 본문은 pre-line으로 같은 항목 안에서 줄을 바꾼다. Windows renderItems와 같은 구조다.
+    const ul = node('ul', null, 'items');
+    for (const item of items) {
+      const li = node('li');
+      li.append(node('span', item.text, labels && MeetingFormats.OVERVIEW_LABELS.includes(item.text) ? 'item-text item-label' : 'item-text'));
+      // 핵심 요약의 머리말 넷(전체 방향 등)만 굵게 써서 그 아래 하위 항목의 제목으로 보이게 한다.
+      if (item.details.length) { const inner = node('ul', null, 'item-details'); for (const detail of item.details) inner.append(node('li', detail)); li.append(inner); }
+      ul.append(li);
+    }
+    host.append(ul);
+  }
   function renderUsage(record) {
     const rows = Flow.usageRows(record), host = $('usage'); host.replaceChildren();
     if (!rows.length) { host.append(node('p', '미제공 · 이 회의에는 기록된 사용량이 없습니다.', 'hint')); return; }
@@ -518,13 +529,13 @@
     for (const section of sections) {
       if (section.type === 'overview') {
         const summary = node('div', null, 'summary'); summary.append(node('strong', section.title));
-        for (const line of section.text.split(/\n+/)) summary.append(node('p', line));
+        if (section.items.length) renderItems(summary, section.items, true);
         host.append(summary);
       } else if (section.type === 'topics') {
         if (section.title && section.topics.length) host.append(node('h3', section.title));
-        for (const topic of section.topics) { host.append(node(section.title ? 'h4' : 'h3', topic.title)); for (const text of topic.points || []) host.append(node('p', text)); }
+        for (const topic of section.topics) { host.append(node(section.title ? 'h4' : 'h3', topic.title)); if (topic.points.length) renderItems(host, topic.points); }
       } else if (section.key === 'actions' && section.items.length && renderActions) renderActions(host, section.title, section.empty != null);
-      else if (section.items.length) list(section.title, section.items, host);
+      else if (section.items.length) { host.append(node('h3', section.title)); renderItems(host, section.items); }
       else if (section.empty) host.append(node('h3', section.title), node('p', section.empty, 'hint'));
     }
   }

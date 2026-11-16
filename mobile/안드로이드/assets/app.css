@@ -161,6 +161,15 @@ body.typing .dock { display: none; }
 .minutes h3 { margin-top: 8px; }
 .minutes p, .minutes li { font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; }
 .minutes ul { padding-left: 20px; margin: 0; }
+/* 개조식 결과: 항목은 진한 글, 하위 항목(이유·조건)은 옅은 글로 한 단계 안에 써서 결론이 먼저 보이게 한다. 여러 줄 항목은 한 항목 안에서 줄을 바꾼다. */
+.minutes .items li { color: var(--ink); white-space: pre-line; }
+.minutes .items li::marker { color: var(--ink-faint); }
+.minutes .items > li + li { margin-top: 4px; }
+.minutes .item-details { margin-top: 2px; }
+.minutes .item-details li { color: var(--ink-soft); }
+.minutes .item-details li + li { margin-top: 2px; }
+.minutes .item-label { font-weight: 600; }
+.minutes .summary .items { margin-top: 6px; }
 .usage table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
 .usage th, .usage td { padding: 8px 4px; border-bottom: 1px solid var(--rule); text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .usage th:first-child, .usage td:first-child { text-align: left; width: 38%; }

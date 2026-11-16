@@ -68,12 +68,15 @@
     return [action.task, owner, due].filter(Boolean).join(' · ');
   }
   function minutesSections(format, minutes, custom) {
-    const m = minutes || {}, actions = undecided => (m.actions || []).map(a => actionLine(a, undecided));
-    const overview = title => ({ type: 'overview', title, text: String(m.overview || '') });
+    const m = Formats.normalizeMinutes(minutes || {}), item = text => ({ text, details: [] });
+    // 옛 문자열 결과도 항목 구조로 바꿔 넘긴다. 핵심 요약·주제 항목·결정·미확정은 {text, details}, 할 일은 한 줄 항목이다.
+    const actions = undecided => (m.actions || []).map(a => item(actionLine(a, undecided)));
+    const overview = title => ({ type: 'overview', title, items: m.overview });
     const list = (title, items, empty, key) => ({ type: 'list', title, items: items || [], empty, ...(key ? { key } : {}) });
-    const topics = title => ({ type: 'topics', title, topics: m.topics || [] });
+    const topics = title => ({ type: 'topics', title, topics: m.topics });
     // 내 형식은 정의가 있을 때만 고른 항목·순서·이름으로 보여 주고, 정의가 없으면 회의록으로 보여 준다.
-    if (outputFormat(format) === 'custom' && custom) return Formats.customSections(m, custom).map(section => section.type === 'list' ? { ...section, empty: '없음' } : section);
+    if (outputFormat(format) === 'custom' && custom) return Formats.customSections(m, custom).map(section => section.type === 'overview' ? { type: 'overview', title: section.title, items: section.items }
+      : section.type === 'list' ? { ...section, items: section.key === 'actions' ? section.items.map(item) : section.items, empty: '없음' } : section);
     switch (outputFormat(format)) {
       case 'summary': return [overview('핵심 요약'), topics('주요 내용'), list('합의된 방향', m.decisions), list('다음 할 일', actions(false), undefined, 'actions'), list('미확정 사항', m.openQuestions)];
       case 'tasks': return [overview('업무 요약'), list('할 일', actions(true), '정해진 할 일이 없습니다.', 'actions'), list('확인 필요', m.openQuestions), list('결정 사항', m.decisions), topics('관련 논의')];
