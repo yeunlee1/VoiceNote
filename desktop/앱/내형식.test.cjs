@@ -24,7 +24,7 @@ test('내 형식은 앞뒤 공백을 지운 이름·항목·추가 지시만 받
 
 test('내 형식 본문은 고른 순서와 이름으로 쓰고 빈 항목은 없음으로 남긴다', () => {
   const value = formats.validateCustom({ ...custom, sections: [...custom.sections, { key: 'openQuestions', title: '물어볼 것' }] });
-  assert.deepEqual(formats.customText(minutes, value), ['## 이번 주 할 일', '- 보고서 쓰기 · 담당 미정 · 기한 금요일', '', '## 한 줄 요약', '요약입니다.', '', '## 물어볼 것', '- 없음', '']);
+  assert.deepEqual(formats.customText(minutes, value), ['## 이번 주 할 일', '- 보고서 쓰기 · 담당 미정 · 기한 금요일', '', '## 한 줄 요약', '- 요약입니다.', '', '## 물어볼 것', '- 없음', '']);
   assert.deepEqual(formats.customSections(minutes, value).map(section => section.type), ['list', 'overview', 'list']);
   assert.equal(formats.defaultCustom().sections.length, 5);
   for (const key of ['meeting', 'summary', 'tasks', 'custom']) assert.ok(formats.LABELS[key] && formats.DESCRIPTIONS[key]);

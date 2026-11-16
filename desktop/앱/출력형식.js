@@ -92,11 +92,12 @@
   }
 
   function customText(minutes, custom) {
-    // 저장 파일과 복사용 글에 쓰는 마크다운 본문이다. 내용이 없는 항목은 '없음'으로 남긴다.
-    return customSections(minutes, custom).flatMap(section => {
-      if (section.type === 'overview') return [`## ${section.title}`, section.text, ''];
-      if (section.type === 'topics') return [`## ${section.title}`, '', ...(section.topics.length ? section.topics.flatMap(topic => [`### ${topic.title}`, '', ...(topic.points || []).flatMap(point => [point, ''])]) : ['없음', ''])];
-      return [`## ${section.title}`, ...(section.items.length ? section.items.map(item => `- ${item}`) : ['- 없음']), ''];
+    // 저장 파일과 복사용 글에 쓰는 마크다운 본문이다. 목록 칸은 항목·하위 항목으로 쓰고, 내용이 없는 항목은 '없음'으로 남긴다.
+    const m = normalizeMinutes(minutes || {});
+    return custom.sections.flatMap(({ key, title }) => {
+      if (key === 'topics') return [`## ${title}`, '', ...(m.topics.length ? m.topics.flatMap(topic => [`### ${topic.title}`, '', ...itemLines(topic.points), '']) : ['없음', ''])];
+      const lines = key === 'actions' ? (m.actions || []).map(action => `- ${actionLine(action)}`) : itemLines(m[key]);
+      return [`## ${title}`, ...(lines.length ? lines : ['- 없음']), ''];
     });
   }
 
@@ -168,9 +169,9 @@
     const indent = ' '.repeat(marker.length);
     const block = (text, first, rest) => {
       const [head, ...tail] = String(text).split(/\r?\n/);
-      return [first + head.trim(), ...tail.map(clean).filter(Boolean).map(line => rest + line)];
+      return [first + head.trim(), ...tail.map(line => line.trim()).map(line => line ? rest + line : '')];
     };
-    // 이어지는 줄은 앞 기호를 떼고 빈 줄을 버려 하위 항목처럼 보이지 않게 한다.
+    // 이어지는 줄은 앞뒤 공백만 떼고 내용과 빈 줄은 그대로 둔다. 줄 안의 기호(예: '- 5도')도 원문 글자이므로 지우지 않는다.
     return items(list).flatMap(entry => [...block(entry.text, marker, indent), ...entry.details.flatMap(detail => block(detail, '  - ', '    '))]);
   }
 
