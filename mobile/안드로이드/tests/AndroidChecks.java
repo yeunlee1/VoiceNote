@@ -103,8 +103,8 @@ public final class AndroidChecks extends Instrumentation {
             JSONObject failing=heardRecord(store,"전사까지만 실패");code=500;replies.add("{}");
             try{new Ai(store,message->{}).transcribeOnly(failing);throw new AssertionError("전사 실패가 필요합니다.");}catch(IOException ex){expect(ex.getMessage().contains("HTTP 500"),"전사 실패를 알린다");}
             code=200;expect(store.access().trialUsed==1&&store.access().trialReserved==0&&!store.load("main",failing.getString("id")).optString("state").equals("transcribed"),"전사 실패는 예약을 돌려주고 transcribed로 남기지 않는다");
-            JSONObject blocked=heardRecord(store,"전사까지만 저장 실패");replies.add("{\"text\":\"저장 실패 전 전사\"}");Store.failSaveId=blocked.getString("id");
-            try{new Ai(store,message->{}).transcribeOnly(blocked);throw new AssertionError("회의정보 저장 실패가 필요합니다.");}catch(IOException ex){expect(ex.getMessage().equals("시험용 회의정보 저장 실패"),"회의정보 저장 실패를 알린다");}finally{Store.failSaveId=null;}
+            JSONObject blocked=heardRecord(store,"전사까지만 저장 실패");replies.add("{\"text\":\"저장 실패 전 전사\"}");Store.failSaveState="transcribed";
+            try{new Ai(store,message->{}).transcribeOnly(blocked);throw new AssertionError("회의정보 저장 실패가 필요합니다.");}catch(IOException ex){expect(ex.getMessage().equals("시험용 회의정보 저장 실패"),"회의정보 저장 실패를 알린다");}finally{Store.failSaveState=null;}
             expect(store.access().trialUsed==1&&store.access().trialReserved==0&&Store.read(new File(store.directory("main",blocked.getString("id")),"전사-001.txt")).equals("저장 실패 전 전사"),"전사 뒤 회의정보 저장이 실패해도 체험 예약을 돌려주고 받은 전사는 남긴다");
             expect(MeetingService.mode(null).equals("minutes")&&MeetingService.mode("").equals("minutes")&&MeetingService.mode("minutes").equals("minutes")&&MeetingService.mode("transcript").equals("transcript"),"분석 방식 값을 읽는다");
             try{MeetingService.mode("summary");throw new AssertionError("모르는 분석 방식이 통과했습니다.");}catch(IOException ex){expect(ex.getMessage().equals("분석 방식을 확인할 수 없습니다."),"모르는 분석 방식은 거절한다");}

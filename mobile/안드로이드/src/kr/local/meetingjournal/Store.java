@@ -33,8 +33,8 @@ final class Store {
         return SettingsFile.write(new SettingsFile.Value(current.getString("summaryModel"),current.getString("defaultOutputFormat"),custom==null?null:CustomFormat.parse(custom.toString())));
     }
     static volatile int failImportAfter=-1;
-    static volatile String failSaveId=null;
-    // 기기 시험이 이 회의의 회의정보 저장만 실패하게 만들 때 쓴다. 앱에서는 늘 null이다.
+    static volatile String failSaveState=null;
+    // 기기 시험이 이 상태(state)로 저장하는 회의정보만 실패하게 만들 때 쓴다. 앱에서는 늘 null이다.
     JSONObject settingsPreview(SettingsFile.Value value)throws Exception{
         boolean model=AiModels.find(value.summaryModel)!=null;
         JSONObject preview=new JSONObject().put("summaryModel",new JSONObject().put("value",value.summaryModel).put("apply",model))
@@ -120,7 +120,7 @@ final class Store {
     void save(JSONObject record)throws Exception {
         synchronized(Store.class){
             String location=location(record),id=record.getString("id");File dir=directory(location,id);
-            if(id.equals(failSaveId))throw new IOException("시험용 회의정보 저장 실패");
+            if(failSaveState!=null&&failSaveState.equals(record.optString("state")))throw new IOException("시험용 회의정보 저장 실패");
             preserveLegacy(location,id);
             // 옛 최신 결과는 상태·사용량 갱신보다 먼저 별도 파일로 보존한다.
             record.put("location",location);write(new File(dir,"회의정보.json"),record.toString(2));
