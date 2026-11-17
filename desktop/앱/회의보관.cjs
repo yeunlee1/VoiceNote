@@ -262,7 +262,7 @@ function createMeetingStore(root, validateMinutes, options = {}) {
         const open = record.minutes ? mineOpenCount(record, myName) : 0;
         return { location: record.location, id: record.id, groupId: groupKey(record), ...(record.recordingId ? { recordingId: record.recordingId } : {}), title: record.title, date: record.date,
           dailySequence: record.dailySequence, ...(record.projectName ? { projectName: record.projectName } : {}), savedAt: record.savedAt, outputFormat: record.outputFormat,
-          analyzed: Boolean(record.minutes), audioCount: record.audio?.length || 0, ...(record.expectedParts ? { expectedParts: record.expectedParts } : {}),
+          analyzed: Boolean(record.minutes), ...(!record.minutes && record.transcript ? { transcribed: true } : {}), audioCount: record.audio?.length || 0, ...(record.expectedParts ? { expectedParts: record.expectedParts } : {}),
           ...(review?.stars ? { stars: review.stars } : {}), refined: Boolean(record.feedback), ...(open ? { mineOpen: open } : {}) };
         // groupId는 한 회의의 결과들을 묶는 열쇠다. 화면이 옛 결과를 보다 닫아도 같은 줄로 돌아가는 데 쓴다.
       }).sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')) || b.dailySequence - a.dailySequence || savedAt(b).localeCompare(savedAt(a)));
