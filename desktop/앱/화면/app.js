@@ -1173,8 +1173,9 @@
     ui["finish-choice-note"].textContent = note;
     return new Promise((resolve) => {
       let chosen = null;
-      const minutes = () => { chosen = "minutes"; dialog.close(); };
-      const transcript = () => { chosen = "transcript"; dialog.close(); };
+      const minutes = () => { if (chosen) return; chosen = "minutes"; dialog.close(); };
+      const transcript = () => { if (chosen) return; chosen = "transcript"; dialog.close(); };
+      // 창이 닫히는 이벤트는 조금 뒤에 오므로, 그 사이 다른 단추가 눌려도 처음 고른 값을 지킨다.
       const done = () => {
         ui["finish-minutes"].removeEventListener("click", minutes);
         ui["finish-transcript"].removeEventListener("click", transcript);
@@ -1249,6 +1250,8 @@
   async function summarize(useExistingText = false, feedback = "") {
     // feedback이 있으면 의견 반영 다시 정리다. 모든 구간 요청에 같은 의견을 넣고, 새 결과에 그 의견을 함께 저장한다.
     if (state.parts.length && !state.audioStored) return await finishMeeting();
+    state.finishMode = "minutes";
+    // 회의록을 만들려는 요청이다. 실패 뒤 ‘저장·분석 다시 시도’도 전사만이 아니라 회의록까지 이어 간다.
     return await paidTask(async (signal) => {
       const transcript = useExistingText === true && ui.transcript.value.trim()
         ? ui.transcript.value.trim()

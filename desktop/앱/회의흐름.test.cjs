@@ -12,14 +12,20 @@ function fixture(summaryResponse, responses = {}, { finishMode = 'minutes', ...e
     return { tagName: String(tag).toUpperCase(), value: '', checked: true, hidden: false, disabled: false, open: false, textContent: '', dataset: {}, style: {}, children: [],
       classList: { add() {}, remove() {} }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
       addEventListener(type, handler) { (listeners[type] ||= []).push(handler); }, removeEventListener(type, handler) { listeners[type] = (listeners[type] || []).filter(item => item !== handler); },
-      dispatch(type) { for (const handler of [...(listeners[type] || [])]) handler({ type, target: this, currentTarget: this, preventDefault() {} }); },
+      dispatch(type, event = {}) { for (const handler of [...(listeners[type] || [])]) handler({ type, target: this, currentTarget: this, preventDefault() {}, ...event }); },
       click() { if (!this.disabled) this.dispatch('click'); },
-      setAttribute() {}, removeAttribute() {}, querySelectorAll() { return []; }, querySelector() { return null; },
-      focus() { seen.focused = this; }, show() { this.open = true; }, showModal() { this.open = true; }, close() { if (!this.open) return; this.open = false; this.dispatch('close'); } };
+      setAttribute() {}, removeAttribute() {}, querySelector() { return null; },
+      querySelectorAll(selector) {
+        if (!selector.startsWith('.') || /[\s.#[:>]/.test(selector.slice(1))) return [];
+        const found = [], visit = node => { for (const child of node.children || []) { if (String(child.className || '').split(' ').includes(selector.slice(1))) found.push(child); visit(child); } };
+        visit(this);
+        return found;
+      },
+      focus() { seen.focused = this; }, show() { this.open = true; }, showModal() { this.open = true; }, close() { if (!this.open) return; this.open = false; setTimeout(() => this.dispatch('close'), 0); } };
   };
-  // 처리기를 기억했다가 click()·close()로 부른다. 고르는 창은 열릴 때 finishMode의 단추를 누르고(null이면 닫고, 'manual'이면 시험이 직접 누름), 열린 때의 안내 글을 choices에 모은다.
+  // 처리기를 기억했다가 click()·close()로 부른다. 브라우저처럼 close 이벤트는 조금 뒤에 보낸다. 고르는 창은 열릴 때 finishMode의 단추를 누르고(null이면 닫고, 'manual'이면 시험이 직접 누름), 열린 때의 안내 글을 choices에 모은다.
   const nodes = new Map(), calls = [], summaryBodies = [], posts = [], requests = [];
-  const sandbox = { crypto, Blob, File, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: { MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') },
+  const sandbox = { crypto, Blob, File, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: { MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js'), addEventListener() {}, removeEventListener() {} },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
     document: { getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element },
     async fetch(url, options = {}) {
@@ -50,7 +56,7 @@ function fixture(summaryResponse, responses = {}, { finishMode = 'minutes', ...e
   };
   // 시험마다 필요한 브라우저 기능(예: 가짜 마이크)을 더한다. window는 이미 있는 내용에 합친다.
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
-  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, renderMinutesInto, plainText, loadHistory, openMeeting, importAudio, finishMeeting, clearLocal, archiveResult, startRecording, bindDialog };\n})();');
+  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, renderMinutesInto, plainText, loadHistory, openMeeting, importAudio, finishMeeting, clearLocal, archiveResult, startRecording, bindDialog, bind };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const { state, ui } = sandbox.review;
@@ -763,12 +769,34 @@ test('전사까지만에서 전사 저장이 실패해도 다시 시도는 요�
   assert.equal(closeStatus().unsaved, false);
 });
 
-test('전사만 저장이 끝나면 미저장 경고가 없다', async () => {
-  const { state, finishMeeting, closeStatus } = fixture(null, {}, { finishMode: 'transcript' });
+test('전사만 저장이 끝나면 미저장 경고가 없고 전사를 고치면 다시 생긴다', async () => {
+  const { state, ui, finishMeeting, bind, closeStatus } = fixture(null, {}, { finishMode: 'transcript' });
+  bind();
   state.keyConfigured = true;
   state.parts = [recorded()];
   await finishMeeting();
   assert.equal(closeStatus().unsaved, false);
+  ui.transcript.value += ' 고친 내용';
+  ui.transcript.dispatch('input');
+  assert.equal(closeStatus().unsaved, true);
+});
+
+test('전사만 저장 뒤 회의록 만들기가 실패해도 다시 시도는 전사를 다시 하지 않고 요약을 다시 요청한다', async () => {
+  let failing = true;
+  const { state, ui, finishMeeting, calls } = fixture(() => failing ? failed('요약 실패') : Response.json({ minutes: { overview: '시험', topics: [], decisions: [], actions: [], openQuestions: [] } }), {}, { finishMode: 'transcript' });
+  state.keyConfigured = true;
+  state.parts = [recorded()];
+  await finishMeeting();
+  const make = walk(ui.minutes).find(node => node.tagName === 'BUTTON' && String(node.className).includes('make-minutes'));
+  make.click();
+  await waitFor(() => count(calls, '/api/summary') === 1 && !state.aiController);
+  assert.equal(ui['retry-analysis'].hidden, false);
+  failing = false;
+  await finishMeeting();
+  assert.equal(count(calls, '/api/transcribe'), 1, '전사는 다시 요청하지 않는다');
+  assert.equal(count(calls, '/api/summary'), 2, '다시 시도는 요약을 다시 요청한다');
+  assert.ok(state.minutes);
+  assert.equal(state.resultStored, true);
 });
 
 test('고르는 창이 열려 있는 동안과 원음 저장 전에는 AI를 요청하지 않고 한 번 고르면 분석은 한 번만 시작한다', async () => {
@@ -807,17 +835,22 @@ test('summarize 우회 경로에서도 회의록까지·전사까지만·닫기�
   }
 });
 
-test('창의 배경을 눌러 닫으면 AI 요청이 없고 초점이 회의 준비로 돌아간다', async () => {
-  const { state, ui, finishMeeting, bindDialog, calls, focused } = fixture(null, {}, { finishMode: 'manual' });
-  bindDialog(ui['finish-choice']);
-  state.keyConfigured = true;
-  state.parts = [recorded()];
-  const running = finishMeeting();
-  await waitFor(() => ui['finish-choice'].open);
-  ui['finish-choice'].click();
-  await running;
-  assert.equal(count(calls, '/api/transcribe') + count(calls, '/api/summary'), 0);
-  assert.equal(focused(), ui.prepare);
+test('실제 등록(bind)을 거친 고르는 창은 닫기 단추와 배경 누르기로 닫히고 AI를 부르지 않으며 초점이 회의 준비로 돌아간다', async () => {
+  for (const how of ['닫기 단추', '배경']) {
+    const { state, ui, finishMeeting, bind, calls, focused } = fixture(null, {}, { finishMode: 'manual' });
+    bind();
+    state.keyConfigured = true;
+    state.parts = [recorded()];
+    const running = finishMeeting();
+    await waitFor(() => ui['finish-choice'].open);
+    if (how === '닫기 단추') ui['finish-choice'].dispatch('click', { target: { closest: selector => selector === '[data-close]' ? {} : null } });
+    else ui['finish-choice'].click();
+    await Promise.race([running, new Promise(resolve => setTimeout(resolve, 1000))]);
+    // 등록이 빠져 창이 닫히지 않으면 회의 종료가 끝나지 않으므로 기다리지 않고 실패로 알린다.
+    assert.equal(ui['finish-choice'].open, false, how);
+    assert.equal(count(calls, '/api/transcribe') + count(calls, '/api/summary'), 0, how);
+    assert.equal(focused(), ui.prepare, how);
+  }
 });
 
 test('키가 없으면 고르는 창을 띄우지 않는다', async () => {
