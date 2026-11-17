@@ -320,6 +320,26 @@
   </div>
 </dialog>
 
+<dialog id="update-ask" class="modal modal-choice" aria-labelledby="update-ask-title" aria-describedby="update-ask-versions update-ask-question">
+  <div class="modal-head">
+    <h2 id="update-ask-title" class="modal-title">새 버전이 있습니다</h2>
+    <button class="icon-button" type="button" data-close aria-label="새 버전 알림 닫기"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
+  </div>
+  <div class="modal-body">
+    <dl id="update-ask-versions" class="settings-preview">
+      <div class="preview-row"><dt>새 버전</dt><dd id="update-ask-version" class="update-ask-version"></dd></div>
+      <div class="preview-row"><dt>지금 버전</dt><dd id="update-ask-current"></dd></div>
+    </dl>
+    <p id="update-ask-question" class="update-ask-question">업데이트하시겠습니까?</p>
+    <p class="fine-print">설치할 때 VoiceNote를 닫았다가 다시 엽니다. 회의 기록과 설정은 그대로 남습니다.</p>
+    <div class="button-row">
+      <button id="update-ask-yes" class="button button-primary" type="button">업데이트</button>
+      <button class="button button-quiet" type="button" data-close>나중에</button>
+      <button id="update-ask-notes" class="button button-quiet update-ask-notes" type="button">바뀐 점 보기</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="settings-import" class="modal" aria-labelledby="settings-import-title">
   <div class="modal-head">
     <h2 id="settings-import-title" class="modal-title">설정 불러오기</h2>
