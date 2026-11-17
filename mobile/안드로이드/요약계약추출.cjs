@@ -5,7 +5,7 @@ const destination=process.argv[2];
 if(!destination)throw new Error('빌드 자산 경로가 필요합니다.');
 const formats=['meeting','summary','tasks'],sent={};
 let current='';
-const server=createMeetingServer({dataDir:path.join(destination,'임시검증'),apiFetch:async(url,options)=>{sent[current]=JSON.parse(options.body);return Response.json({status:'completed',usage:{input_tokens:1,output_tokens:1},output:[{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:JSON.stringify(current==='compact'?{overview:'시험',topics:[]}:{suggestedTitle:'시험',overview:'시험',topics:[],decisions:[],actions:[],openQuestions:[]})}]}]});}});
+const server=createMeetingServer({dataDir:path.join(destination,'임시검증'),apiFetch:async(url,options)=>{sent[current]=JSON.parse(options.body);return Response.json({status:'completed',usage:{input_tokens:1,output_tokens:1},output:[{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:JSON.stringify(current==='compact'?{overview:[{text:'시험',details:[]}],topics:[]}:{suggestedTitle:'시험',overview:[{text:'시험',details:[]}],topics:[],decisions:[],actions:[],openQuestions:[]})}]}]});}});
 const userFields=body=>Object.keys(JSON.parse(body.input.find(item=>item.role==='user').content)).sort().join(',');
 const systems=body=>body.input.filter(item=>item.role==='system');
 (async()=>{await new Promise(resolve=>server.server.listen(0,'127.0.0.1',resolve));try{const origin=`http://127.0.0.1:${server.server.address().port}`,headers={Origin:origin,'X-Meeting-Token':server.token,'Content-Type':'application/json'};await fetch(origin+'/api/key',{method:'POST',headers,body:JSON.stringify({apiKey:'mock-only',persist:false})});

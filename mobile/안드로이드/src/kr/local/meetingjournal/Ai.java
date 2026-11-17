@@ -163,15 +163,20 @@ final class Ai {
         try{
             progress.update("회의록이 길어 읽기 좋은 길이로 줄이는 중…");
             CustomFormat custom="custom".equals(format)?Store.custom(record):null;
-            JSONObject input=new JSONObject().put("title",record.optString("title")).put("date",record.optString("date")).put("participants",record.optString("participants")).put("targetCharacters",target).put("minutes",minutes);
+            JSONObject input=new JSONObject().put("title",record.optString("title")).put("date",record.optString("date")).put("participants",record.optString("participants")).put("targetCharacters",target).put("minutes",MinutesItems.normalize(minutes));
+            // 옛 구조 결과도 항목 구조로 바꿔 보낸다. 데스크톱 compactInput과 같다.
             if(feedback!=null)input.put("feedback",feedback);
             String instructions=templates.read("summary-compact.json");
-            String source=new JSONArray().put("compact-v1").put(input.toString()).put(model.id).put(format).put(custom==null?JSONObject.NULL:custom.json()).put(digest(instructions)).toString();
+            String source=new JSONArray().put("compact-v2").put(input.toString()).put(model.id).put(format).put(custom==null?JSONObject.NULL:custom.json()).put(custom==null?JSONObject.NULL:digest(custom.instruction())).put(digest(instructions)).toString();
+            // 내 형식 지시 글의 지문도 묶어, 코드의 지시 글만 바뀌어도 옛 캐시를 쓰지 않게 한다.
             File cache=new File(dir,"중간요약/"+digest(source)+".json");
             if(cache.exists())return new JSONObject(Store.read(cache));
             JSONObject body=requestBody(instructions,custom);
             body.getJSONArray("input").put(new JSONObject().put("role","user").put("content",input.toString()));
-            JSONObject merged=mergeCompact(minutes,withoutForeignScript(new JSONObject(minutesText(record,body))));
+            JSONObject answer=new JSONObject(minutesText(record,body));
+            MinutesItems.checkResponse(answer,true);
+            JSONObject merged=mergeCompact(minutes,MinutesItems.prune(withoutForeignScript(answer)));
+            // 응답 틀 확인 → 일본어·중국어 글자 정리 → 빈 값 정리 순서다. 데스크톱 서버와 같다.
             // 모델이 줄이지 못한 답을 주면 실패로 알리고, 성공으로 재사용하지 않게 저장하지 않는다.
             if(merged==minutes){shortenFailed=true;return minutes;}
             Store.write(cache,merged.toString());return merged;
@@ -189,28 +194,27 @@ final class Ai {
         if(value instanceof JSONObject){JSONObject in=(JSONObject)value,out=new JSONObject();for(Iterator<String> keys=in.keys();keys.hasNext();){String key=keys.next();out.put(key,withoutForeign(in.get(key)));}return out;}
         return value;
     }
-    static JSONObject mergeCompact(JSONObject before,JSONObject after)throws Exception {
-        // 모델 답에서 overview와 topics만 쓴다. 더 짧아지지 않았거나 있던 핵심 요약·주제를 비운 답은 버리고 원래 결과를 쓴다. 데스크톱 mergeCompact와 같은 규칙이다.
-        String overview=after.getString("overview");JSONArray topics=after.getJSONArray("topics");
-        if(after.length()!=2)throw new IOException("줄인 결과의 형식이 다릅니다.");
-        for(int i=0;i<topics.length();i++){JSONObject topic=topics.getJSONObject(i);topic.getString("title");topic.getJSONArray("points");}
-        JSONArray oldTopics=before.optJSONArray("topics");
-        if(bodyLength(after)>=bodyLength(before)||!JsonText.trim(before.optString("overview")).isEmpty()&&JsonText.trim(overview).isEmpty()||oldTopics!=null&&oldTopics.length()>0&&topics.length()==0)return before;
-        return new JSONObject(before.toString()).put("overview",overview).put("topics",topics);
+    static JSONObject mergeCompact(JSONObject original,JSONObject after)throws Exception {
+        // 모델 답(정리를 마친 새 구조)에서 overview와 topics만 쓴다. 더 짧아지지 않았거나 있던 핵심 요약·주제를 비운 답(머리말만 남은 핵심 요약 포함)은 버리고 받은 원본 객체를 그대로 돌려준다. 데스크톱 mergeCompact와 같은 규칙이다.
+        JSONObject before=MinutesItems.normalize(original);
+        List<MinutesItems.Item> was=MinutesItems.items(before.opt("overview")),now=MinutesItems.items(after.opt("overview"));
+        boolean shorter=MinutesItems.bodyLength(after)<MinutesItems.bodyLength(before);
+        if(!shorter||!was.isEmpty()&&!hollow(was)&&hollow(now)||before.getJSONArray("topics").length()>0&&after.getJSONArray("topics").length()==0)return original;
+        JSONObject merged=new JSONObject((original.opt("overview") instanceof JSONArray?original:before).toString()).put("overview",after.getJSONArray("overview")).put("topics",after.getJSONArray("topics"));
+        // 제목·결정·할 일·미확정은 받은 원본 글자 그대로 되붙인다. 옛 구조 원본만 항목으로 바꾼 값을 붙여 새 구조 하나로 맞춘다.
+        try{MinutesItems.checkResponse(merged,false);}catch(IOException ex){return original;}
+        // 합친 결과가 응답 틀 한도를 넘으면(새 항목 한도보다 긴 옛 결정 등) 줄이기를 받지 않는다.
+        return merged;
     }
-    static int bodyLength(JSONObject minutes)throws JSONException {
-        // 줄일 수 있는 본문(overview·topics)의 글자 수다. 출력형식.js의 minutesLengths와 같은 항목을 센다.
-        int size=minutes.optString("overview").length();JSONArray topics=minutes.optJSONArray("topics");
-        if(topics!=null)for(int i=0;i<topics.length();i++){JSONObject topic=topics.getJSONObject(i);size+=topic.optString("title").length()+listLength(topic.optJSONArray("points"));}
-        return size;
+    static boolean hollow(List<MinutesItems.Item> items){
+        // 핵심 요약에 회의록형 머리말만 남고 내용이 모두 빠졌으면(빈 목록 포함) 비운 것과 같게 본다.
+        for(MinutesItems.Item item:items)if(!item.details.isEmpty()||!MinutesItems.LABELS.contains(item.text))return false;
+        return true;
     }
-    static int keptLength(JSONObject minutes)throws JSONException {
-        // 그대로 둘 목록(결정·할 일·미확정)의 글자 수다. 담당·기한이 null이면 0자로 센다.
-        int size=listLength(minutes.optJSONArray("decisions"))+listLength(minutes.optJSONArray("openQuestions"));JSONArray actions=minutes.optJSONArray("actions");
-        if(actions!=null)for(int i=0;i<actions.length();i++){JSONObject action=actions.getJSONObject(i);for(String name:new String[]{"task","owner","due"})if(!action.isNull(name))size+=action.optString(name).length();}
-        return size;
-    }
-    static int listLength(JSONArray list){int size=0;if(list!=null)for(int i=0;i<list.length();i++)if(!list.isNull(i))size+=list.optString(i).length();return size;}
+    static int bodyLength(JSONObject minutes){return MinutesItems.bodyLength(minutes);}
+    // 줄일 수 있는 본문(overview·topics)의 글자 수다. 옛 문자열은 원래 길이를, 항목은 본문과 하위 항목을 센다(출력형식.js minutesLengths).
+    static int keptLength(JSONObject minutes){return MinutesItems.keptLength(minutes);}
+    // 그대로 둘 목록(결정·할 일·미확정)의 글자 수다. 담당·기한이 null이면 0자로 센다.
     JSONObject requestBody(String instructions,CustomFormat custom)throws Exception {
         JSONObject body=new JSONObject(instructions);
         // 내 형식은 기준 지침 바로 다음에 사용자 항목·순서·추가 지시를 넣는다. 데스크톱과 같은 위치다.
@@ -236,11 +240,12 @@ final class Ai {
         check();JSONObject input=new JSONObject();
         if(!record.optString("notes").isEmpty())input.put("notes",record.optString("notes"));
         input.put("title",record.optString("title")).put("date",record.optString("date")).put("participants",record.optString("participants")).put("transcript",text);
-        if(previous!=null)input.put("previousMinutes",previous);
+        if(previous!=null)input.put("previousMinutes",MinutesItems.normalize(previous));
+        // 앞 구간은 캐시에서 읽은 옛 구조여도 항목 구조로 바꿔 보낸다. 데스크톱 summaryInput과 같다.
         if(feedback!=null)input.put("feedback",feedback);
         String format=Store.meetingFormat(record);CustomFormat custom="custom".equals(format)?Store.custom(record):null;
         String instructions=templates.read("summary-"+(custom!=null?"meeting":format)+".json"),feedbackInstructions=feedback==null?null:templates.read("summary-feedback.json");
-        String source=new JSONArray().put("summary-v2").put(input.toString()).put(model.id).put(format).put(custom==null?JSONObject.NULL:custom.json()).put(digest(instructions)).put(feedbackInstructions==null?JSONObject.NULL:digest(feedbackInstructions)).toString();
+        String source=new JSONArray().put("summary-v3").put(input.toString()).put(model.id).put(format).put(custom==null?JSONObject.NULL:custom.json()).put(custom==null?JSONObject.NULL:digest(custom.instruction())).put(digest(instructions)).put(feedbackInstructions==null?JSONObject.NULL:digest(feedbackInstructions)).toString();
         String hash=digest(source);File cache=new File(dir,"중간요약/"+hash+".json"), split=new File(dir,"중간요약/"+hash+"-분할.json");
         // 요청 내용과 실제 자산의 지문을 함께 묶어 옛 지시문·다른 의견의 성공 결과가 섞이지 않게 한다.
         if(cache.exists())return new JSONObject(Store.read(cache));
@@ -250,7 +255,9 @@ final class Ai {
             try{JSONObject body=requestBody(instructions,custom);
                 if(feedbackInstructions!=null)body.getJSONArray("input").put(new JSONObject(feedbackInstructions));
                 body.getJSONArray("input").put(new JSONObject().put("role","user").put("content",input.toString()));
-                JSONObject minutes=withoutForeignScript(new JSONObject(minutesText(record,body)));minutes.getString("overview");minutes.getJSONArray("topics");minutes.getJSONArray("decisions");minutes.getJSONArray("actions");minutes.getJSONArray("openQuestions");Store.write(cache,minutes.toString());return minutes;
+                JSONObject minutes=new JSONObject(minutesText(record,body));MinutesItems.checkResponse(minutes,false);
+                minutes=MinutesItems.prune(withoutForeignScript(minutes));Store.write(cache,minutes.toString());return minutes;
+                // 응답 틀 확인 → 일본어·중국어 글자 정리 → 빈 값 정리 순서다. 옛 문자열 구조로 돌아온 답은 형식 오류로 끝나고 캐시에 남지 않는다.
             }catch(Limit limit){if(text.length()<=2000||extra>=6)throw new IOException("길이 한도를 복구하지 못했습니다. 전사와 성공 구간은 저장되어 있습니다.");parts=new JSONArray(TextChunks.split(text,(text.length()+1)/2));Store.write(split,parts.toString());}
         }
         progress.update("길이 한도에 도달해 작은 구간으로 나눠 분석합니다.");JSONObject result=previous;

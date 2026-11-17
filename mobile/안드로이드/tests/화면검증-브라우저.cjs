@@ -59,6 +59,7 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     await require('./후속검증-화면.cjs')({viewport,load,key,click,evaluate,until,wait,shot,check});
     await require('./업데이트검증-화면.cjs')({viewport,load,click,evaluate,until,wait,shot,check});
     await require('./불러오기검증-화면.cjs')({viewport,load,key,tap,evaluate,until,wait,shot,check});
+    await require('./개조식검증-화면.cjs')({viewport,load,key,click,evaluate,wait,shot,check});
     for(const width of [360,390,412]){
       await viewport(width);await load();await key();await click('#history button');await wait(60);
       check(width+'px T1 의견 예시와 앞선 정리본을 보지 않는 안내',await evaluate("document.getElementById('review-comment').placeholder==='예) 담당자가 틀렸어요. 견적 검토는 이대리가 맡기로 했습니다.'&&document.getElementById('review-help').textContent==='AI는 앞선 결과를 보지 않고 전사를 다시 읽습니다. 위치보다 무엇이 어떻게 틀렸는지 적어 주세요.'"));

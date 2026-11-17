@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createMeetingServer } = require('./서버.cjs');
 const SECRET = 'sk-test-SECRET-never-shown-1234567890';
-const minutes = { overview: '회의', topics: [], decisions: [], actions: [], openQuestions: [] };
+const minutes = { overview: [{ text: '회의', details: [] }], topics: [], decisions: [], actions: [], openQuestions: [] };
 const completed = (usage = { input_tokens: 1200, input_tokens_details: { cached_tokens: 200 }, output_tokens: 900, output_tokens_details: { reasoning_tokens: 700 }, total_tokens: 2100 }) => ({
   status: 'completed', ...(usage ? { usage } : {}),
   output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify(minutes) }] }] });

@@ -50,7 +50,9 @@ DefaultKeyFile의 기본값은 빈값이므로 지정하지 않으면 키가 들
 
 - node --test mobile/안드로이드/tests/*.test.cjs
 - node mobile/안드로이드/tests/화면검증-브라우저.cjs <캡처폴더>
-- JVM 단독 시험 10종은 TextChunksTest·TrialAccessTest·AiUsageTest·UpdateRulesTest·AiResponseModelTest·SettingsFileTest·AiFeedbackTest·CopyFilesTest·TextFileNameTest·AudioImportTest입니다. 새 DebugBuild의 stage-debug/classes와 android-36/android.jar를 classpath로 따로 컴파일해 실행합니다. android.jar의 org.json은 JVM에서 Stub 예외가 나므로 Store·Ai 저장 동작은 기기 시험이 맡습니다.
+- JVM 단독 시험 12종은 TextChunksTest·TrialAccessTest·AiUsageTest·UpdateRulesTest·AiResponseModelTest·SettingsFileTest·AiFeedbackTest·CopyFilesTest·TextFileNameTest·AudioImportTest·MinutesItemsTest·MeetingDocumentTest입니다. 새 DebugBuild의 stage-debug/classes와 android-36/android.jar를 classpath로 따로 컴파일해 실행합니다. android.jar의 org.json은 JVM에서 Stub 예외가 나므로 Store·Ai 저장 동작은 기기 시험이 맡습니다.
+- MinutesItemsTest·MeetingDocumentTest는 desktop/tests/fixtures의 공통 예시(회의결과-항목-예시.json·회의문서-예시.json)를 한글 없는 임시 경로로 복사해 받음
+  - DebugBuild는 같은 두 예시를 minutes-items-cases.json·meeting-document-cases.json 자산으로 넣어 AndroidChecks가 기기에서도 대조함
 - AndroidChecks는 DebugBuild에만 들어갑니다. 검증 전용 가상기기에 설치한 뒤 다음을 실행합니다.
 
   adb -s emulator-5554 install -r <검증용 APK>

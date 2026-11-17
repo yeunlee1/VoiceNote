@@ -32,7 +32,7 @@ module.exports = '(' + function () {
         const record={...original}, selected=d.resultId||record.resultId;
         if(selected)record.resultId=selected;
         if(selected==='1233'||selected==='1235'){record.outputFormat='summary';record.feedback='담당자를 확인해 주세요.';}
-        const minutes=record.state==='complete'?{overview:selected==='1233'?'앞선 결과입니다.':'전체 방향 | 회의 내용을 보존합니다.',topics:[{title:'보관함',points:['원래 보관함에서 기록을 엽니다.']}],decisions:[],actions:[],openQuestions:[]}:null;
+        const minutes=record.state!=='complete'?null:m.minutesOverride?JSON.parse(JSON.stringify(m.minutesOverride)):{overview:selected==='1233'?'앞선 결과입니다.':'전체 방향 | 회의 내용을 보존합니다.',topics:[{title:'보관함',points:['원래 보관함에서 기록을 엽니다.']}],decisions:[],actions:[],openQuestions:[]};
         const versions=selected?[{id:'1233',savedAt:2,outputFormat:'summary',refined:true},{id:selected==='legacy'?'legacy':'1234',savedAt:3,outputFormat:'tasks',refined:false}]:[];
         if(original.resultId==='1235')versions.push({id:'1235',savedAt:4,outputFormat:'summary',refined:true});
         if(minutes&&m.todoActions){minutes.actions=(m.todoActionsByResult||{})[selected]||m.todoActions;record.participants=m.todoParticipants||'';}

@@ -24,7 +24,10 @@ public final class AndroidChecks extends Instrumentation {
     static final List<String> auths=new ArrayList<>();
     @Override public void onCreate(Bundle args){super.onCreate(args);probe=args==null?"":args.getString("probe","");start();}
     static void expect(boolean value,String label){if(!value)throw new AssertionError(label);checks++;}
-    static JSONObject minutes()throws Exception{return new JSONObject().put("suggestedTitle","표준 문서 구현 준비").put("overview","전체 방향 | 제조지시서를 먼저 구현합니다.\n주요 결정 | 기존 DB를 사용합니다.").put("topics",new JSONArray().put(new JSONObject().put("title","문서 연결").put("points",new JSONArray().put("생산 중 문서를 반복해서 확인하므로 이동을 단순하게 합니다.")))).put("decisions",new JSONArray().put("기존 DB 활용")).put("actions",new JSONArray().put(new JSONObject().put("task","화면 기획").put("owner",JSONObject.NULL).put("due",JSONObject.NULL))).put("openQuestions",new JSONArray().put("탭 방식은 미정"));}
+    static JSONObject item(String text,String... details)throws Exception{JSONArray list=new JSONArray();for(String detail:details)list.put(detail);return new JSONObject().put("text",text).put("details",list);}
+    static JSONObject minutes()throws Exception{return new JSONObject().put("suggestedTitle","표준 문서 구현 준비").put("overview",new JSONArray().put(item("전체 방향","제조지시서를 먼저 구현함")).put(item("주요 결정","기존 DB 사용"))).put("topics",new JSONArray().put(new JSONObject().put("title","문서 연결").put("points",new JSONArray().put(item("생산 중 문서를 반복해서 확인하므로 이동을 단순하게 함"))))).put("decisions",new JSONArray().put(item("기존 DB 활용"))).put("actions",new JSONArray().put(new JSONObject().put("task","화면 기획").put("owner",JSONObject.NULL).put("due",JSONObject.NULL))).put("openQuestions",new JSONArray().put(item("탭 방식은 미정")));}
+    // AI 응답과 새 결과에 쓰는 항목 구조 가짜 결과다. 아래 oldMinutes()는 개조식 이전에 저장된 옛 결과를 흉내 낸다.
+    static JSONObject oldMinutes()throws Exception{return new JSONObject().put("suggestedTitle","표준 문서 구현 준비").put("overview","전체 방향 | 제조지시서를 먼저 구현합니다.\n주요 결정 | 기존 DB를 사용합니다.").put("topics",new JSONArray().put(new JSONObject().put("title","문서 연결").put("points",new JSONArray().put("생산 중 문서를 반복해서 확인하므로 이동을 단순하게 합니다.")))).put("decisions",new JSONArray().put("기존 DB 활용")).put("actions",new JSONArray().put(new JSONObject().put("task","화면 기획").put("owner",JSONObject.NULL).put("due",JSONObject.NULL))).put("openQuestions",new JSONArray().put("탭 방식은 미정"));}
     static String completed()throws Exception{return new JSONObject().put("status","completed").put("output",new JSONArray().put(new JSONObject().put("type","message").put("content",new JSONArray().put(new JSONObject().put("type","output_text").put("text",minutes().toString()))))).toString();}
     static int meetingFiles(File dir){int n=0;File[] items=dir.listFiles();if(items!=null)for(File f:items)n+=f.isDirectory()?count(f):0;return n;}
     static int count(File dir){int n=0;File[] items=dir.listFiles();if(items!=null)for(File f:items)n+=f.isDirectory()?count(f):1;return n;}
@@ -141,8 +144,8 @@ public final class AndroidChecks extends Instrumentation {
         String id=UUID.randomUUID().toString();File dir=new File(new File(store.root,String.format(Locale.ROOT,"프로젝트-%02d",slot)),id);
         JSONObject record=new JSONObject().put("id",id).put("slot",slot).put("projectName","옛 업무 "+slot).put("date",date).put("title",title).put("dailySequence",7)
             .put("participants","예시 참석자").put("outputFormat","tasks").put("state","complete").put("createdAt",100L).put("audio",new JSONArray());
-        Store.write(new File(dir,"회의정보.json"),record.toString());Store.write(new File(dir,"요약.json"),minutes().put("overview",title+" 본문").toString());
-        Store.write(new File(dir,"전사.txt"),"옛 전사 원문");if(version!=null)Store.write(new File(dir,"요약-"+version+".json"),minutes().toString());return record;
+        Store.write(new File(dir,"회의정보.json"),record.toString());Store.write(new File(dir,"요약.json"),oldMinutes().put("overview",title+" 본문").toString());
+        Store.write(new File(dir,"전사.txt"),"옛 전사 원문");if(version!=null)Store.write(new File(dir,"요약-"+version+".json"),oldMinutes().toString());return record;
     }
     static void archiveChecks(Store store)throws Exception {
         JSONObject one=legacy(store,1,"2099-02-01","옛 첫째","1234"),two=legacy(store,2,"2099-02-02","옛 둘째",null),three=legacy(store,3,"2099-02-03","옛 셋째","2345");
@@ -513,8 +516,9 @@ public final class AndroidChecks extends Instrumentation {
     }
     static String replyWith(JSONObject value)throws Exception{return new JSONObject().put("status","completed").put("output",new JSONArray().put(new JSONObject().put("type","message").put("content",new JSONArray().put(new JSONObject().put("type","output_text").put("text",value.toString()))))).toString();}
     static String repeated(int count,char value){return new String(new char[count]).replace('\0',value);}
-    static JSONObject longMinutes()throws Exception{return minutes().put("overview","전체 방향 | "+repeated(3000,'가')).put("topics",new JSONArray().put(new JSONObject().put("title","주제").put("points",new JSONArray().put(repeated(1000,'나')))));}
-    static JSONObject shortPart()throws Exception{return new JSONObject().put("overview","전체 방향 | 짧게").put("topics",new JSONArray().put(new JSONObject().put("title","주제").put("points",new JSONArray().put("짧은 문단"))));}
+    static JSONObject longMinutes()throws Exception{return minutes().put("overview",new JSONArray().put(item("전체 방향",repeated(1000,'가'),repeated(1000,'가'),repeated(1000,'가')))).put("topics",new JSONArray().put(new JSONObject().put("title","주제").put("points",new JSONArray().put(item(repeated(1000,'나'))))));}
+    static JSONObject shortPart()throws Exception{return new JSONObject().put("overview",new JSONArray().put(item("전체 방향","짧게"))).put("topics",new JSONArray().put(new JSONObject().put("title","주제").put("points",new JSONArray().put(item("짧은 문단")))));}
+    static String overview(File file)throws Exception{return new JSONObject(Store.read(file)).getJSONArray("overview").toString();}
     static void shortenChecks(Store store)throws Exception{
         expect(Ai.bodyLength(new JSONObject("{\"overview\":\"12345\",\"topics\":[{\"title\":\"가나\",\"points\":[\"다라마\",\"바\"]}]}"))==11&&Ai.keptLength(new JSONObject("{\"decisions\":[\"1234\"],\"actions\":[{\"task\":\"일\",\"owner\":\"김과장\",\"due\":\"내일\"},{\"task\":\"둘\",\"owner\":null,\"due\":null}],\"openQuestions\":[\"미정\"]}"))==13,"글자 수는 데스크톱과 같은 항목을 세고 null 담당은 0자로 센다");
         JSONObject full=longMinutes();
@@ -529,20 +533,21 @@ public final class AndroidChecks extends Instrumentation {
         expect(payload.names().join(",").equals("\"title\",\"date\",\"participants\",\"targetCharacters\",\"minutes\""),"줄이기 입력 순서가 데스크톱과 같다");
         expect(payload.getInt("targetCharacters")==SummaryRules.compactTarget("meeting",Ai.bodyLength(full),Ai.keptLength(full))&&payload.getJSONObject("minutes").toString().equals(full.toString()),"목표 글자 수와 전체 결과를 보낸다");
         JSONObject saved=new JSONObject(Store.read(new File(dir,"요약.json")));
-        expect(saved.getString("overview").equals("전체 방향 | 짧게")&&saved.getJSONArray("topics").length()==1,"줄인 본문을 저장한다");
+        expect(saved.getJSONArray("overview").toString().equals(shortPart().getJSONArray("overview").toString())&&saved.getJSONArray("topics").length()==1,"줄인 본문을 저장한다");
         expect(saved.getString("suggestedTitle").equals(full.getString("suggestedTitle"))&&saved.getJSONArray("decisions").toString().equals(full.getJSONArray("decisions").toString())&&saved.getJSONArray("actions").toString().equals(full.getJSONArray("actions").toString())&&saved.getJSONArray("openQuestions").toString().equals(full.getJSONArray("openQuestions").toString()),"제목·결정·할 일·미확정은 원문 그대로 저장한다");
         expect(!record.getString("message").contains("줄이지 못해"),"성공하면 실패 안내가 없다");
         before=requests.size();new Ai(store,message->{}).run(record);expect(requests.size()==before,"성공한 요약과 줄이기는 다시 요청하지 않는다");
         JSONObject failing=analyzable(store,"줄이기 실패");
         replies.add(replyWith(full));replies.add("{\"status\":\"failed\"}");new Ai(store,message->{}).run(failing);
         expect(failing.getString("state").equals("complete")&&failing.getString("message").contains("길이를 줄이지 못해"),"줄이기 실패는 안내만 하고 완료한다");
-        expect(new JSONObject(Store.read(new File(store.directory("main",failing.getString("id")),"요약.json"))).getString("overview").equals(full.getString("overview")),"줄이기 실패 때 전체 결과를 저장한다");
+        expect(overview(new File(store.directory("main",failing.getString("id")),"요약.json")).equals(full.getJSONArray("overview").toString()),"줄이기 실패 때 전체 결과를 저장한다");
         JSONObject longer=analyzable(store,full.getString("suggestedTitle"));File longerDir=store.directory("main",longer.getString("id"));
-        replies.add(replyWith(full));replies.add(replyWith(new JSONObject().put("overview",repeated(5000,'다')).put("topics",new JSONArray())));new Ai(store,message->{}).run(longer);
-        expect(new JSONObject(Store.read(new File(longerDir,"요약.json"))).getString("overview").equals(full.getString("overview")),"더 길어진 답은 버리고 원래 결과를 쓴다");
+        JSONArray longer5=new JSONArray();for(int i=0;i<5;i++)longer5.put(item(repeated(1000,'다')));
+        replies.add(replyWith(full));replies.add(replyWith(new JSONObject().put("overview",longer5).put("topics",new JSONArray().put(new JSONObject().put("title","주제").put("points",new JSONArray().put(item("짧게")))))));new Ai(store,message->{}).run(longer);
+        expect(overview(new File(longerDir,"요약.json")).equals(full.getJSONArray("overview").toString()),"더 길어진 답은 버리고 원래 결과를 쓴다");
         expect(longer.getString("message").contains("길이를 줄이지 못해")&&longer.getString("message").contains("의견 칸에 요청을 적고"),"줄이지 못한 답도 실패로 알리고 다음 행동을 안내한다");
         before=requests.size();replies.add(replyWith(shortPart()));new Ai(store,message->{}).run(longer);
-        expect(requests.size()==before+1&&new JSONObject(Store.read(new File(longerDir,"요약.json"))).getString("overview").equals("전체 방향 | 짧게"),"줄이지 못한 답은 재사용하지 않고 다음 분석에서 다시 줄인다");
+        expect(requests.size()==before+1&&overview(new File(longerDir,"요약.json")).equals(shortPart().getJSONArray("overview").toString()),"줄이지 못한 답은 재사용하지 않고 다음 분석에서 다시 줄인다");
         before=requests.size();replies.add(replyWith(full));replies.add(replyWith(shortPart()));
         refine(new Ai(store,message->{}),record,record.getString("resultId"),"일정을 자세히");
         expect(user(requests.get(before+1)).getString("feedback").equals("일정을 자세히"),"의견 반영의 줄이기에도 의견을 싣는다");
@@ -574,6 +579,72 @@ public final class AndroidChecks extends Instrumentation {
         JSONObject feedback=new JSONObject(assets.get("summary-feedback.json"));feedback.put("content","의견은 전사에서 다시 확인하세요.");assets.put("summary-feedback.json",feedback.toString());replies.add(completed());
         new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인");expect(requests.size()==before+4,"의견 지시문 내용이 바뀌면 이전 캐시를 쓰지 않는다");
         JSONArray messages=new JSONObject(requests.get(before+3)).getJSONArray("input");expect(messages.getJSONObject(messages.length()-2).getString("content").equals("의견은 전사에서 다시 확인하세요."),"변경한 실제 의견 지시문으로 요청한다");
+    }
+    static void itemChecks(Store store)throws Exception{
+        // 항목 규칙의 org.json 경로를 데스크톱과 같은 공통 예시로 대조하고, 응답 틀 확인·줄이기 병합·앞 구간 재전송을 기기에서 확인한다.
+        JSONObject cases=store.asset("minutes-items-cases.json");
+        JSONArray normalize=cases.getJSONArray("normalize"),prune=cases.getJSONArray("prune"),lines=cases.getJSONArray("lines");
+        for(int i=0;i<normalize.length();i++){JSONObject c=normalize.getJSONObject(i);Object input=c.opt("input");
+            List<MinutesItems.Item> items="overview".equals(c.optString("field"))?MinutesItems.overview(input):MinutesItems.items(input);
+            expect(MinutesItems.plain(items).equals(MinutesItems.plain(c.get("expected"))),"공통 항목 예시(org.json): "+c.getString("name"));}
+        for(int i=0;i<prune.length();i++){JSONObject c=prune.getJSONObject(i);expect(MinutesItems.prune(c.getJSONObject("input")).toString().equals(c.getJSONObject("expected").toString()),"공통 빈 값 정리 예시(org.json): "+c.getString("name"));}
+        for(int i=0;i<lines.length();i++){JSONObject c=lines.getJSONObject(i);expect(MinutesItems.lines(MinutesItems.items(c.get("items")),c.getString("marker")).equals(MinutesItems.plain(c.getJSONArray("expected"))),"공통 목록 줄 예시(org.json): "+c.getString("name"));}
+        try{MinutesItems.checkResponse(oldMinutes(),false);throw new AssertionError("옛 문자열 구조 응답은 형식 오류여야 한다");}catch(IOException ex){expect(ex.getMessage().equals(MinutesItems.MALFORMED),"옛 문자열 구조 응답은 형식 오류로 끝난다");}
+        MinutesItems.checkResponse(minutes(),false);
+        try{MinutesItems.checkResponse(minutes().put("extra",1),false);throw new AssertionError("모르는 칸은 형식 오류여야 한다");}catch(IOException ex){expect(ex.getMessage().equals(MinutesItems.MALFORMED),"모르는 칸이 있는 응답은 형식 오류로 끝난다");}
+        try{MinutesItems.checkResponse(shortPart().put("decisions",new JSONArray()),true);throw new AssertionError("줄이기 답의 다른 칸은 형식 오류여야 한다");}catch(IOException ex){expect(ex.getMessage().equals(MinutesItems.MALFORMED),"줄이기 답에 overview·topics 밖의 칸이 있으면 형식 오류로 끝난다");}
+        JSONObject wide=new JSONObject().put("text","결정").put("details",new JSONArray());for(int i=0;i<9;i++)wide.getJSONArray("details").put("이유");
+        try{MinutesItems.checkResponse(minutes().put("decisions",new JSONArray().put(wide)),false);throw new AssertionError("하위 항목 9개는 형식 오류여야 한다");}catch(IOException ex){expect(ex.getMessage().equals(MinutesItems.MALFORMED),"하위 항목이 8개를 넘으면 형식 오류로 끝난다");}
+
+        JSONObject before=minutes().put("topics",new JSONArray().put(new JSONObject().put("title","양식").put("points",new JSONArray().put(item("공통 양식 쓰기로 함",repeated(400,'가'))))));
+        JSONObject detailsOnly=new JSONObject().put("overview",before.getJSONArray("overview")).put("topics",new JSONArray().put(new JSONObject().put("title","양식").put("points",new JSONArray().put(item("공통 양식 쓰기로 함","줄인 이유")))));
+        String beforeText=before.toString();
+        // 기대값은 호출 전에 글로 고정한다. 호출 뒤 원본과 비교하면 원본을 함께 바꾸는 구현도 통과한다(짝보고 9).
+        JSONObject merged=Ai.mergeCompact(before,MinutesItems.prune(detailsOnly)),frozen=new JSONObject(beforeText);
+        expect(merged!=before&&merged.getJSONArray("topics").getJSONObject(0).getJSONArray("points").getJSONObject(0).getJSONArray("details").getString(0).equals("줄인 이유")
+            &&merged.getJSONArray("decisions").toString().equals(frozen.getJSONArray("decisions").toString())&&merged.getJSONArray("openQuestions").toString().equals(frozen.getJSONArray("openQuestions").toString())
+            &&merged.getJSONArray("actions").toString().equals(frozen.getJSONArray("actions").toString())&&merged.getString("suggestedTitle").equals(frozen.getString("suggestedTitle"))&&before.toString().equals(beforeText),"하위 항목만 줄어든 답은 받고 제목·결정·할 일·미확정과 받은 원본은 그대로 둔다");
+        JSONObject labeled=minutes().put("overview",new JSONArray().put(item("전체 방향",repeated(300,'가'))).put(item("주요 결정",repeated(300,'나'))));
+        JSONObject labelsOnly=new JSONObject().put("overview",new JSONArray().put(item("전체 방향")).put(item("주요 결정"))).put("topics",labeled.getJSONArray("topics"));
+        String labeledText=labeled.toString();
+        expect(Ai.mergeCompact(labeled,MinutesItems.prune(labelsOnly))==labeled&&labeled.toString().equals(labeledText),"머리말만 남은 핵심 요약 답은 받지 않고 원래 결과를 그대로 쓴다");
+        JSONObject spaced=minutes().put("decisions",new JSONArray().put(item("  결정  ","  조건  "))).put("topics",before.getJSONArray("topics"));
+        String spacedText=spaced.toString();
+        JSONObject kept=Ai.mergeCompact(spaced,MinutesItems.prune(detailsOnly));
+        expect(kept!=spaced&&kept.getJSONArray("decisions").toString().equals(new JSONObject(spacedText).getJSONArray("decisions").toString())&&spaced.toString().equals(spacedText),"줄이기를 받으면 결정은 받은 원본 글자(앞뒤 공백 포함) 그대로 되붙이고 원본은 바꾸지 않는다");
+        JSONObject old=oldMinutes().put("topics",new JSONArray().put(new JSONObject().put("title","양식").put("points",new JSONArray().put(repeated(800,'나')))));
+        String oldText=old.toString();
+        JSONObject fromOld=Ai.mergeCompact(old,MinutesItems.prune(detailsOnly)),converted=MinutesItems.normalize(new JSONObject(oldText));
+        expect(fromOld!=old&&fromOld.getJSONArray("decisions").toString().equals(converted.getJSONArray("decisions").toString())&&fromOld.getJSONArray("openQuestions").toString().equals(converted.getJSONArray("openQuestions").toString())
+            &&fromOld.getJSONArray("overview").length()==2&&old.toString().equals(oldText),"옛 구조를 줄여 받으면 새 구조 하나로 돌려주고 받은 옛 원본은 그대로 둔다");
+        JSONObject tooLong=oldMinutes().put("topics",old.getJSONArray("topics")).put("decisions",new JSONArray().put(repeated(1500,'다')));
+        String tooLongText=tooLong.toString();
+        expect(Ai.mergeCompact(tooLong,MinutesItems.prune(detailsOnly))==tooLong&&tooLong.toString().equals(tooLongText),"새 항목 한도보다 긴 옛 결정이 있으면 줄이기를 받지 않고 원본을 그대로 둔다");
+
+        JSONObject record=analyzable(store,"항목 구조 회의");File dir=store.directory("main",record.getString("id")),caches=new File(dir,"중간요약");
+        replies.add(replyWith(oldMinutes()));
+        try{new Ai(store,message->{}).section(record,"옛 응답 전사",null,dir,0);throw new AssertionError("옛 구조 응답은 실패해야 한다");}catch(IOException ex){expect(ex.getMessage().equals(MinutesItems.MALFORMED),"옛 문자열 구조로 돌아온 요약 응답은 형식 오류로 끝난다");}
+        expect(caches.listFiles()==null||caches.listFiles().length==0,"형식 오류 응답은 구간 캐시에 남지 않는다");
+        replies.add(replyWith(minutes().put("overview",new JSONArray().put(item("日本",new String[]{"中国"})).put(item("전체 방향","中")))));
+        JSONObject cleaned=new Ai(store,message->{}).section(record,"첫 구간",null,dir,0);
+        expect(cleaned.getJSONArray("overview").toString().equals(new JSONArray().put(item("전체 방향")).toString()),"응답은 글자 정리 뒤 빈 값 정리까지 마치고 저장한다");
+        File[] written=caches.listFiles();expect(written!=null&&written.length==1,"성공한 구간은 캐시에 하나 남는다");
+        Store.write(written[0],oldMinutes().toString());
+        JSONObject cachedOld=new Ai(store,message->{}).section(record,"첫 구간",null,dir,0);
+        expect(cachedOld.get("overview") instanceof String,"캐시에 남은 옛 구조 구간을 읽는다(준비)");
+        int sent=requests.size();replies.add(completed());new Ai(store,message->{}).section(record,"둘째 구간",cachedOld,dir,0);
+        JSONObject previous=user(requests.get(sent)).getJSONObject("previousMinutes");
+        expect(previous.get("overview") instanceof JSONArray&&previous.getJSONArray("overview").getJSONObject(0).getString("text").equals("전체 방향")&&previous.getJSONArray("decisions").getJSONObject(0).getString("text").equals("기존 DB 활용"),"캐시에서 읽은 옛 구조 앞 구간도 항목 구조로 바꿔 보낸다");
+    }
+    static void itemScreenSeed(Store store)throws Exception{
+        // 디버그 빌드 전용이다. 화면에서 새 구조·옛 구조 결과가 목록으로 보이는지 사람이 확인하도록 가상의 회의 두 개를 저장한다.
+        JSONObject fresh=store.create(new JSONObject().put("date","2099-02-01").put("title","합성 새 구조 회의").put("participants","김민수, 박서연"));
+        Store.write(new File(store.directory("main",fresh.getString("id")),"전사.txt"),"합성 전사");
+        JSONObject now=minutes().put("suggestedTitle","합성 새 구조 회의").put("topics",new JSONArray().put(new JSONObject().put("title","양식").put("points",new JSONArray().put(item("공통 양식 쓰기로 함","이유: 부서마다 서식이 달라 혼선","적용: 다음 달 보고서부터")).put(item("옛 양식은 보관만 함\n새로 만들지는 않음")))));
+        store.finish(fresh,now,null);expect(store.load("main",fresh.getString("id")).getString("state").equals("complete"),"새 구조 합성 회의 저장");
+        JSONObject old=store.create(new JSONObject().put("date","2099-02-02").put("title","합성 옛 구조 회의").put("participants","이도현"));
+        Store.write(new File(store.directory("main",old.getString("id")),"전사.txt"),"합성 전사");
+        store.finish(old,oldMinutes().put("suggestedTitle","합성 옛 구조 회의"),null);expect(store.load("main",old.getString("id")).getString("state").equals("complete"),"옛 구조 합성 회의 저장");
     }
     static void documentChecks(Store store)throws Exception{
         JSONArray cases=store.asset("meeting-document-cases.json").getJSONArray("cases");
@@ -995,6 +1066,8 @@ public final class AndroidChecks extends Instrumentation {
         if(probe.equals("samples")){sampleFiles();result.putString("stream","PASS "+checks+" sample files\n");finish(-1,result);return;}
         // 문서 선택 창 확인용 합성 파일만 만들고 끝낸다. 시험 결과를 바꾸지 않는다.
         if(probe.equals("import")){importChecks(new Store(testContext()));result.putString("stream","PASS "+checks+" import checks\n");finish(-1,result);return;}
+        if(probe.equals("m-items")){itemScreenSeed(new Store(getTargetContext()));result.putString("stream","PASS "+checks+" item screen seeds\n");finish(-1,result);return;}
+        // 가상기기 화면 확인용으로 새 구조·옛 구조 합성 회의를 앱 저장소에 만들고 끝낸다. 실제 AI는 부르지 않는다.
         if(!probe.isEmpty()&&!probe.startsWith("f-")&&!probe.startsWith("g-")){regressionCheck(probe);result.putString("stream","PASS "+checks+" regression checks: "+probe+"\n");finish(-1,result);return;}
         for(String name:new String[]{"first","open","review","draft","finish","n1new","n1old","n1meta"})regressionCheck(name);
         archiveChecks(new Store(testContext()));
@@ -1072,6 +1145,7 @@ public final class AndroidChecks extends Instrumentation {
         shortenChecks(new Store(testContext()));
         templateCacheChecks(new Store(testContext()));
         documentChecks(new Store(testContext()));
+        itemChecks(new Store(testContext()));
         copyChecks(new Store(testContext()));
         folderPermissionChecks(new Store(testContext()));
         copyFailureKeepsResult(new Store(testContext()));

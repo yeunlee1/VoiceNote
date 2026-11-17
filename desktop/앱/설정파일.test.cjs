@@ -285,7 +285,7 @@ test('진행 중에는 설정 변경이 409다', async t => {
   let release, reached;
   const waiting = new Promise(resolve => { release = resolve; });
   const called = new Promise(resolve => { reached = resolve; });
-  const minutes = { suggestedTitle: '시험', overview: '시험', topics: [], decisions: [], actions: [], openQuestions: [] };
+  const minutes = { suggestedTitle: '시험', overview: [{ text: '시험', details: [] }], topics: [], decisions: [], actions: [], openQuestions: [] };
   const server = await start(t, { apiFetch: async () => {
     reached();
     await waiting;
