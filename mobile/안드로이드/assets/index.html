@@ -243,6 +243,16 @@
     </div>
   </div>
 </dialog>
+<dialog id="update-ask" aria-labelledby="update-ask-title" aria-describedby="update-ask-versions update-ask-question">
+  <div class="modal">
+    <div class="modal-head"><h2 id="update-ask-title">새 버전이 있습니다</h2><button class="link close-dialog" type="button" data-close="update-ask">닫기</button></div>
+    <dl id="update-ask-versions" class="version-pair"><div><dt>새 버전</dt><dd id="update-ask-version" class="version-new"></dd></div><div><dt>지금 버전</dt><dd id="update-ask-current"></dd></div></dl>
+    <p id="update-ask-question" class="update-ask-question">업데이트하시겠습니까?</p>
+    <p class="hint">설치하면 VoiceNote가 닫히고 새 버전으로 바뀝니다. 회의 기록과 설정은 그대로 남습니다.</p>
+    <div class="row"><button id="update-ask-yes" class="button primary" type="button">업데이트</button><button id="update-ask-later" class="button" type="button" data-close="update-ask">나중에</button></div>
+    <button id="update-ask-notes" class="link update-page" type="button">바뀐 점 보기</button>
+  </div>
+</dialog>
 <dialog id="share" aria-labelledby="share-title">
   <div class="modal">
     <div class="modal-head"><h2 id="share-title">사람별 할 일 복사</h2><button class="link close-dialog" type="button" data-close="share">닫기</button></div>

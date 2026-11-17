@@ -61,6 +61,7 @@
       "update-progress-text", "update-detail", "update-lock", "update-install", "update-check", "update-page", "update-note", "release-list",
       "desk-work", "recording-info", "people-preview", "history-search",
       "finish-choice", "finish-choice-note", "finish-minutes", "finish-transcript",
+      "update-ask", "update-ask-version", "update-ask-current", "update-ask-yes", "update-ask-notes",
     ].map((id) => [id, $(id)]),
   );
   const Formats = window.MeetingFormats;
@@ -128,7 +129,7 @@
     // 같은 녹음(회의)의 결과 목록과 지금 결과의 평가·반영한 의견·사본 저장 결과다. 평가는 결과마다 따로 저장한다.
     versions: [], feedback: "", review: null, reviewStars: null, reviewBusy: false, copies: null, copyBusy: false,
     // 앱 업데이트 상태(서버가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 설치 시작 잠금, 상태 조회 간격이다.
-    update: null, updateIntent: false, updateLaunching: false, updateError: "", updatePoll: null, updatePollMs: 1000, updateNotified: false, updatePollFailures: 0, editorBaseline: null, customBusy: false,
+    update: null, updateIntent: false, updateLaunching: false, updateError: "", updatePoll: null, updatePollMs: 1000, updateNotified: false, updateAsked: false, updateAskQueued: false, updatePollFailures: 0, editorBaseline: null, customBusy: false,
   };
 
   function applyAccess(data) {
@@ -650,6 +651,8 @@
     updateSize();
     // 녹음·저장 상태가 바뀌면 업데이트 칸의 설치 가능 여부와 이유도 함께 바뀐다.
     renderUpdate();
+    askUpdateSoon();
+    // 녹음·분석이 끝나 미뤄 둔 업데이트 묻기를 다시 판단한다.
   }
 
   function stopTracks(stream) {
@@ -2780,6 +2783,8 @@
       else if (dialog !== ui.about && !inPage && ui["meeting-detail"].open) (sameControl(opener) || ui[`tab-${state.resultTab}`]).focus();
       // 결과 화면에서 연 창이고 연 단추가 다시 그려져 바뀌었으면 같은 열쇠의 새 단추로, 그런 단추가 없으면 보고 있던 결과 탭으로 돌아간다.
       else (dialog === ui.about ? ui["open-settings"] : ui.prepare).focus();
+      askUpdateSoon();
+      // 다른 창이 열려 있어 미뤄 둔 업데이트 묻기를 다시 판단한다.
     });
   }
 
@@ -3080,6 +3085,7 @@
     }
     if (update.status === "available" && update.error) state.updateIntent = false;
     renderUpdate();
+    askUpdateSoon();
     clearTimeout(state.updatePoll);
     if (["checking", "downloading"].includes(update.status)) state.updatePoll = setTimeout(loadUpdate, state.updatePollMs);
     else if (update.status === "ready" && before !== "ready" && state.updateIntent) launchUpdate();
@@ -3121,9 +3127,38 @@
     catch (error) { showUpdateError(error.message); }
   }
 
+  function askUpdateSoon() {
+    // 하던 화면 갱신이나 창 열기가 끝난 뒤 묻는다. 다른 창을 여는 중이면 그 창이 열린 것을 보고 미룬다.
+    if (state.updateAsked || state.updateAskQueued) return;
+    state.updateAskQueued = true;
+    Promise.resolve().then(() => { state.updateAskQueued = false; askUpdate(); });
+  }
+
+  function askUpdate() {
+    // 켜서 확인한 새 버전을 앱에서 바로 받을 수 있으면 이번 실행에서 한 번 업데이트할지 묻는다.
+    // 녹음·분석·저장 중이거나 다른 창이 열려 있으면 미뤘다가, 그 일이 끝나 화면이 바뀌거나 창이 닫힐 때 다시 판단한다.
+    const update = state.update;
+    if (state.updateAsked || update?.status !== "available" || update.error) return;
+    if (state.recorders.size || state.permissionPending || state.recorder || state.aiController || state.flowBusy || state.archiveBusy || state.historyBusy || state.updateLaunching) return;
+    if ([ui.settings, ui["share-dialog"], ui["finish-choice"], ui["settings-import"], ui.about].some((dialog) => dialog.open)) return;
+    state.updateAsked = true;
+    setText(ui["update-ask-version"], update.version);
+    setText(ui["update-ask-current"], update.currentVersion);
+    openDialog(ui["update-ask"], document.activeElement);
+    // 묻지 않고 뜬 창이라 초점은 다른 창처럼 닫기에 둔다. 입력하던 띄어쓰기·Enter가 업데이트를 누르지 않게 한다.
+  }
+
+  async function acceptUpdate() {
+    // 묻는 창에서 업데이트를 고르면 프로그램 정보의 '지금 업데이트'와 같이 받는다. 받는 정도와 설치를 막는 이유는 프로그램 정보에서 보인다.
+    ui["update-ask"].close();
+    openAbout(ui["update-chip"]);
+    await startUpdate();
+  }
+
   async function startUpdate() {
     const update = state.update;
     if (!update || state.updateLaunching) return;
+    state.updateAsked = true;
     state.updateError = "";
     if (update.status === "ready") return launchUpdate();
     if (update.status !== "available") return;
@@ -3240,6 +3275,8 @@
   }
 
   function openAbout(opener) {
+    state.updateAsked = true;
+    // 프로그램 정보에서 업데이트를 이미 보았으므로 이번 실행에서는 따로 묻지 않는다.
     renderAbout();
     renderUpdate();
     openDialog(ui.about, opener);
@@ -3309,7 +3346,7 @@
       refresh();
       ui.prepare.focus();
     });
-    for (const dialog of [ui["meeting-detail"], ui.settings, ui["settings-import"], ui.about, ui["share-dialog"], ui["finish-choice"]]) bindDialog(dialog);
+    for (const dialog of [ui["meeting-detail"], ui.settings, ui["settings-import"], ui.about, ui["share-dialog"], ui["finish-choice"], ui["update-ask"]]) bindDialog(dialog);
     ui["share-open"].addEventListener("click", () => openShare(ui["share-open"]));
     ui["update-chip"].addEventListener("click", () => openAbout(ui["update-chip"]));
     ui["open-about"].addEventListener("click", () => openAbout(ui["open-about"]));
@@ -3367,6 +3404,9 @@
     // 깃허브 릴리즈 페이지는 Windows 창이 정해 둔 주소로만 기본 브라우저에서 연다. 창 밖(개발용 브라우저)에서는 숨긴다.
     ui["update-page"].hidden = !webview;
     ui["update-page"].addEventListener("click", () => webview?.postMessage("open-update-page"));
+    ui["update-ask-notes"].hidden = !webview;
+    ui["update-ask-notes"].addEventListener("click", () => webview?.postMessage("open-update-page"));
+    ui["update-ask-yes"].addEventListener("click", acceptUpdate);
     webview?.addEventListener("message", (event) => onHostMessage(event.data));
     ui.clear.addEventListener("click", () => {
       if (!clearLocal()) return;

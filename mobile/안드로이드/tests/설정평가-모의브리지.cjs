@@ -42,7 +42,8 @@ module.exports = '(' + function () {
         if(m.failRefine)throw Error('요약 요청에 실패했습니다.');
         m.active=true;m.meeting={id:d.id,location:d.location,attemptId:d.attemptId,state:'analyzing',createdAt:Date.now(),message:'의견을 반영해 정리 중'};
         const terminal=()=>{m.active=false;m.meeting={...m.meeting,state:m.refineOutcome==='success'?'complete':'failed',resultId:m.refineOutcome==='success'?'1235':'1234',message:'합성 서비스 종료'};if(m.refineOutcome==='success')m.history.find(r=>r.id===d.id).resultId='1235';};
-        if(['failure','success'].includes(m.refineOutcome))terminal();
+        m.finishRefine=terminal;if(['failure','success'].includes(m.refineOutcome))terminal();
+        // refineOutcome이 hold면 시험이 __mock.finishRefine()을 부를 때까지 진행 중으로 둔다.
         reply({id:d.id,attemptId:d.attemptId});
       }
       else if (method==='saveTodos') {if(m.todoFail||(m.todoFailNext>0&&m.todoFailNext--))throw Error('디스크 오류');m.savedTodos={...(m.savedTodos||{}),[d.resultId]:d.todos};reply({version:1,...d.todos});}
