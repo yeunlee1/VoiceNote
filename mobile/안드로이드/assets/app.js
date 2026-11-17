@@ -1,13 +1,15 @@
 // 네이티브 녹음 상태와 보관함별 지난 회의 및 AI 설정을 연결한다.
 (() => {
-  const $ = id => document.getElementById(id), pending = new Map(), Flow = window.VoiceFlow, Todos = window.MeetingTodos, OPEN_TODO_LIMIT = 30;
+  const $ = id => document.getElementById(id), pending = new Map(), Flow = window.VoiceFlow, Todos = window.MeetingTodos;
   const state = { settings: {}, connection: { keyConfigured: false, keySource: 'none', models: [], summaryModel: '' }, active: false, recording: false, busy: false, opened: null, lastState: '', lastHistory: '', lastMeetingState: '', removeArmed: false, deleteArmed: false, opener: null,
     // 앱 업데이트 상태(네이티브가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 실행 중 여부와 마지막 오류다.
     update: null, updateIntent: false, updateRunning: false, updateError: '',
     // 업데이트로 앱이 닫히면 사라질 입력이다. 평가 의견·별점, 내 형식 편집, 회의 준비 저장 실패를 따로 기억한다.
     reviewDirty: false, customDirty: false, draftSaving: null, draftFailed: false,
     // 지금 보는 탭과, 사람이 고친 할 일 수정본·고치는 중인 줄·저장 중인 요청 수다.
-    view: 'new', todos: null, todoConfirmed: null, todoEditing: null, todoPending: 0, todoSerial: 0, todoQueue: Promise.resolve() };
+    view: 'new', todos: null, todoConfirmed: null, todoEditing: null, todoPending: 0, todoSerial: 0, todoQueue: Promise.resolve(),
+    // me는 이 회의에 저장된 나의 선택(없으면 null), mePicking은 나 고르기 상자를 펼쳤는지, meBusy는 나를 저장하는 중인지, resultTab은 결과 화면에서 보는 탭이다.
+    me: null, mePicking: false, meBusy: false, resultTab: 'mine' };
   let serial = 0, draftTimer = 0;
   window.receive = (id, payload) => { const task = pending.get(id); if (!task) return; pending.delete(id); payload.error ? task.reject(new Error(payload.error)) : task.resolve(payload.value); };
   function call(method, data = {}) {
@@ -31,13 +33,13 @@
   const number = value => Number(value || 0).toLocaleString('ko-KR');
 
   function snapshot() {
-    return { busy: state.busy, active: state.active || !!state.refining, opened: !!state.opened, keyConfigured: Flow.canAnalyze(state.connection), trialExhausted: state.connection.accessMode === 'exhausted',
+    return { busy: state.busy, active: state.active || !!state.refining || !!state.importing, opened: !!state.opened, keyConfigured: Flow.canAnalyze(state.connection), trialExhausted: state.connection.accessMode === 'exhausted',
       date: $('date').value, notes: $('notes').value, customMissing: $('output-format').value === 'custom' && !state.customFormat,
       permissionPending: !!state.connection.permissionPending, filePending: !!state.connection.filePending, modelError: !!state.connection.modelError };
   }
   function renderBlockers() {
     const reasons = Flow.startBlockers(snapshot()), list = $('blocker-list');
-    $('blockers').hidden = state.active;
+    $('blockers').hidden = state.active || !!state.importing;
     list.replaceChildren(...(reasons.length ? reasons.map(reason => node('li', reason.text)) : [node('li', '위쪽의 회의 시작을 누르면 바로 녹음합니다.')]));
     $('blockers').classList.toggle('ready', reasons.length === 0);
     $('blockers').querySelector('.needs-title').textContent = reasons.length ? '시작 전 필요' : '준비 완료';
@@ -48,7 +50,7 @@
   }
   function renderStage() {
     const order = ['prepare', 'record', 'analyze', 'done'];
-    const current = state.recording ? 'record' : state.active ? 'analyze' : state.lastMeetingState === 'complete' ? 'done' : 'prepare';
+    const current = state.recording ? 'record' : state.active || state.importing ? 'analyze' : ['complete', 'transcribed'].includes(state.lastMeetingState) ? 'done' : 'prepare';
     for (const li of $('stage').children) {
       const index = order.indexOf(li.dataset.stage), at = order.indexOf(current);
       li.classList.toggle('done', index < at || current === 'done');
@@ -59,16 +61,18 @@
     const idle = !state.busy && !state.active && !state.refining;
     $('prepare').disabled = !idle;
     // 회의가 진행 중이면 준비 칸을 접고 회의 전에 적은 내용을 읽기로 보여 준다.
-    setPrep(!state.active && !state.refining);
+    setPrep(!state.active && !state.refining && !state.importing);
     $('start').hidden = state.recording || state.view !== 'new'; $('finish').hidden = !state.recording;
     $('console-heading').textContent = state.recording ? '녹음 중' : state.view === 'records' ? '회의 기록' : '새 회의';
     renderPeople($('people-preview'), Todos.people($('participants').value));
-    for (const item of document.querySelectorAll('#open-todos button,#open-todos input')) item.disabled = !idle;
     // 업데이트 설치 확인 화면을 기다리는 동안에는 네이티브도 새 회의를 거절하므로 시작 단추를 잠근다.
     $('start').disabled = !Flow.canStart(snapshot()) || state.update?.status === 'confirming';
+    $('import-audio').disabled = $('start').disabled; $('import-wrap').hidden = state.active || !!state.refining || !!state.importing;
+    // 녹음 파일 불러오기는 회의 시작과 같은 조건에서만 누를 수 있고, 녹음·분석 중에는 감춘다.
     $('start-label').textContent = state.active && !state.recording ? '분석 중' : '회의 시작';
     $('finish').disabled = state.busy || !state.recording;
     $('retry').disabled = !idle || !state.opened;
+    for (const button of document.querySelectorAll('.make-minutes')) button.disabled = !idle || !state.opened;
     $('save-key').disabled = !idle;
     $('remove-key').disabled = !idle || !state.connection.keyConfigured;
     $('settings-lock').hidden = idle;
@@ -77,7 +81,7 @@
     $('model').disabled = !idle || !state.connection.models.length;
     for (const id of ['custom-save','custom-delete','custom-name','custom-instruction']) $(id).disabled = !idle;
     for (const input of document.querySelectorAll('#custom-section-list input,#custom-section-list button')) input.disabled = !idle || input.dataset.edge === 'true';
-    for (const input of document.querySelectorAll('#prep input,#prep textarea,#prep select,#default-format,[data-pick-folder],[data-clear-folder],#export-settings,#import-settings,#apply-settings')) input.disabled = !idle;
+    for (const input of document.querySelectorAll('#prep input,#prep textarea,#prep select,#default-format,[data-pick-folder],[data-clear-folder],#export-settings,#import-settings,#apply-settings,#my-name,#my-name-save')) input.disabled = !idle;
     for (const button of $('history').querySelectorAll('button')) button.disabled = !idle;
     $('refresh').disabled = !idle; $('close-result').disabled = state.busy;
     $('result-version').disabled = !idle;
@@ -89,7 +93,7 @@
     $('refine-cost').hidden = !comment.trim();
     $('review-count').textContent = `${number(comment.length)} / 1,000`;
     $('copy-result').disabled = !idle || !(state.resultTab === 'transcript' ? state.result?.transcript : state.result?.minutes);
-    $('share-result').disabled = $('copy-result').disabled;
+    $('share-result').disabled = $('copy-result').disabled; $('save-text').disabled = $('copy-result').disabled;
     $('share-all').disabled = !idle || !state.opened;
     $('save-copies').disabled = !resultReady;
     // 받는 동안 녹음 시작·분석·저장 같은 작업이 끼면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 '설치'를 다시 누른다.
@@ -112,7 +116,8 @@
   // 모달 위에 미리보기 모달이 겹칠 수 있으므로 돌아갈 포커스는 모달마다 따로 기억한다.
   function openDialog(id, opener) { if ($(id).open) return; $(id).returnFocus = opener || document.activeElement; $(id).showModal(); }
   // 연 단추가 그 사이 숨었으면(예: 새 버전 안내 줄이 사라짐) 프로그램 정보는 설정 단추로 초점을 돌린다.
-  for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { const opener = dialog.returnFocus; dialog.returnFocus = null; if (opener && document.contains(opener) && !opener.hidden) opener.focus(); else if (dialog.id === 'about') $('open-settings').focus(); });
+  for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { const opener = dialog.returnFocus; dialog.returnFocus = null; if (opener && document.contains(opener) && !opener.hidden) opener.focus(); else if (dialog.id === 'about') $('open-settings').focus(); else if (!$('result').hidden) focusResultControl(opener?.dataset?.todoFocus); });
+  // 결과 화면에서 연 창의 단추가 그사이 다시 그려졌으면 같은 열쇠의 새 단추로 돌아가고, 그런 단추가 없으면(설정에 내 이름을 적어 나를 알게 된 경우 등) 내 할 일의 바꾸기·후보나 보고 있던 탭으로 간다.
   for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => $(button.dataset.close).close());
 
   function renderAccess() {
@@ -170,29 +175,238 @@
     if (draftTimer || state.draftSaving) throw new Error('회의 준비 내용을 저장하는 중입니다. 잠시 뒤 다시 눌러 주세요.');
     if (state.draftFailed) throw new Error('회의 준비 내용을 저장하지 못했습니다. 잠시 뒤 다시 눌러 주세요.');
   }
-  const stateLabels = { complete: '회의록', failed: '분석 실패', interrupted: '녹음 중단', saved: '음성 저장', analyzing: '분석 중', recording: '녹음 중' };
+  const stateLabels = { complete: '회의록', transcribed: '전사만', failed: '분석 실패', interrupted: '녹음 중단', saved: '음성 저장', analyzing: '분석 중', recording: '녹음 중' };
   async function history() {
-    const data = await call('history'), entries = data.meetings; $('history').replaceChildren();
-    if (data.skipped) $('history').append(node('p', '읽지 못한 기록 ' + data.skipped + '개', 'hint'));
-    if (!entries.length) $('history').append(node('p', '보관된 회의가 없습니다.', 'empty'));
+    const data = await call('history'), entries = data.meetings, rows = [];
+    if (data.skipped) rows.push(node('p', '읽지 못한 기록 ' + data.skipped + '개', 'hint'));
+    if (!entries.length) rows.push(node('p', '보관된 회의가 없습니다.', 'empty'));
     for (const entry of entries) {
       const button = node('button'); button.type = 'button'; button.dataset.location = entry.location; button.dataset.id = entry.id; button.dataset.search = `${entry.title || '제목 미정 회의'} ${entry.date || ''} ${entry.projectName || ''}`.toLowerCase();
       const label = entry.state !== 'complete' ? stateLabels[entry.state] : Flow.outputFormat(entry.outputFormat) === 'custom' && entry.customFormat?.name ? entry.customFormat.name : Flow.FORMAT_LABELS[Flow.outputFormat(entry.outputFormat)];
-      button.append(node('small', entry.date + ' · ' + entry.dailySequence + '차'), node('strong', entry.title || '제목 미정 회의'), node('span', label || '보관', 'state ' + (entry.state === 'failed' || entry.state === 'interrupted' ? 'failed' : '')));
+      const status = node('span', null, 'state ' + (entry.state === 'failed' || entry.state === 'interrupted' ? 'failed' : ''));
+      if (entry.mineOpen) status.append(node('span', `내 일 ${entry.mineOpen}`, 'mine-count'));
+      // 최신 결과에서 내가 아직 안 끝낸 일의 수를 형식 이름 위에 둔다. 0이거나 내가 누구인지 모르면 네이티브가 주지 않는다.
+      status.append(node('span', label || '보관'));
+      button.append(node('small', entry.date + ' · ' + entry.dailySequence + '차'), node('strong', entry.title || '제목 미정 회의'), status);
       if (entry.projectName) button.append(node('small', '이전 프로젝트: ' + entry.projectName));
       if (entry.stars) button.append(node('small', '★ ' + entry.stars));
       button.onclick = () => openRow(entry.location, entry.id, button, entry.resultId);
-      $('history').append(button);
+      rows.push(button);
     }
-    filterHistory(); await loadOpenTodos();
+    const y = window.scrollY; $('history').replaceChildren(...rows); window.scrollTo(0, y);
+    // 할 일을 저장할 때마다 목록을 다시 읽으므로, 한 번에 갈고 보던 자리를 되돌려 목록이 위로 튀지 않게 한다.
+    filterHistory();
   }
   function currentTodos() { return Todos.effective(state.result.data, state.todos); }
   function renderMinutes() {
     const r = state.result; $('minutes').replaceChildren();
-    if (!r?.data) return;
-    renderSections($('minutes'), Flow.minutesSections(r.format, Todos.apply(r.data, state.todos), r.custom), renderTodos);
+    if (r?.data) renderSections($('minutes'), Flow.minutesSections(r.format, Todos.apply(r.data, state.todos), r.custom), renderTodos);
+    renderMine();
+    // 정리본과 내 할 일 탭은 같은 할 일 목록을 보여 주므로 함께 다시 그린다.
   }
-  function renderTodosAgain(focusKey) { renderMinutes(); if (focusKey) $('minutes').querySelector(`[data-todo-focus="${focusKey}"]`)?.focus(); }
+  function renderTodosAgain(focusKey) { renderMinutes(); if (focusKey) (state.resultTab === 'mine' ? $('panel-mine') : $('minutes')).querySelector(`[data-todo-focus="${focusKey}"]`)?.focus(); }
+  // 초점은 보고 있는 탭의 패널에서 되찾는다. 내 할 일 탭의 체크 상자는 mine:<번호> 열쇠를 쓴다.
+  function renderTodosKeepingFocus(fallbackKey) {
+    // 늦게 온 응답으로 다시 그릴 때 쓴다. 초점이 보고 있는 패널 안에 있었으면 같은 열쇠의 새 요소로, 잃었으면 fallbackKey로 돌려준다.
+    const panel = state.resultTab === 'mine' ? $('panel-mine') : $('minutes'), active = document.activeElement;
+    const inside = panel.contains(active), lost = !active || active === document.body;
+    renderTodosAgain(inside ? active.dataset?.todoFocus || fallbackKey : lost ? fallbackKey : null);
+    // 사용자가 그사이 패널 밖으로 옮긴 초점은 빼앗지 않는다.
+  }
+  function focusResultControl(key) {
+    // 결과 화면에서 연 창의 단추가 그사이 다시 그려졌으면 같은 열쇠의 새 단추로, 없으면 내 할 일의 바꾸기·후보나 보고 있던 탭으로 초점을 돌린다.
+    const panel = state.resultTab === 'mine' ? $('panel-mine') : $('minutes'), again = key ? panel.querySelector(`[data-todo-focus="${key}"]`) : null;
+    if (again && !again.disabled) { again.focus(); return; }
+    if (!(state.resultTab === 'mine' && focusMineControl())) $(`tab-${state.resultTab}`).focus();
+  }
+  function sameResult(target) {
+    // 늦게 온 응답이 지금 열린 회의의 같은 결과에 대한 것인지 본다. 옛 회의는 결과 표지(legacy)가 같을 수 있어 보관함과 회의까지 함께 비교한다.
+    return state.opened?.location === target.location && state.opened?.id === target.id && state.opened?.resultId === target.resultId;
+  }
+  function currentMe() {
+    // 이 회의에서 나로 정해진 사람이다. 이 회의에 저장된 선택, 설정의 내 이름 순서로 정하고 모르면 null이다.
+    return Todos.resolveMe(Todos.candidates(state.result?.participants || '', currentTodos()), state.me, state.settings?.myName || '');
+  }
+  function focusMine(key) {
+    const target = $('panel-mine').querySelector(`[data-todo-focus="${key}"]`);
+    if (!target || target.disabled) return false;
+    target.focus(); return true;
+  }
+  function focusMineControl() {
+    // 내 할 일 패널을 다시 그린 뒤 초점을 둘 곳이다. 나를 알면 바꾸기, 모르면 눌린 이름이나 첫 후보로 간다.
+    return focusMine('me-change') || focusMine('who:pressed') || focusMine('who:0');
+  }
+  function restLine(items, meName) {
+    // 내 일이 아닌 일의 수와 정리본으로 가는 단추다. 담당 미정은 아직 아무에게도 가지 않은 일이라 굵게 쓴다.
+    const { unassigned, others } = Todos.rest(items, meName), line = node('div', null, 'mine-rest'), text = node('p');
+    if (unassigned) text.append(node('b', `담당 미정 ${unassigned}건`));
+    if (unassigned && others) text.append(' · ');
+    if (others) text.append(`다른 사람 일 ${others}건`);
+    if (text.childNodes.length) line.append(text);
+    const all = node('button', '정리본에서 전체 보기', 'button mine-all'); all.type = 'button'; all.dataset.todoFocus = 'mine-all';
+    all.onclick = () => { showTab('minutes'); $('tab-minutes').focus(); };
+    line.append(all); return line;
+  }
+  function whoBox(list, me) {
+    // 이 회의에서 나를 고르는 상자다. 참석자 번호와 이름(참석자를 안 적은 회의는 담당자 이름)이 후보다.
+    const box = node('div', null, 'who-box'), group = node('div', null, 'who-list'), locked = !state.opened?.resultId || state.meBusy;
+    group.setAttribute('role', 'group'); group.setAttribute('aria-label', '이 회의의 사람 중에서 나 고르기');
+    list.forEach((entry, index) => {
+      const pressed = me?.name === entry.name, pick = node('button', null, 'who-button');
+      pick.type = 'button'; pick.disabled = locked; pick.setAttribute('aria-pressed', String(pressed)); pick.dataset.todoFocus = pressed ? 'who:pressed' : `who:${index}`;
+      if (entry.number) pick.append(node('b', entry.number, 'num'));
+      pick.append(node('span', entry.name));
+      pick.onclick = () => {
+        if (!pressed) return saveMe(entry.name);
+        state.mePicking = false; renderMine(); focusMine('me-change');
+        // 눌린 이름을 다시 누르면 바꾸지 않고 상자만 닫는다.
+      };
+      group.append(pick);
+    });
+    box.append(node('p', '이 회의에서 나는 누구인가요?', 'who-lead'), group, node('p', '한 번 고르면 이 회의에 기억합니다. 설정에 적어 둔 내 이름과 같은 사람이 있으면 앱이 미리 골라 둡니다.', 'hint'));
+    if (state.me !== null) {
+      const clear = node('button', '선택 지우기', 'button who-clear'); clear.type = 'button'; clear.disabled = locked; clear.dataset.todoFocus = 'who-clear';
+      clear.onclick = () => saveMe(null); box.append(clear);
+      // 이 회의에 저장된 선택이 있으면 지울 수 있다. 지금 결과의 후보에 없어 적용되지 않는 옛 선택도 지울 수 있어야 한다.
+    }
+    if (!state.settings?.myName) {
+      const settings = node('button', '설정에 내 이름 적어 두기', 'link who-settings'); settings.type = 'button'; settings.dataset.todoFocus = 'who-settings'; settings.setAttribute('aria-haspopup', 'dialog');
+      settings.onclick = () => openSettings({ currentTarget: settings }, 'me'); box.append(settings);
+      // 설정에 내 이름이 없으면 회의마다 고르지 않아도 되게 설정의 내 이름 칸으로 가는 길을 둔다.
+    }
+    return box;
+  }
+  function renderMine() {
+    // 내 할 일 탭을 다시 그린다. 판정하지 못한 회의가 내 일이 없는 회의처럼 보이지 않게 상태마다 다른 말로 보여 준다.
+    const panel = $('panel-mine');
+    if (!state.result?.data) return panel.replaceChildren();
+    const items = currentTodos();
+    if (!items.length) return panel.replaceChildren(node('p', '이 회의에는 정리된 할 일이 없습니다.', 'mine-empty'));
+    const list = Todos.candidates(state.result.participants, items);
+    if (!list.length) return panel.replaceChildren(node('p', '참석자를 적지 않은 회의라 누가 맡았는지 알 수 없습니다.', 'mine-empty'), restLine(items, null));
+    const me = currentMe();
+    if (!me) return panel.replaceChildren(...[whoBox(list, null), shareBlock()].filter(Boolean));
+    const mine = Todos.mine(items, me.name), left = mine.filter(item => !item.done).length, editable = !!state.opened?.resultId;
+    const head = node('div', null, 'mine-head'), title = node('div', null, 'mine-title'), row = node('div', null, 'me-row');
+    title.append(node('h3', '내가 맡은 일'));
+    if (mine.length) title.append(node('span', left ? `${left}건 남음` : '모두 끝냄', 'mine-left'));
+    const change = node('button', '바꾸기', 'link me-change'); change.type = 'button'; change.dataset.todoFocus = 'me-change'; change.setAttribute('aria-expanded', String(state.mePicking));
+    change.onclick = () => { state.mePicking = !state.mePicking; renderMine(); if (!state.mePicking || !(focusMine('who:pressed') || focusMine('who:0'))) focusMine('me-change'); };
+    row.append(node('span', '나', 'me-chip'), node('span', me.name, 'me-name'), change);
+    head.append(title, row);
+    const parts = [head];
+    if (state.mePicking) parts.push(whoBox(list, me));
+    if (!mine.length) parts.push(node('p', '이 회의에서 내가 맡은 일은 없습니다.', 'mine-empty'));
+    else {
+      const rows = node('ul', null, 'mine-list');
+      for (const item of mine) {
+        const line = node('li', null, `mine-row${item.done ? ' is-done' : ''}`), label = node('label'), check = node('input'), text = node('span', null, 'mine-text');
+        check.type = 'checkbox'; check.checked = item.done; check.disabled = !editable; check.dataset.todoFocus = `mine:${item.index}`;
+        check.onchange = () => updateTodo(item.index, { done: check.checked }, check.dataset.todoFocus);
+        text.append(node('span', item.task, 'mine-task'), node('span', item.due || '', 'mine-due'));
+        // 기한은 저장된 글자 그대로 문장 아래에 쓰고, 없으면 비워 둔다.
+        label.append(check, text); line.append(label); rows.append(line);
+      }
+      parts.push(rows);
+    }
+    parts.push(restLine(items, me.name));
+    const share = shareBlock(); if (share) parts.push(share);
+    panel.replaceChildren(...parts);
+  }
+  function shareGroups() { return Todos.shareGroups(state.result?.participants || '', currentTodos()); }
+  function shareReady() {
+    // 사람별 글은 정리본이 있는 결과에서만 만든다. 담당자가 있는 남은 일이 한 건도 없으면 보낼 글이 없다.
+    return !!state.result?.data && shareGroups().length > 0;
+  }
+  function shareBlock() {
+    // 내 할 일 패널 끝에서 사람별 할 일 복사 창을 여는 단추다. 내가 누구인지와 상관없이 보낼 글이 있으면 보인다.
+    if (!shareReady()) return null;
+    const block = node('div', null, 'send-block'), open = node('button', '사람별 할 일 복사', 'button share-open');
+    open.type = 'button'; open.dataset.todoFocus = 'share-open'; open.setAttribute('aria-haspopup', 'dialog'); open.onclick = () => openShare(open);
+    block.append(open, node('p', '받는 사람마다 그 사람의 남은 일만 담은 글을 복사해 메신저나 메일에 붙여 넣습니다.', 'hint'));
+    return block;
+  }
+  function setShareStatus(text, tone = '') { $('share-status').textContent = text; $('share-status').dataset.tone = tone; }
+  function renderSharePreview(groups) {
+    const group = groups.find(entry => entry.name === state.shareCurrent);
+    $('share-preview-title').textContent = group ? `${group.name} 님에게 갈 글` : '';
+    $('share-preview').textContent = group ? Todos.shareText(state.result.title, state.result.date, group) : '';
+  }
+  function renderShare() {
+    // 남은 일이 한 건이라도 있는 사람을 번호순으로 한 줄씩 보여 주고, 고른 사람에게 갈 글을 아래에 미리 보여 준다.
+    const groups = shareGroups(), me = currentMe();
+    if (!groups.some(group => group.name === state.shareCurrent)) state.shareCurrent = groups[0]?.name ?? null;
+    $('share-list').replaceChildren(...groups.map(group => {
+      const row = node('li', null, 'copy-row'), who = node('span', null, 'copy-who'), copied = state.shareCopied.has(group.name);
+      row.dataset.current = String(group.name === state.shareCurrent);
+      if (group.number) who.append(node('b', group.number, 'num'));
+      who.append(node('span', Todos.sameName(group.name, me?.name) ? `${group.name} (나)` : group.name, 'copy-name'), node('span', `${group.tasks.length}건`, 'copy-count'));
+      const pick = () => {
+        state.shareCurrent = group.name;
+        for (const other of $('share-list').children) { const on = other === row; other.dataset.current = String(on); other.querySelector('.copy-show')?.setAttribute('aria-pressed', String(on)); }
+        renderSharePreview(groups);
+        // 줄을 다시 그리지 않고 표시만 바꿔 누른 단추에 초점이 남게 한다.
+      };
+      const show = node('button', '보기', 'link copy-show'); show.type = 'button'; show.setAttribute('aria-pressed', String(group.name === state.shareCurrent)); show.setAttribute('aria-label', `${group.name} 님에게 갈 글 보기`); show.onclick = pick;
+      const copy = node('button', copied ? '복사함' : '복사', 'button copy-button'); copy.type = 'button'; copy.dataset.copied = String(copied); copy.setAttribute('aria-label', `${group.name} 님 할 일 ${copied ? '다시 복사' : '복사'}`);
+      copy.onclick = async () => {
+        const session = state.shareSession; pick();
+        try {
+          await call('copyText', { text: Todos.shareText(state.result.title, state.result.date, group) });
+          if (session !== state.shareSession) return;
+          // 창을 닫았다 다시 열었으면 그 사이 끝난 이전 복사는 새 창에 표시하지 않는다.
+          state.shareCopied.add(group.name); copy.textContent = '복사함'; copy.dataset.copied = 'true'; copy.setAttribute('aria-label', `${group.name} 님 할 일 다시 복사`);
+          setShareStatus(`${group.name} 님 할 일을 복사했습니다. 메신저에 붙여 넣으세요.`);
+        } catch (error) { if (session === state.shareSession) setShareStatus(error.message.includes('복사') ? error.message : `복사하지 못했습니다. ${error.message}`, 'error'); }
+        // 실패하면 복사함으로 바꾸지 않고, 아래 미리보기 글을 직접 골라 복사할 수 있게 둔다.
+      };
+      row.append(who, show, copy);
+      return row;
+    }));
+    const unassigned = currentTodos().filter(item => !item.done && !String(item.owner ?? '').trim()).length;
+    $('share-unassigned').hidden = !unassigned;
+    $('share-unassigned').textContent = unassigned ? `담당 미정 ${unassigned}건은 누구에게도 가지 않습니다. 정리본에서 담당자를 먼저 맞추세요.` : '';
+    renderSharePreview(groups);
+  }
+  function openShare(opener) {
+    // 창을 열 때마다 복사함 표시를 지운다. 누구에게 보냈는지는 저장하지 않는다. 떠 있는 알림은 창을 가리지 않게 치운다.
+    state.shareCopied = new Set(); state.shareCurrent = null; state.shareSession = (state.shareSession || 0) + 1; setShareStatus('');
+    // 창을 열 때마다 새 차례를 매겨, 이전 창에서 누른 복사의 늦은 결과가 새 창을 바꾸지 않게 한다.
+    clearTimeout(message.timer); $('message').hidden = true;
+    renderShare(); openDialog('share', opener);
+  }
+  async function saveMe(name) {
+    // 이 회의에서 나를 고르거나(이름) 고른 것을 지운다(null). 먼저 화면에 반영하고, 실패하면 앞선 선택으로 되돌린다.
+    if (state.meBusy || !state.opened?.resultId) return false;
+    const target = { ...state.opened }, before = state.me, hadFocus = $('panel-mine').contains(document.activeElement);
+    // 저장할 결과를 지금 결과로 고정한다. 누른 단추는 다시 그리며 사라지므로 초점이 이 패널 안에 있었는지 기억해 둔다.
+    const same = () => state.opened?.location === target.location && state.opened?.id === target.id && state.opened?.resultId === target.resultId;
+    state.me = name; state.mePicking = false; state.meBusy = true; state.todoPending++;
+    // 할 일 저장과 같은 대기 수를 올려 저장이 끝날 때까지 결과 닫기·버전 바꾸기·다시 분석·업데이트 설치를 같은 규칙으로 막는다.
+    renderMine(); if (hadFocus) focusMineControl(); lock();
+    try {
+      const { me = null } = await call('saveMe', { ...target, name });
+      if (same()) { state.me = me; message(me ? `이 회의에서 나는 ${me}입니다.` : '고른 나를 지웠습니다.'); }
+      await history().catch(() => {});
+      // 지난 회의 목록의 내 일 수를 다시 센다. 목록을 다시 읽지 못해도 나는 저장되었으므로 실패로 되돌리지 않는다.
+      return true;
+    } catch (error) {
+      if (same()) { state.me = before; message(`나를 저장하지 못했습니다. ${error.message}`); }
+      else message(`이전 회의의 나를 저장하지 못했습니다. ${error.message}`);
+      return false;
+    } finally {
+      state.meBusy = false; state.todoPending--; clearTodoNotice();
+      if (same()) {
+        const active = document.activeElement, inside = $('panel-mine').contains(active), lost = !active || active === document.body;
+        const key = inside ? active.dataset?.todoFocus : '';
+        // 다시 그리면 패널 안의 조작 요소가 새것으로 바뀐다. 저장 중에 옮겨 둔 패널 안 초점은 같은 열쇠의 새 요소로 돌려주고, 그 요소가 없거나 잠겨 초점을 잃었으면 바꾸기·후보로 간다.
+        renderMine();
+        if (inside || (hadFocus && lost)) { if (!key || !focusMine(key)) focusMineControl(); }
+        // 사용자가 그사이 패널 밖으로 옮긴 초점은 빼앗지 않는다.
+      }
+      lock();
+    }
+  }
   function renderTodos(host, title, undecided) {
     // 저장된 결과에서만 고칠 수 있다. 참석자를 안 적은 회의는 번호 없이 체크만 된다.
     const section = node('section', null, 'todo-section'), people = Todos.people(state.result.participants), finalized = !!state.todos?.finalized, editable = !!state.opened?.resultId, assigning = editable && people.length > 0 && !finalized;
@@ -206,6 +420,8 @@
       const finish = node('button', finalized ? '담당자 다시 맞추기' : '맞추기 완료', 'button todo-finish'); finish.type = 'button'; finish.dataset.todoFocus = 'finish';
       finish.onclick = () => commitTodos({ finalized: !finalized, items: currentTodos() }, 'finish'); section.append(finish);
     }
+    if (shareReady()) { const share = node('button', '사람별 할 일 복사', 'button todo-share'); share.type = 'button'; share.dataset.todoFocus = 'share'; share.setAttribute('aria-haspopup', 'dialog'); share.onclick = () => openShare(share); section.append(share); }
+    // 담당자를 맞춘 자리에서 바로 사람마다 보낼 글을 복사할 수 있게 같은 창을 여는 단추를 둔다.
     host.append(section);
   }
   function todoRow(item, people, assigning, editable, undecided) {
@@ -245,9 +461,9 @@
     // 저장 대상을 지금 결과로 고정한다. 저장 도중 화면이 바뀌어도 원래 결과에만 저장한다.
     const target = { ...state.opened }, serial = ++state.todoSerial; state.todos = next; state.todoPending++; renderTodosAgain(focusKey); lock();
     state.todoQueue = state.todoQueue.then(async () => {
-      try { await call('saveTodos', { ...target, todos: { finalized: next.finalized, items: next.items.map(({ task, owner, due, done }) => ({ task, owner, due, done })) } }); if (state.opened?.resultId === target.resultId) state.todoConfirmed = next; await loadOpenTodos(); return true; }
+      try { await call('saveTodos', { ...target, todos: { finalized: next.finalized, items: next.items.map(({ task, owner, due, done }) => ({ task, owner, due, done })) } }); if (sameResult(target)) state.todoConfirmed = next; await history().catch(() => {}); return true; }
       // 뒤에 더 누른 저장이 남아 있으면 그 저장이 목록 전체를 다시 쓰므로 되돌리지 않는다. 마지막 저장이 실패했을 때만 저장이 확인된 값으로 돌아간다.
-      catch (error) { if (state.opened?.resultId === target.resultId && serial === state.todoSerial) { state.todos = state.todoConfirmed; renderTodosAgain(focusKey); } message(`할 일을 저장하지 못했습니다. ${error.message}`); return false; }
+      catch (error) { if (sameResult(target) && serial === state.todoSerial) { state.todos = state.todoConfirmed; renderTodosKeepingFocus(focusKey); } message(`할 일을 저장하지 못했습니다. ${error.message}`); return false; }
       finally { state.todoPending--; clearTodoNotice(); lock(); }
     });
     return state.todoQueue;
@@ -256,29 +472,18 @@
   function todoHolding() { if (!state.todoEditing && !state.todoPending) return false; message(state.todoEditing ? TODO_NOTICES.editing : TODO_NOTICES.saving); return true; }
   // 막을 이유가 없어졌으면 안내를 남겨 두지 않는다. 저장 실패처럼 다른 안내는 그대로 둔다.
   function clearTodoNotice() { if (state.todoEditing || state.todoPending || !Object.values(TODO_NOTICES).includes($('message').textContent)) return; clearTimeout(message.timer); $('message').hidden = true; }
-  async function loadOpenTodos() {
-    try {
-      const { items = [] } = await call('openTodos');
-      $('open-status').textContent = !items.length ? '남은 일이 없습니다.' : items.length > OPEN_TODO_LIMIT ? `최근 ${OPEN_TODO_LIMIT}건 · 전체 ${items.length}건` : `${items.length}건`;
-      $('open-todos').replaceChildren(...items.slice(0, OPEN_TODO_LIMIT).map(openTodoRow));
-    } catch (error) { $('open-status').textContent = `확인 실패. ${error.message}`; }
+  function renderItems(host, items, labels = false) {
+    // 항목은 ul > li, 하위 항목은 그 li 안의 ul > li로 그린다. 여러 줄 본문은 pre-line으로 같은 항목 안에서 줄을 바꾼다. Windows renderItems와 같은 구조다.
+    const ul = node('ul', null, 'items');
+    for (const item of items) {
+      const li = node('li');
+      li.append(node('span', item.text, labels && MeetingFormats.OVERVIEW_LABELS.includes(item.text) ? 'item-text item-label' : 'item-text'));
+      // 핵심 요약의 머리말 넷(전체 방향 등)만 굵게 써서 그 아래 하위 항목의 제목으로 보이게 한다.
+      if (item.details.length) { const inner = node('ul', null, 'item-details'); for (const detail of item.details) inner.append(node('li', detail)); li.append(inner); }
+      ul.append(li);
+    }
+    host.append(ul);
   }
-  function openTodoRow(item) {
-    const row = node('li'), box = node('label'), check = node('input'), button = node('button', item.task, 'open-todo-open');
-    check.type = 'checkbox'; check.setAttribute('aria-label', `${item.task} 완료`); button.type = 'button'; button.append(node('small', [item.owner, item.due, item.title].filter(Boolean).join(' · ')));
-    // 회의록 저장과 같은 줄로 보내고, 저장이 끝날 때까지 업데이트 설치를 막는다.
-    check.onchange = () => {
-      state.todoPending++; lock();
-      state.todoQueue = state.todoQueue.then(async () => {
-        try { await call('todoDone', { location: item.location, id: item.id, resultId: item.resultId, index: item.index, done: true }); await loadOpenTodos(); return true; }
-        catch (error) { check.checked = false; message(error.message); return false; }
-        finally { state.todoPending--; clearTodoNotice(); lock(); }
-      });
-    };
-    button.onclick = () => openRow(item.location, item.id, button, item.resultId);
-    box.append(check); row.append(box, button); return row;
-  }
-  function list(title, items, host = $('minutes')) { if (!items?.length) return; host.append(node('h3', title)); const ul = node('ul'); for (const item of items) ul.append(node('li', item)); host.append(ul); }
   function renderUsage(record) {
     const rows = Flow.usageRows(record), host = $('usage'); host.replaceChildren();
     if (!rows.length) { host.append(node('p', '미제공 · 이 회의에는 기록된 사용량이 없습니다.', 'hint')); return; }
@@ -290,7 +495,8 @@
   }
   // 저장이 끝나기 전에 회의를 다시 읽으면 저장 전 할 일이 화면에 올라와 저장본과 어긋난다.
   function openRow(location, id, opener, resultId) { if (state.todoPending) { message(TODO_NOTICES.saving); return; } task(() => open(location, id, opener, resultId)); }
-  async function open(location, id, opener, resultId = null) {
+  async function open(location, id, opener, resultId = null, tab = 'mine') {
+    // 목록에서 열면 내 할 일 탭을, 결과 버전을 바꾸면 보던 탭을, 분석·의견 반영이 끝나 저절로 열리면 정리본 탭을 연다.
     const data = await call('open', { location, id, ...(resultId == null ? {} : { resultId }) });
     const { record, minutes, transcript } = data;
     // 목록의 회의를 열면 닫았을 때 그 목록으로 돌아오게 회의 기록 탭으로 옮겨 둔다.
@@ -302,10 +508,15 @@
     $('meeting-notes').textContent = record.notes || ''; $('meeting-notes-wrap').hidden = !record.notes;
     $('transcript').textContent = transcript;
     const format = Flow.outputFormat(record.outputFormat), custom = format === 'custom' ? record.customFormat || null : null, label = custom ? custom.name : Flow.FORMAT_LABELS[format === 'custom' ? 'meeting' : format];
-    state.todos = data.todos || null; state.todoConfirmed = state.todos; state.todoEditing = null; if (data.todosUnreadable) message('저장된 할 일 수정본을 읽지 못해 AI 결과를 보여 줍니다. 원본 파일은 보존합니다.');
-    state.result = { label, minutes: !!minutes, transcript: !!transcript, data: minutes || null, format, custom, participants: record.participants || '' };
+    state.todos = data.todos || null; state.todoConfirmed = state.todos; state.todoEditing = null; state.me = data.me ?? null; state.mePicking = false; if (data.todosUnreadable) message('저장된 할 일 수정본을 읽지 못해 AI 결과를 보여 줍니다. 원본 파일은 보존합니다.');
+    state.result = { label, minutes: !!minutes, transcript: !!transcript, data: minutes || null, format, custom, participants: record.participants || '', title: record.title || '', date: record.date || '' };
     renderMinutes();
-    if (!minutes) $('minutes').append(node('p', `아직 ${label}${format === 'tasks' ? '가' : '이'} 없습니다. 아래 재분석으로 다시 만들 수 있습니다.`, 'hint'));
+    if (!minutes && transcript) {
+      const box = node('div', null, 'transcript-only'), make = node('button', '회의록 만들기', 'button primary make-minutes');
+      make.type = 'button'; make.onclick = () => analyzeOpened(true);
+      box.append(node('p', '전사만 저장한 회의입니다. 전사문은 옆 ‘전사문’ 탭에 있습니다.'), make); $('minutes').append(box);
+      // 전사만 저장한 회의는 저장된 전사로 요약만 요청한다.
+    } else if (!minutes) $('minutes').append(node('p', `아직 ${label}${format === 'tasks' ? '가' : '이'} 없습니다. 아래 재분석으로 다시 만들 수 있습니다.`, 'hint'));
     renderUsage(record);
     const versions = data.versions || []; $('result-version').replaceChildren(...versions.map((version,index) => {
       const option = node('option', [`${index + 1}번째 결과`, savedLabel(version.savedAt), Flow.FORMAT_LABELS[Flow.outputFormat(version.outputFormat)], version.refined && '의견 반영본', version.stars && `별 ${version.stars}개`].filter(Boolean).join(' · ')); option.value = version.id; return option;
@@ -315,7 +526,7 @@
     $('review-comment').value = data.review?.comment || ''; $('review-state').textContent = data.review ? '저장된 평가입니다.' : '별점과 의견은 선택입니다. 평가 저장에는 요금이 들지 않습니다.';
     renderStars(); renderCopies(data.copies);
     $('transcript-meta').textContent = transcript ? `전사 ${number(Array.from(transcript).length)}자 · 녹음에서 인식한 글을 그대로 보여 줍니다.` : '아직 전사문이 없습니다.';
-    showTab('minutes');
+    showTab(availableTab(tab));
     $('result').hidden = false; document.body.style.overflow = 'hidden'; $('main').inert = true; document.querySelector('.topbar').inert = true; document.querySelector('.dock').inert = true; $('result').scrollTop = 0; $('result').focus();
     lock();
   }
@@ -324,13 +535,13 @@
     for (const section of sections) {
       if (section.type === 'overview') {
         const summary = node('div', null, 'summary'); summary.append(node('strong', section.title));
-        for (const line of section.text.split(/\n+/)) summary.append(node('p', line));
+        if (section.items.length) renderItems(summary, section.items, true);
         host.append(summary);
       } else if (section.type === 'topics') {
         if (section.title && section.topics.length) host.append(node('h3', section.title));
-        for (const topic of section.topics) { host.append(node(section.title ? 'h4' : 'h3', topic.title)); for (const text of topic.points || []) host.append(node('p', text)); }
+        for (const topic of section.topics) { host.append(node(section.title ? 'h4' : 'h3', topic.title)); if (topic.points.length) renderItems(host, topic.points); }
       } else if (section.key === 'actions' && section.items.length && renderActions) renderActions(host, section.title, section.empty != null);
-      else if (section.items.length) list(section.title, section.items, host);
+      else if (section.items.length) { host.append(node('h3', section.title)); renderItems(host, section.items); }
       else if (section.empty) host.append(node('h3', section.title), node('p', section.empty, 'hint'));
     }
   }
@@ -392,7 +603,7 @@
     }
     if (state.opened) renderCopies(state.copies);
   }
-  function focusSettings(section) { const el = $('settings-' + section); el.focus({preventScroll:true}); $('settings').scrollTop = section === 'ai' ? 0 : el.offsetTop - 64; }
+  function focusSettings(section) { const el = $('settings-' + section); (section === 'me' ? $('my-name') : el).focus({preventScroll:true}); $('settings').scrollTop = section === 'ai' ? 0 : el.offsetTop - 64; }
   function renderStars() {
     for (const button of document.querySelectorAll('[data-stars]')) button.setAttribute('aria-pressed', String(Number(button.dataset.stars) === state.stars));
   }
@@ -429,7 +640,7 @@
     const review = await call('review', {...target,stars:state.stars || null,comment:$('review-comment').value.trim()});
     state.reviewDirty = false; $('review-state').textContent = '평가를 저장했습니다. 요금은 들지 않습니다.'; await history(); return review;
   }
-  $('result-version').onchange = () => { if (todoHolding()) { $('result-version').value = state.opened.resultId || ''; return; } const target = {...state.opened}, resultId = $('result-version').value; task(() => open(target.location,target.id,state.opener,resultId)); };
+  $('result-version').onchange = () => { if (todoHolding()) { $('result-version').value = state.opened.resultId || ''; return; } const target = {...state.opened}, resultId = $('result-version').value; task(() => open(target.location,target.id,state.opener,resultId,state.resultTab)); };
   for (const button of document.querySelectorAll('[data-stars]')) button.onclick = () => {
     const stars = Number(button.dataset.stars); state.stars = state.stars === stars ? null : stars; state.reviewDirty = true; renderStars(); lock();
   };
@@ -477,7 +688,8 @@
   function closeResult() {
     if ($('result').hidden || state.busy || todoHolding()) return; const target = state.opened; state.reviewDirty = false; $('result').hidden = true; document.body.style.overflow = ''; $('main').inert = false; document.querySelector('.topbar').inert = false; document.querySelector('.dock').inert = false; state.opened = null;
     const opener = document.contains(state.opener) ? state.opener : [...$('history').querySelectorAll('button')].find(button => button.dataset.location === target?.location && button.dataset.id === target?.id);
-    state.opener = null; if (opener) opener.focus(); lock();
+    state.opener = null; if (opener) { opener.focus({ preventScroll: true }); opener.scrollIntoView({ block: 'nearest' }); } lock();
+    // 초점을 줄 때 브라우저가 스스로 스크롤하면 목록 끝의 줄이 아래쪽 탭에 가릴 수 있다. 스크롤 여백을 지키는 가까운 위치로만 옮긴다.
   }
 
   async function poll(force = false) {
@@ -486,6 +698,10 @@
     try {
       const status = await call('status'), meeting = status.meeting;
       if (state.busy && !force) return;
+      const analysis = state.analyzing && meeting.attemptId === state.analyzing.attemptId ? state.analyzing : null;
+      const mine = !!state.importing && meeting.attemptId === state.importing, watching = !!state.lastState || mine || !!analysis;
+      // 다시 분석·회의록 만들기·종료 뒤 고른 분석은 시도 번호로 따라간다. 첫 조회 전에 끝나도 그 끝 상태로 결과를 연다.
+      // 녹음 파일 불러오기는 이번 시도 번호가 실린 상태만 이번 불러오기의 것으로 본다. 그 상태가 끝 상태면 앞선 진행 상태를 못 봤어도 녹음 뒤 분석이 끝났을 때와 같이 안내하고 결과를 연다.
       state.active = status.active; state.recording = status.active && meeting.state === 'recording';
       // 받는 동안 녹음·분석이 시작되면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 다시 눌러야 설치한다.
       if (state.active || state.refining) state.updateIntent = false;
@@ -500,26 +716,35 @@
         const seconds = Math.max(0, Math.floor((Date.now() - meeting.createdAt) / 1000));
         if (state.recording) $('timer').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
         if (!$('prep').hidden) setPrep(false);
-      } else if (state.lastState) {
+      } else if (watching) {
         state.lastMeetingState = meeting.state || '';
-        $('record-state').textContent = meeting.state === 'complete' ? '보관 완료' : '확인 필요';
+        $('record-state').textContent = meeting.state === 'complete' ? '보관 완료' : meeting.state === 'transcribed' ? '전사 저장 완료' : '확인 필요';
         $('workflow').textContent = meeting.message || '다음 회의를 준비하세요.'; $('timer').textContent = '00:00';
       }
+      if (state.importing) {
+        if (mine && meeting.id) { state.chosenMode = { location: meeting.location, id: meeting.id, mode: state.importMode }; state.importing = null; clearNewMeeting(); }
+        else if (mine && !status.active) { state.importing = null; $('workflow').textContent = meeting.message || '녹음 파일을 불러오지 못했습니다. 다시 골라 주세요.'; }
+        else if (!mine) { $('record-state').textContent = '분석 중'; $('workflow').textContent = '녹음 파일을 준비하는 중'; }
+      }
+      // 이번 상태에 회의 id가 생기면 회의가 만들어진 것이라 칸을 비우고, id 없이 끝나면 실패라 칸 값을 지우지 않는다. 앞선 회의의 상태나 서비스가 아직 시작되지 않은 상태는 준비 중과 같게 보여 준다.
       const target = state.refining;
       const finishedRefine = !status.active && target && meeting.attemptId === target.attemptId && target.id === meeting.id && target.location === meeting.location && ['complete','failed'].includes(meeting.state);
       const key = `${meeting.id || ''}-${meeting.state || ''}-${meeting.attemptId || ''}`;
       if (key !== state.lastHistory || finishedRefine) {
         state.lastHistory = key; await history();
-        if (finishedRefine || (!target && !state.active && state.lastState && meeting.id && meeting.location)) {
+        if (finishedRefine || (!target && !state.active && watching && meeting.id && meeting.location)) {
           const failedRefine = finishedRefine && meeting.state === 'failed';
           const opener = [...$('history').querySelectorAll('button')].find(button => button.dataset.location === meeting.location && button.dataset.id === meeting.id);
-          await open(meeting.location, meeting.id, opener, failedRefine ? target.resultId : meeting.resultId);
+          await open(meeting.location, meeting.id, opener, failedRefine ? target.resultId : meeting.resultId, 'minutes');
           if (failedRefine) $('review-state').textContent = '다시 정리하지 못했습니다. 평가는 저장되어 있고 앞선 결과는 그대로입니다.';
           if (finishedRefine) state.refining = null;
         }
         // 녹음 뒤 자동 분석이 체험 소진으로 멈췄으면 같은 안내와 함께 AI 설정을 연다.
-        if (!state.active && state.lastState && meeting.state === 'failed' && meeting.message === Flow.EXHAUSTED_MESSAGE && !$('settings').open) { message(meeting.message); openSettings(); }
+        if (!state.active && watching && meeting.state === 'failed' && meeting.message === Flow.EXHAUSTED_MESSAGE && !$('settings').open) { message(meeting.message); openSettings(); }
       }
+      if (analysis && !status.active && ['complete', 'failed', 'transcribed'].includes(meeting.state)) state.analyzing = null;
+      if (!status.active && state.chosenMode && state.chosenMode.id === meeting.id && ['complete', 'transcribed'].includes(meeting.state)) state.chosenMode = null;
+      // 고른 방식은 그 회의의 분석이 실패한 동안만 다시 분석에 이어 쓴다. 성공해 끝나면 지운다.
       // 체험 남은 횟수가 분석 뒤 바뀌므로 상태 조회 때 연결 정보도 함께 갱신한다.
       if (status.connection) { state.connection = status.connection; renderAccess(); }
       // 업데이트 확인·받기 진행도 같은 상태 조회로 받는다.
@@ -549,40 +774,150 @@
   $('start').onclick = () => task(async () => {
     await flushDraft();
     await call('start', { date: $('date').value, title: $('title').value.trim(), participants: $('participants').value, notes: $('notes').value, ...formatFields() });
+    clearNewMeeting(); setPrep(false); await poll(true);
+  });
+  function clearNewMeeting() {
     clearTimeout(draftTimer); draftTimer = 0;
     for (const id of ['title', 'participants', 'notes']) $(id).value = '';
-    state.formatChosen = false; $('output-format').value = newMeetingFormat(); setPrep(false); await poll(true);
+    state.formatChosen = false; $('output-format').value = newMeetingFormat();
+  }
+  // 회의가 만들어진 뒤 새 회의 칸을 비운다. 회의 시작은 요청이 끝나면 곧바로, 녹음 파일 불러오기는 서비스가 회의를 만든 것을 상태 조회로 본 뒤에 부른다.
+  $('import-audio').onclick = () => task(async () => {
+    await flushDraft();
+    const mode = await chooseMode('녹음 파일을 고르기 전에 어디까지 만들지 정합니다.');
+    if (!mode) return;
+    state.importMode = mode;
+    const attemptId = crypto.randomUUID();
+    const started = await call('importAudio', { date: $('date').value, title: $('title').value.trim(), participants: $('participants').value, notes: $('notes').value, ...formatFields(), mode, attemptId });
+    if (!started || started.cancelled) return;
+    state.importing = attemptId; setPrep(false); await poll(true);
   });
-  $('finish').onclick = () => task(async () => { await call('finish'); $('workflow').textContent = '녹음을 저장하고 분석합니다.'; });
-  $('retry').onclick = () => { if (!todoHolding()) task(async () => {
-    if (!Flow.canAnalyze(state.connection)) { openSettings(null, 'ai'); throw new Error(state.connection.accessMode === 'exhausted' ? Flow.EXHAUSTED_MESSAGE : '설정의 AI 연결에서 API 키를 먼저 등록하세요.'); }
-    await call('analyze', { ...state.opened }); await poll(true); }); };
+  // 파일 선택 창이 열린 동안에는 task가 화면을 잠그고, 시작된 뒤에는 시도 번호로 이번 불러오기를 따라간다. 칸 값은 회의가 실제로 만들어진 뒤에 비우므로 그 전에 실패하면 적은 값이 그대로 남는다.
+  function requireAnalysis() { if (!Flow.canAnalyze(state.connection)) { openSettings(null, 'ai'); throw new Error(state.connection.accessMode === 'exhausted' ? Flow.EXHAUSTED_MESSAGE : '설정의 AI 연결에서 API 키를 먼저 등록하세요.'); } }
+  function chooseMode(note) {
+    // 회의록까지 만들지(minutes) 전사까지만 할지(transcript) 고르는 창을 열고 고른 값을 돌려준다. 닫기·뒤로로 닫으면 null이다.
+    const dialog = $('finish-choice'); $('finish-choice-note').textContent = note;
+    return new Promise(resolve => {
+      let chosen = null;
+      const pick = value => () => { if (chosen) return; chosen = value; dialog.close(); };
+      const minutes = pick('minutes'), transcript = pick('transcript');
+      const done = () => { $('finish-minutes').removeEventListener('click', minutes); $('finish-transcript').removeEventListener('click', transcript); dialog.removeEventListener('close', done); resolve(chosen); };
+      $('finish-minutes').addEventListener('click', minutes); $('finish-transcript').addEventListener('click', transcript); dialog.addEventListener('close', done);
+      openDialog('finish-choice', document.activeElement); $('finish-minutes').focus();
+      // 창이 닫히는 이벤트는 조금 뒤에 오므로 그 사이 다른 단추가 눌려도 처음 고른 값을 지킨다. 처음 초점은 대부분 고르는 회의록까지 단추다.
+    });
+  }
+  async function waitSaved(id) {
+    // 회의 종료는 서비스에 맡겨지므로 같은 회의의 녹음이 저장되고 서비스가 쉬는 상태를 볼 때까지 기다린다. 저장에 실패했으면 null이다.
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      const status = await call('status'), meeting = status.meeting || {};
+      if (status.connection) { state.connection = status.connection; renderAccess(); }
+      // 녹음하는 동안 키나 체험 상태가 바뀌었을 수 있어 고르기 전에 최신 연결 정보로 맞춘다.
+      if (!status.active && (!id || meeting.id === id)) return meeting.state === 'saved' ? meeting : null;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    throw new Error('녹음 저장을 확인하지 못했습니다. 회의 기록에서 저장된 음성을 확인하세요.');
+  }
+  async function startAnalysis(target, mode) {
+    // 고른 방식으로 분석을 시작하고 시도 번호로 이번 분석의 끝을 따라간다.
+    const attemptId = crypto.randomUUID();
+    state.analyzing = { location: target.location, id: target.id, attemptId };
+    try { await call('analyze', { location: target.location, id: target.id, mode, attemptId }); } catch (error) { state.analyzing = null; throw error; }
+    await poll(true);
+  }
+  function analyzeOpened(minutesOnly) {
+    // 열린 회의를 다시 분석한다. 전사가 없으면 방식을 고르고, 전사가 있거나 회의록 만들기를 누르면 묻지 않고 회의록까지 만든다.
+    if (todoHolding()) return;
+    task(async () => {
+      requireAnalysis();
+      const chosen = state.chosenMode && state.chosenMode.id === state.opened?.id && state.chosenMode.location === state.opened?.location ? state.chosenMode.mode : null;
+      const mode = minutesOnly ? 'minutes' : chosen || (state.result?.transcript ? 'minutes' : await chooseMode('저장된 음성으로 만듭니다.'));
+      // 이 회의에서 고른 방식이 실패했으면 같은 방식으로 이어 간다. 회의록 만들기는 늘 회의록까지다.
+      if (!mode) return;
+      state.chosenMode = { location: state.opened.location, id: state.opened.id, mode };
+      await startAnalysis(state.opened, mode);
+    });
+  }
+  $('finish').onclick = () => task(async () => {
+    const before = (await call('status')).meeting || {};
+    await call('finish', { hold: true }); $('workflow').textContent = '녹음을 멈추고 음성을 저장합니다.';
+    const saved = await waitSaved(before.id);
+    if (!saved) return;
+    // 저장에 실패했으면 상태 조회가 그 안내를 보여 준다.
+    requireAnalysis();
+    const mode = await chooseMode('음성은 저장했습니다.');
+    if (!mode) { state.lastState = ''; $('workflow').textContent = '음성을 저장했습니다. 회의 기록에서 열어 분석할 수 있습니다.'; return; }
+    // 창을 닫으면 저장한 회의를 끝난 분석처럼 열지 않고 안내만 남긴다.
+    state.chosenMode = { location: saved.location, id: saved.id, mode };
+    await startAnalysis(saved, mode);
+  });
+  $('retry').onclick = () => analyzeOpened(false);
   $('refresh').onclick = () => task(history);
   $('tab-new').onclick = () => showView('new');
   $('tab-records').onclick = () => showView('records');
   $('history-search').oninput = filterHistory;
   $('close-result').onclick = closeResult;
   $('share-all').onclick = () => task(() => call('share', { ...state.opened, kind: 'all' }));
-  // 결과 화면: 보고 있는 탭의 내용을 바로 복사하거나 다른 앱으로 공유한다.
+  // 결과 화면: 내 할 일·정리본·전사문 탭으로 나누고, 정리본·전사문 탭에서는 보고 있는 내용을 바로 복사하거나 다른 앱으로 공유한다.
+  const RESULT_TABS = ['mine', 'minutes', 'transcript'];
+  function availableTab(wanted) {
+    // 내 할 일 탭은 정리본이 있는 결과에만 있다. 정리본이 없으면 다시 분석 안내가 있는 정리본 탭을 연다.
+    return wanted === 'mine' && !state.result?.minutes ? 'minutes' : wanted;
+  }
   function showTab(tab) {
-    state.resultTab = tab; const minutes = tab === 'minutes', r = state.result || {};
-    $('tab-minutes').setAttribute('aria-selected', String(minutes)); $('tab-transcript').setAttribute('aria-selected', String(!minutes));
-    $('tab-minutes').tabIndex = minutes ? 0 : -1; $('tab-transcript').tabIndex = minutes ? -1 : 0;
-    $('panel-minutes').hidden = !minutes; $('panel-transcript').hidden = minutes;
+    state.resultTab = tab; const minutes = tab === 'minutes', mine = tab === 'mine', r = state.result || {};
+    $('tab-mine').hidden = !r.minutes;
+    for (const name of RESULT_TABS) { const chosen = name === tab; $(`tab-${name}`).setAttribute('aria-selected', String(chosen)); $(`tab-${name}`).tabIndex = chosen ? 0 : -1; $(`panel-${name}`).hidden = !chosen; }
+    document.querySelector('.result-actions').hidden = mine; $('result-more').hidden = mine;
+    // 내 할 일 탭에서는 정리본·전사문을 다루는 복사·공유 단추와 사용량·내보내기·다시 분석 묶음을 감춘다.
+    if (state.mePicking) { state.mePicking = false; renderMine(); }
+    // 탭을 옮기면 펼쳐 둔 나 고르기 상자를 접는다.
     const name = minutes ? r.label || '정리본' : '전사문', ready = minutes ? r.minutes : r.transcript;
     $('copy-result').lastChild.textContent = `${name} 복사`; $('share-result').lastChild.textContent = `${name} 공유`;
     $('copy-result').disabled = !ready || state.busy || state.active; $('share-result').disabled = $('copy-result').disabled;
+    $('save-text').hidden = !minutes; $('save-text').disabled = $('copy-result').disabled;
+    // 텍스트 파일로 저장은 정리본 탭에만 있고 복사·공유와 같은 조건으로 잠긴다.
   }
-  $('tab-minutes').onclick = () => showTab('minutes'); $('tab-transcript').onclick = () => showTab('transcript');
-  for (const id of ['tab-minutes', 'tab-transcript']) $(id).addEventListener('keydown', event => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-    const next = state.resultTab === 'minutes' ? 'transcript' : 'minutes'; showTab(next); $(next === 'minutes' ? 'tab-minutes' : 'tab-transcript').focus();
-  });
+  for (const name of RESULT_TABS) {
+    $(`tab-${name}`).onclick = () => showTab(name);
+    $(`tab-${name}`).addEventListener('keydown', event => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      const order = RESULT_TABS.filter(item => !$(`tab-${item}`).hidden), step = event.key === 'ArrowRight' ? 1 : -1;
+      const next = order[(order.indexOf(state.resultTab) + step + order.length) % order.length]; showTab(next); $(`tab-${next}`).focus();
+      // 보이는 탭 사이만 돈다. 정리본이 없는 회의는 내 할 일 탭이 감춰져 있다.
+    });
+  }
   const resultKind = () => state.resultTab === 'transcript' ? 'transcript' : 'summary';
   $('copy-result').onclick = () => task(async () => { await call('copy', { ...state.opened, kind: resultKind() }); message(`‘${resultKind() === 'transcript' ? '전사문' : state.result?.label || '정리본'}’ 내용을 복사했습니다. 메신저나 메일에 붙여 넣으세요.`); });
   $('share-result').onclick = () => task(() => call('share', { ...state.opened, kind: resultKind() }));
+  $('save-text').onclick = () => task(async () => {
+    const result = await call('saveText', { ...state.opened });
+    // 글과 파일 이름은 네이티브가 저장된 결과와 할 일 수정본으로 만든다. 화면은 어느 회의의 어느 결과인지만 알린다.
+    if (!result?.cancelled) message(result?.file ? `‘${result.file}’ 파일로 저장했습니다.` : '텍스트 파일로 저장했습니다.');
+  });
 
-  function openSettings(event, section = 'ai') { state.removeArmed = false; $('remove-key').textContent = '키 삭제'; renderConnection(); renderSettings(); lock(); openDialog('settings', event?.currentTarget); focusSettings(section); }
+  function openSettings(event, section = 'ai') {
+    state.removeArmed = false; $('remove-key').textContent = '키 삭제'; renderConnection(); renderSettings(); lock();
+    if (!$('settings').open) { $('my-name').value = state.settings?.myName || ''; $('my-name-status').textContent = ''; }
+    // 내 이름 칸은 창을 새로 열 때만 채운다. 다른 설정을 저장하며 다시 그릴 때 적고 있던 글자를 지우지 않는다.
+    openDialog('settings', event?.currentTarget); focusSettings(section);
+  }
+  async function saveMyName() {
+    // 설정의 내 이름을 저장한다. 저장되면 지난 회의 목록의 내 일 수와 열려 있는 내 할 일 탭을 다시 계산한다.
+    try { await call('saveSettings', { myName: $('my-name').value.trim() }); }
+    catch (error) { $('my-name-status').textContent = `내 이름을 저장하지 못했습니다. ${error.message}`; return; }
+    // 실패하면 적어 둔 글자를 그대로 둬 다시 누를 수 있게 한다.
+    $('my-name').value = state.settings?.myName || ''; $('my-name-status').textContent = state.settings?.myName ? '내 이름을 저장했습니다.' : '내 이름을 지웠습니다.';
+    renderMine(); await history().catch(() => {});
+  }
+  function saveMyNameKeepingFocus() {
+    // 저장하는 동안 칸과 단추가 잠기며 초점이 빠지므로, 저장이 끝나면 누른 곳으로 초점을 돌려준다.
+    const back = document.activeElement;
+    return task(saveMyName).then(() => { const now = document.activeElement; if ((!now || now === document.body) && back && document.contains(back) && !back.disabled) back.focus(); });
+  }
+  $('my-name-save').onclick = saveMyNameKeepingFocus;
+  $('my-name').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); saveMyNameKeepingFocus(); } });
   $('open-settings').onclick = openSettings; $('blocker-settings').onclick = openSettings;
   async function saveKey() {
     const key = $('api-key').value.trim(); if (!key) throw new Error('API 키를 붙여 넣으세요.');

@@ -367,3 +367,21 @@ test('요약 전 전사를 저장하면 재실행 후 재전사 없이 복원하
   assert.equal((await restarted(route.replace('/main/', '/p2/') + '/transcript', { text: '다른 보관함' })).status, 404);
   assert.equal((await restarted(route + '/transcript', { text: '인증 없음' }, false)).status, 401);
 });
+
+test('회의록 없이 전사만 저장한 녹음은 목록에 transcribed로 표시한다', async t => {
+  const request = await start(t, folder(t));
+  const transcribed = randomUUID(), audioOnly = randomUUID(), analyzed = randomUUID();
+  for (const id of [transcribed, audioOnly, analyzed]) {
+    await request(`/api/recordings/main/${id}`, recordingMeta());
+    await request.audio(`/api/recordings/main/${id}/audio/1`, Buffer.from(`원음 ${id}`));
+  }
+  for (const id of [transcribed, analyzed]) assert.equal((await request(`/api/recordings/main/${id}/transcript`, { text: '전사만 저장한 회의 발언' })).status, 200);
+  assert.equal((await request('/api/meetings/main', result({ recordingId: analyzed }))).status, 200);
+  const list = (await request('/api/meetings')).body.meetings;
+  const item = id => list.find(meeting => (meeting.recordingId || meeting.id) === id);
+  assert.equal(item(transcribed).transcribed, true);
+  assert.equal(item(transcribed).analyzed, false);
+  assert.equal('transcribed' in item(audioOnly), false, '음성만 있는 녹음');
+  assert.equal(item(analyzed).analyzed, true);
+  assert.equal('transcribed' in item(analyzed), false, '회의록이 있는 회의');
+});

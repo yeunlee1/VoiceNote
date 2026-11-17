@@ -74,7 +74,7 @@ test('설정 2판을 내보내고 다시 불러오면 같은 값이 화면에 �
   assert.equal(await page.$eval('#default-format', node => node.value), 'summary');
   assert.equal(await page.$eval('#storage-summary', node => node.textContent), summaryFolder);
   assert.equal(await page.$eval('#custom-name', node => node.value), '주간 보고');
-  assert.deepEqual((await api('/api/settings')).settings, original);
+  assert.deepEqual((await api('/api/settings')).settings, { ...original, myName: '' });
   assert.equal((await api('/api/custom-format')).customFormat.name, '주간 보고');
   assert.deepEqual(errors, []);
 });

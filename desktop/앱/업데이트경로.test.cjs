@@ -82,7 +82,7 @@ test('AI 요청이 진행 중이면 설치를 시작하지 않는다', async (t)
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
   const updater = fakeUpdater();
-  const minutes = { overview: '요약', topics: [], decisions: [], actions: [], openQuestions: [] };
+  const minutes = { overview: [{ text: '요약', details: [] }], topics: [], decisions: [], actions: [], openQuestions: [] };
   const { url, headers, call } = await fixture(t, { updater, apiFetch: async () => {
     await gate;
     return Response.json({ status: 'completed', output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify(minutes) }] }] });

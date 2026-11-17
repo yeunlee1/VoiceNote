@@ -5,7 +5,7 @@ const { randomUUID } = require('node:crypto');
 const { createMeetingServer } = require('./서버.cjs');
 
 const FEEDBACK_INSTRUCTION = "feedback은 사용자가 앞선 정리본을 읽고 남긴 검토 의견입니다. 의견이 가리키는 내용을 전사에서 다시 확인해 고쳐 정리하세요. 의견에 있더라도 전사에 없는 발언·결정·담당자·기한은 만들지 마세요. 의견이 전사와 맞지 않으면 전사를 따르고 '확인 필요'로 남기세요.";
-const minutes = { overview: '준비 회의', topics: [], decisions: [], actions: [], openQuestions: [] };
+const minutes = { overview: [{ text: '준비 회의', details: [] }], topics: [], decisions: [], actions: [], openQuestions: [] };
 
 async function fixture(t) {
   const requests = [];

@@ -60,9 +60,9 @@ test('빌드가 데스크톱 서버에서 줄이기 지시문을 뽑는다', () 
     assert.deepEqual(meeting.text.format.schema.required, ['suggestedTitle', 'overview', 'topics', 'decisions', 'actions', 'openQuestions']);
     const fields = meeting.text.format.schema.properties;
     assert.deepEqual([fields.topics.maxItems, fields.topics.items.properties.points.maxItems, fields.decisions.maxItems, fields.actions.maxItems, fields.openQuestions.maxItems], [30, 30, 40, 40, 40]);
-    assert.deepEqual([fields.overview.maxLength, fields.topics.items.properties.points.items.maxLength, fields.actions.items.properties.owner.maxLength], [8000, 2000, 200]);
+    assert.deepEqual([fields.overview.maxItems, fields.overview.items.properties.text.maxLength, fields.topics.items.properties.points.items.properties.text.maxLength, fields.decisions.items.properties.details.maxItems, fields.actions.items.properties.owner.maxLength], [12, 1000, 1000, 8, 200]);
     assert.equal(asset.text.format.schema.properties.topics.maxItems, 30);
-    assert.equal(asset.text.format.schema.properties.overview.maxLength, 8000);
+    assert.deepEqual(asset.text.format.schema.properties.overview.items.required, ['text', 'details']);
   } finally {
     fs.rmSync(destination, { recursive: true, force: true });
   }
@@ -72,11 +72,12 @@ test('Android 원본은 줄이기 단계와 이름 힌트를 분석과 의견 �
   const source = fs.readFileSync(path.join(root, 'src/kr/local/meetingjournal/Ai.java'), 'utf8');
   assert.match(source, /previous=shorten\(record,previous,dir,null\);/);
   assert.match(source, /previous=shorten\(work,previous,dir,feedback\);/);
-  assert.match(source, /mergeCompact\(minutes,withoutForeignScript\(new JSONObject\(minutesText\(record,body\)\)\)\)/);
+  assert.match(source, /JSONObject answer=new JSONObject\(minutesText\(record,body\)\);\s*MinutesItems\.checkResponse\(answer,true\);\s*JSONObject merged=mergeCompact\(minutes,MinutesItems\.prune\(withoutForeignScript\(answer\)\)\);/);
   // Android 9 이하는 정규식의 Is 접두사 문자 체계를 읽지 못하므로 쓰지 않는다.
   const rules = fs.readFileSync(path.join(root, 'src/kr/local/meetingjournal/SummaryRules.java'), 'utf8');
   assert.doesNotMatch(rules, /\\p\{Is|\\p\{(sc|script)=/i);
-  assert.match(source, /JSONObject minutes=withoutForeignScript\(new JSONObject\(minutesText\(record,body\)\)\);/);
+  assert.match(source, /JSONObject minutes=new JSONObject\(minutesText\(record,body\)\);MinutesItems\.checkResponse\(minutes,false\);\s*minutes=MinutesItems\.prune\(withoutForeignScript\(minutes\)\);/);
+  // 응답 틀 확인 → 일본어·중국어 글자 정리 → 빈 값 정리 순서를 데스크톱 서버와 같게 지킨다.
   assert.match(source, /SummaryRules\.participantKeywords\(record\.optString\("participants"\)\)/);
   const build = fs.readFileSync(path.join(root, '빌드.ps1'), 'utf8');
   assert.match(build, /assets\/summary-compact\.json/);

@@ -20,7 +20,7 @@ async function run(t, status, body) {
   return { status: response.status, body: await response.json(), calls };
 }
 test('14977자 전사를 자르지 않고 Sol 모델과 32000토큰 출력 여유를 요청한다', async t => {
-  const minutes = { overview: '회의', topics: [], decisions: [], actions: [], openQuestions: [] };
+  const minutes = { overview: [{ text: '회의', details: [] }], topics: [], decisions: [], actions: [], openQuestions: [] };
   const result = await run(t, 200, { status: 'completed', usage: { input_tokens: 15000, output_tokens: 1000 }, output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify(minutes) }] }] });
   assert.equal(result.status, 200);
   assert.equal(result.calls[0].max_output_tokens, 32000);

@@ -3,8 +3,8 @@ module.exports = '(' + function () {
   const m = window.__mock, previous = window.Native.request.bind(window.Native);
   const query = new URL(location.href).searchParams;
   const size = 31457280, published = '2026-11-20T01:00:00Z';
-  const base = { supported: true, currentVersion: '1.6.0', status: 'latest', version: null, publishedAt: null, size: 0, received: 0, error: null, needsPermission: false, canContinue: false, pageUrl: 'https://github.com/yeunlee1/VoiceNote/releases/latest' };
-  const next = { version: '1.6.1', publishedAt: published, size };
+  const base = { supported: true, currentVersion: '1.7.0', status: 'latest', version: null, publishedAt: null, size: 0, received: 0, error: null, needsPermission: false, canContinue: false, pageUrl: 'https://github.com/yeunlee1/VoiceNote/releases/latest' };
+  const next = { version: '1.7.1', publishedAt: published, size };
   const presets = {
     latest: {},
     available: { ...next, status: 'available' },

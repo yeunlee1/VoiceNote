@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createMeetingServer } = require('./서버.cjs');
 const SECRET = 'sk-test-SECRET-never-shown-1234567890';
-const minutes = { overview: '회의', topics: [], decisions: [], actions: [], openQuestions: [] };
+const minutes = { overview: [{ text: '회의', details: [] }], topics: [], decisions: [], actions: [], openQuestions: [] };
 const completed = (usage = { input_tokens: 1200, input_tokens_details: { cached_tokens: 200 }, output_tokens: 900, output_tokens_details: { reasoning_tokens: 700 }, total_tokens: 2100 }) => ({
   status: 'completed', ...(usage ? { usage } : {}),
   output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify(minutes) }] }] });
@@ -48,7 +48,7 @@ test('설정 조회는 모델 목록·기본값·선택값·요청 한도를 알
   assert.equal(config.summaryModels.length, 3);
   assert.ok(config.summaryModels.every(model => model.maxOutputTokens === 32000));
   const saved = await first.post('/api/settings', { summaryModel: 'gpt-6-luna' });
-  assert.deepEqual(saved.body.settings, { summaryModel: 'gpt-6-luna', defaultOutputFormat: 'meeting', storage: { audio: '', transcript: '', summary: '' } });
+  assert.deepEqual(saved.body.settings, { summaryModel: 'gpt-6-luna', defaultOutputFormat: 'meeting', storage: { audio: '', transcript: '', summary: '' }, myName: '' });
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'AI설정.json'), 'utf8')).summaryModel, 'gpt-6-luna');
   const rejected = await first.post('/api/settings', { summaryModel: 'gpt-made-up' });
   assert.equal(rejected.status, 400);

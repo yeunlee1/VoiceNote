@@ -87,5 +87,70 @@
     });
     return { version: 1, finalized: data.finalized, items };
   }
-  return { LIMITS, people, ownerNumber, initial, effective, sorted, apply, carryOver, validate };
+  function sameName(a, b) {
+    // 이름은 앞뒤 공백을 떼고 이어진 공백을 하나로 줄인 글자가 같을 때만 같은 사람이다. 빈 이름은 누구와도 같지 않다.
+    const left = same(a);
+    return left !== '' && left === same(b);
+  }
+  function candidates(participants, items) {
+    // 나를 고를 후보다. 참석자가 있으면 참석자 번호 그대로, 없으면 할 일에 적힌 담당자 이름을 처음 나온 순서로 쓴다(번호 0).
+    const list = people(participants);
+    const source = list.length ? list.map((name, index) => ({ name, number: index + 1 }))
+      : items.filter(hasOwner).map(item => ({ name: String(item.owner).trim(), number: 0 }));
+    const seen = new Set(), result = [];
+    for (const entry of source) {
+      const key = same(entry.name);
+      if (seen.has(key)) continue;
+      // 공백만 다른 이름은 먼저 나온 표기 하나만 남긴다.
+      seen.add(key);
+      result.push(entry);
+      if (result.length === LIMITS.people) break;
+    }
+    return result;
+  }
+  function resolveMe(list, savedName, settingsName) {
+    // 이 회의에 저장된 선택이 후보에 있으면 그 사람, 없으면 설정의 내 이름과 같은 후보, 둘 다 없으면 모른다(null).
+    for (const [value, source] of [[savedName, 'saved'], [settingsName, 'settings']]) {
+      const found = list.find(entry => sameName(entry.name, value));
+      if (found) return { ...found, source };
+    }
+    return null;
+  }
+  function mine(items, meName) {
+    // 담당자가 나와 같은 일에 원래 위치를 붙여 안 끝낸 일을 앞에, 끝낸 일을 뒤에 둔다.
+    const own = items.map((item, index) => ({ ...item, index })).filter(item => sameName(item.owner, meName));
+    return [...own.filter(item => !item.done), ...own.filter(item => item.done)];
+  }
+  function mineOpen(participants, items, savedName, settingsName) {
+    // 지난 회의 목록에 붙일 수다. 내가 누구인지 모르면 null, 알면 내가 안 끝낸 일의 수다.
+    const me = resolveMe(candidates(participants, items), savedName, settingsName);
+    return me ? mine(items, me.name).filter(item => !item.done).length : null;
+  }
+  function rest(items, meName) {
+    // 내 일이 아닌 일의 수다. 끝낸 일도 센다.
+    return { unassigned: items.filter(item => !hasOwner(item)).length, others: items.filter(item => hasOwner(item) && !sameName(item.owner, meName)).length };
+  }
+  function shareGroups(participants, items) {
+    // 사람별로 보낼 남은 일이다. 담당자가 있고 안 끝낸 일만 묶고, 공백만 다른 담당자 이름은 한 사람으로 본다.
+    const list = people(participants), groups = new Map();
+    for (const item of items) {
+      if (item.done || !hasOwner(item)) continue;
+      const key = same(item.owner);
+      if (!groups.has(key)) {
+        const at = list.findIndex(name => same(name) === key);
+        groups.set(key, { name: at < 0 ? String(item.owner).trim() : list[at], number: at + 1, tasks: [] });
+        // 부르는 이름은 참석자 명단의 표기를 쓰고, 명단에 없으면 먼저 나온 표기를 쓴다.
+      }
+      groups.get(key).tasks.push({ task: item.task, due: field(item.due) });
+    }
+    const found = [...groups.values()];
+    return [...found.filter(group => group.number).sort((a, b) => a.number - b.number), ...found.filter(group => !group.number)];
+    // 참석자 번호순이 먼저이고, 명단에 없는 담당자는 처음 나온 순서로 뒤에 붙는다.
+  }
+  function shareText(title, date, group) {
+    // 한 사람에게 보낼 글이다. 기한이 없는 일은 문장만 쓴다.
+    const head = `[${String(title ?? '').trim() || '회의'}] ${date ?? ''}`.trim();
+    return [head, `${group.name} 님이 맡은 일 ${group.tasks.length}건`, ...group.tasks.map(item => `- ${item.task}${item.due ? ` · 기한 ${item.due}` : ''}`)].join('\n');
+  }
+  return { LIMITS, people, ownerNumber, initial, effective, sorted, apply, carryOver, validate, sameName, candidates, resolveMe, mine, mineOpen, rest, shareGroups, shareText };
 });

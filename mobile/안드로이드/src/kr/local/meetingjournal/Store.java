@@ -26,13 +26,15 @@ final class Store {
     JSONObject asset(String name) throws Exception {try(InputStream in=context.getAssets().open(name)){return new JSONObject(read(in));}}
     JSONObject settings()throws Exception{
         String model=summaryModel();if(AiModels.find(model)==null)model=AiModels.DEFAULT_MODEL;
-        return new JSONObject().put("summaryModel",model).put("defaultOutputFormat",defaultOutputFormat()).put("storage",Copies.storage(context));
+        return new JSONObject().put("summaryModel",model).put("defaultOutputFormat",defaultOutputFormat()).put("storage",Copies.storage(context)).put("myName",myName());
     }
     byte[] exportSettings()throws Exception{
         JSONObject current=settings(),custom=customFormat();
         return SettingsFile.write(new SettingsFile.Value(current.getString("summaryModel"),current.getString("defaultOutputFormat"),custom==null?null:CustomFormat.parse(custom.toString())));
     }
     static volatile int failImportAfter=-1;
+    static volatile String failSaveState=null;
+    // 기기 시험이 이 상태(state)로 저장하는 회의정보만 실패하게 만들 때 쓴다. 앱에서는 늘 null이다.
     JSONObject settingsPreview(SettingsFile.Value value)throws Exception{
         boolean model=AiModels.find(value.summaryModel)!=null;
         JSONObject preview=new JSONObject().put("summaryModel",new JSONObject().put("value",value.summaryModel).put("apply",model))
@@ -72,8 +74,21 @@ final class Store {
             }
         }
     }
+    // 설정의 내 이름이다. 지난 회의에서 같은 이름의 사람을 나로 미리 고르는 데만 쓰고 설정 내보내기 파일에는 담지 않는다.
+    String myName(){return context.getSharedPreferences("connection",0).getString("myName","");}
     JSONObject saveSettings(JSONObject value)throws Exception{
         synchronized(Store.class){
+            if(value.length()==1&&value.has("myName")){
+                Object name=value.opt("myName");
+                if(!(name instanceof String)||((String)name).length()>Todos.MAX_FIELD)throw new IOException("내 이름은 200자 이하로 적어 주세요.");
+                android.content.SharedPreferences prefs=context.getSharedPreferences("connection",0);String before=prefs.getString("myName",null);
+                if(!prefs.edit().putString("myName",JsonText.trim((String)name)).commit()){
+                    android.content.SharedPreferences.Editor previous=prefs.edit();if(before==null)previous.remove("myName");else previous.putString("myName",before);previous.commit();
+                    // commit이 false여도 메모리에는 새 이름이 먼저 들어가 있다. 이전 이름으로 되돌려 목록의 수와 화면이 같은 사람을 기준으로 남게 한다.
+                    throw new IOException("내 이름을 저장하지 못했습니다.");
+                }
+                return settings();
+            }
             if(value.length()!=1||!value.has("defaultOutputFormat"))throw new IOException("기본 출력 형식을 확인하세요.");
             Object format=value.opt("defaultOutputFormat");if(!(format instanceof String)||!SettingsFile.OUTPUT_FORMATS.contains(format))throw new IOException("기본 출력 형식을 확인하세요.");
             android.content.SharedPreferences prefs=context.getSharedPreferences("connection",0);String before=prefs.getString("defaultOutputFormat",null);
@@ -105,41 +120,84 @@ final class Store {
     void save(JSONObject record)throws Exception {
         synchronized(Store.class){
             String location=location(record),id=record.getString("id");File dir=directory(location,id);
+            if(failSaveState!=null&&failSaveState.equals(record.optString("state")))throw new IOException("시험용 회의정보 저장 실패");
             preserveLegacy(location,id);
             // 옛 최신 결과는 상태·사용량 갱신보다 먼저 별도 파일로 보존한다.
             record.put("location",location);write(new File(dir,"회의정보.json"),record.toString(2));
         }
     }
+    static void checkNew(JSONObject input)throws IOException {
+        // 새 회의를 만들기 전에 보관함·날짜·출력 형식을 확인한다. 녹음 시작과 녹음 파일 불러오기가 회의를 만들기 전에 함께 쓴다.
+        if(input.has("location")&&!"main".equals(input.optString("location")))throw new IOException("새 녹음은 기본 보관함에만 만들 수 있습니다.");
+        if(!input.optString("date").matches("\\d{4}-\\d{2}-\\d{2}"))throw new IOException("회의 날짜를 확인하세요.");
+        if(!input.has("outputFormat"))return;
+        String format=input.optString("outputFormat");
+        if(!SettingsFile.OUTPUT_FORMATS.contains(format)&&!"custom".equals(format))throw new IOException("출력 형식을 다시 선택하세요.");
+        if("custom".equals(format)){if(!input.has("customFormat"))throw new IOException("내 형식 내용을 확인하세요.");CustomFormat.parse(String.valueOf(input.opt("customFormat")));}
+        // 출력 형식을 비워 보내면 설정의 기본 형식을 쓰므로 여기서는 보내온 값만 본다.
+    }
     JSONObject create(JSONObject input)throws Exception {
+        synchronized(Store.class){JSONObject record=newRecord(input);save(record);return record;}
+    }
+    private JSONObject newRecord(JSONObject input)throws Exception {
+        // 새 회의 기록을 만들기만 하고 저장하지 않는다. 날짜별 차수는 이미 목록에 있는 회의로 센다.
+        checkNew(input);
+        String date=input.optString("date"),format=input.optString("outputFormat",defaultOutputFormat());
+        JSONObject custom=null;
+        if("custom".equals(format)){
+            if(input.has("customFormat"))custom=new JSONObject(CustomFormat.parse(String.valueOf(input.opt("customFormat"))).json());
+            else{custom=customFormat();if(custom==null)format="meeting";}
+        }
+        int sequence=1;File[] dirs=locationDirectory("main").listFiles(File::isDirectory);
+        if(dirs!=null)for(File dir:dirs){try{JSONObject item=load("main",dir.getName());if(date.equals(item.optString("date")))sequence=Math.max(sequence,item.optInt("dailySequence")+1);}catch(Exception ignored){}}
+        JSONObject record=new JSONObject().put("id",UUID.randomUUID().toString()).put("location","main").put("date",date).put("dailySequence",sequence)
+            .put("title",input.optString("title","")).put("outputFormat",format).put("participants",input.optString("participants")).put("notes",notes(input))
+            .put("createdAt",System.currentTimeMillis()).put("state","recording").put("audio",new JSONArray());
+        if(custom!=null)record.put("customFormat",custom);return record;
+    }
+    JSONObject createImported(JSONObject input,List<File> parts)throws Exception {
+        // 녹음 조각과 회의정보를 목록 밖 준비 폴더에 다 담은 뒤 폴더 이름을 바꿔 한 번에 목록에 올린다. 중간에 실패하거나 앱이 끝나도 원음 없는 회의가 목록에 생기지 않는다.
+        if(parts.isEmpty())throw new IOException("불러온 녹음 조각이 없습니다.");
+        File staging=new File(parts.get(0).getParentFile(),"회의-"+UUID.randomUUID());
         synchronized(Store.class){
-            if(input.has("location")&&!"main".equals(input.optString("location")))throw new IOException("새 녹음은 기본 보관함에만 만들 수 있습니다.");
-            String date=input.optString("date");if(!date.matches("\\d{4}-\\d{2}-\\d{2}"))throw new IOException("회의 날짜를 확인하세요.");
-            String format=input.optString("outputFormat",defaultOutputFormat());
-            if(!SettingsFile.OUTPUT_FORMATS.contains(format)&&!"custom".equals(format))throw new IOException("출력 형식을 다시 선택하세요.");
-            JSONObject custom=null;
-            if("custom".equals(format)){
-                if(input.has("customFormat"))custom=new JSONObject(CustomFormat.parse(String.valueOf(input.opt("customFormat"))).json());
-                else if(input.has("outputFormat"))throw new IOException("내 형식 내용을 확인하세요.");
-                else{custom=customFormat();if(custom==null)format="meeting";}
-            }
-            int sequence=1;File[] dirs=locationDirectory("main").listFiles(File::isDirectory);
-            if(dirs!=null)for(File dir:dirs){try{JSONObject item=load("main",dir.getName());if(date.equals(item.optString("date")))sequence=Math.max(sequence,item.optInt("dailySequence")+1);}catch(Exception ignored){}}
-            JSONObject record=new JSONObject().put("id",UUID.randomUUID().toString()).put("location","main").put("date",date).put("dailySequence",sequence)
-                .put("title",input.optString("title","")).put("outputFormat",format).put("participants",input.optString("participants")).put("notes",notes(input))
-                .put("createdAt",System.currentTimeMillis()).put("state","recording").put("audio",new JSONArray());
-            if(custom!=null)record.put("customFormat",custom);save(record);return record;
+            try{return publishImported(stageImported(input,parts,staging),staging);}
+            catch(Exception ex){removeTree(staging);throw ex;}
         }
     }
+    JSONObject stageImported(JSONObject input,List<File> parts,File staging)throws Exception {
+        // 준비 폴더에 조각을 원음-001.m4a부터 옮기고 마지막에 회의정보를 쓴다. 목록은 보관함 폴더만 읽으므로 여기 담긴 것은 아직 보이지 않는다.
+        JSONObject record=newRecord(input);
+        if(!staging.mkdirs()&&!staging.isDirectory())throw new IOException("녹음 파일을 담을 폴더를 만들지 못했습니다.");
+        JSONArray audio=record.getJSONArray("audio");
+        for(int i=0;i<parts.size();i++){
+            String name=String.format(Locale.ROOT,"원음-%03d.m4a",i+1);File part=parts.get(i),target=new File(staging,name);
+            if(!part.renameTo(target)){copyBytes(part,target);part.delete();}
+            audio.put(name);
+        }
+        record.put("state","saved").put("message","녹음 파일을 불러왔습니다.");write(new File(staging,"회의정보.json"),record.toString(2));return record;
+    }
+    JSONObject publishImported(JSONObject record,File staging)throws Exception {
+        File target=directory("main",record.getString("id"));target.getParentFile().mkdirs();
+        if(target.exists()||!staging.renameTo(target))throw new IOException("불러온 녹음으로 회의를 만들지 못했습니다.");
+        return record;
+        // 같은 저장 공간 안의 폴더 이름 바꾸기라 회의 폴더가 한꺼번에 나타난다.
+    }
+    private static void copyBytes(File from,File to)throws IOException {
+        try(InputStream in=new FileInputStream(from);OutputStream out=new FileOutputStream(to)){byte[] b=new byte[65536];for(int n;(n=in.read(b))!=-1;)out.write(b,0,n);}
+    }
+    private static void removeTree(File file){File[] children=file.listFiles();if(children!=null)for(File child:children)removeTree(child);file.delete();}
     String defaultOutputFormat(){String value=context.getSharedPreferences("connection",0).getString("defaultOutputFormat","meeting");return SettingsFile.OUTPUT_FORMATS.contains(value)?value:"meeting";}
     JSONObject history()throws Exception {
-        List<JSONObject> records=new ArrayList<>();int skipped=0;
+        List<JSONObject> records=new ArrayList<>();int skipped=0;String myName=myName();
         for(String location:LOCATIONS){
             File[] dirs=locationDirectory(location).listFiles(File::isDirectory);if(dirs==null)continue;
             for(File dir:dirs){File file=new File(dir,"회의정보.json");if(!file.exists())continue;
                 try{JSONObject record=load(location,dir.getName());String resultId=latestResultId(location,record);
                     if(resultId!=null){record.put("resultId",resultId);JSONObject result=result(location,record.getString("id"),resultId);
                         record.put("title",result.optString("title")).put("outputFormat",meetingFormat(result)).put("refined",!result.optString("feedback").isEmpty());
-                        JSONObject review=loadReview(location,record.getString("id"),resultId);if(review!=null&&!review.isNull("stars"))record.put("stars",review.getInt("stars"));}
+                        JSONObject review=loadReview(location,record.getString("id"),resultId);if(review!=null&&!review.isNull("stars"))record.put("stars",review.getInt("stars"));
+                        // 최신 결과에서 내가 아직 안 끝낸 일의 수다. 내가 누구인지 모르거나 0이면 붙이지 않고, 세다가 오류가 나도 그 줄은 목록에 남긴다.
+                        if(result.optJSONObject("minutes")!=null)try{int open=Todos.mineOpen(result.optString("participants"),effectiveItems(location,record.getString("id"),result),loadMe(location,record.getString("id")),myName);if(open>0)record.put("mineOpen",open);}catch(Exception ignored){}}
                     records.add(record);
                 }catch(Exception ex){skipped++;}
             }
@@ -251,6 +309,35 @@ final class Store {
         java.text.SimpleDateFormat date=new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.ROOT);date.setTimeZone(TimeZone.getTimeZone("UTC"));
         write(file,checked.put("savedAt",date.format(new Date())).toString(2));
     }
+    // 할 일 수정본이 결과와 맞으면 수정본을, 아니면 AI 결과를 쓴다(화면의 Todos.effective와 같다).
+    List<Todos.Item> effectiveItems(String location,String id,JSONObject result)throws Exception {
+        JSONArray actions=result.getJSONObject("minutes").getJSONArray("actions");
+        JSONObject edits=result.has("resultId")?loadTodos(location,id,result.getString("resultId")):null;
+        return todoItems(edits!=null&&edits.getJSONArray("items").length()==actions.length()?edits.getJSONArray("items"):actions);
+    }
+    // 이 회의에서 고른 나는 결과가 아니라 회의 폴더의 나.json에 둔다. 의견을 반영해 새 결과가 생겨도 다시 묻지 않는다.
+    File meFile(String location,String id){return new File(directory(location,id),"나.json");}
+    String loadMe(String location,String id){
+        // 파일이 없거나 읽지 못하면 고른 적이 없는 것으로 본다. 읽지 못한 파일은 지우지 않는다.
+        // 버전은 숫자 1만 받는다. optInt처럼 1.5나 글자 "1"을 1로 바꿔 읽지 않아 Windows와 같은 파일을 같게 판정한다.
+        try{File file=meFile(location,id);if(!file.exists())return null;JSONObject saved=new JSONObject(read(file));Object name=saved.opt("name"),version=saved.opt("version");
+            return version instanceof Number&&((Number)version).doubleValue()==1&&name instanceof String&&!JsonText.trim((String)name).isEmpty()&&((String)name).length()<=Todos.MAX_FIELD?(String)name:null;}
+        catch(Exception ex){return null;}
+    }
+    static final String ME_REJECTED="이 회의의 참석자나 담당자 이름 가운데서 골라 주세요.";
+    String saveMe(String location,String id,String resultId,String name)throws Exception {
+        // 이 회의에서 나를 고르거나(이름) 고른 것을 지운다(null). 보고 있는 결과의 후보에 있는 이름만 받아 후보의 표기로 저장한다.
+        synchronized(Store.class){
+            JSONObject target=analyzedResult(location,id,resultId);File file=meFile(location,id);
+            if(name==null){new AtomicFile(file).delete();if(file.exists())throw new IOException("고른 나를 지우지 못했습니다.");return null;}
+            if(name.length()>Todos.MAX_FIELD)throw new IOException(ME_REJECTED);
+            String found=null;for(String candidate:Todos.candidates(target.optString("participants"),effectiveItems(location,id,target)))if(Todos.sameName(candidate,name)){found=candidate;break;}
+            if(found==null)throw new IOException(ME_REJECTED);
+            java.text.SimpleDateFormat date=new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",Locale.ROOT);date.setTimeZone(TimeZone.getTimeZone("UTC"));
+            write(file,new JSONObject().put("version",1).put("name",found).put("savedAt",date.format(new Date())).toString(2));
+            return found;
+        }
+    }
     private JSONObject analyzedResult(String location,String id,String resultId)throws Exception {
         JSONObject target=result(location,id,resultId);if(target.optJSONObject("minutes")==null||!target.has("resultId"))throw new IOException("정리된 결과에서만 할 일을 고칠 수 있습니다.");return target;
     }
@@ -258,16 +345,6 @@ final class Store {
         synchronized(Store.class){
             JSONObject target=analyzedResult(location,id,resultId);JSONObject checked=checkedTodos(data,target.getJSONObject("minutes").getJSONArray("actions"));
             writeTodos(location,id,target.getString("resultId"),checked);return checked;
-        }
-    }
-    JSONObject setTodoDone(String location,String id,String resultId,int index,boolean done)throws Exception {
-        synchronized(Store.class){
-            JSONObject target=analyzedResult(location,id,resultId);String selected=target.getString("resultId");JSONArray actions=target.getJSONObject("minutes").getJSONArray("actions");JSONObject edits=loadTodos(location,id,selected);
-            JSONArray source=edits!=null&&edits.getJSONArray("items").length()==actions.length()?edits.getJSONArray("items"):actions,items=new JSONArray();
-            if(index<0||index>=source.length())throw invalidTodos();
-            for(int i=0;i<source.length();i++){JSONObject item=new JSONObject(source.getJSONObject(i).toString());item.put("done",i==index?done:item.optBoolean("done"));items.put(item);}
-            JSONObject checked=checkedTodos(new JSONObject().put("finalized",edits!=null&&edits.getBoolean("finalized")).put("items",items),actions);
-            writeTodos(location,id,selected,checked);return checked;
         }
     }
     // 복사·공유·고른 폴더 사본에는 사람이 고친 할 일을 합친 회의록을 쓴다. 보관된 AI 결과는 그대로 둔다.
@@ -278,24 +355,6 @@ final class Store {
         List<Todos.Item> items=todoItems(edits.getJSONArray("items"));JSONArray merged=new JSONArray();
         for(int index:Todos.outputOrder(edits.getBoolean("finalized"),items,todoItems(actions)))merged.put(todoJson(items.get(index),false));
         return new JSONObject(minutes.toString()).put("actions",merged);
-    }
-    // 회의마다 최신 결과에서 아직 끝나지 않은 일만 최신 날짜순으로 모은다.
-    JSONObject openTodos()throws Exception {
-        List<JSONObject> found=new ArrayList<>();int skipped=0;
-        for(String location:LOCATIONS){
-            File[] dirs=locationDirectory(location).listFiles(File::isDirectory);if(dirs==null)continue;
-            for(File dir:dirs){if(!new File(dir,"회의정보.json").exists())continue;
-                try{JSONObject record=load(location,dir.getName());String id=record.getString("id"),resultId=latestResultId(location,record);if(resultId==null)continue;
-                    JSONObject result=result(location,id,resultId),minutes=result.optJSONObject("minutes");if(minutes==null)continue;
-                    JSONArray actions=minutes.getJSONArray("actions");JSONObject edits=loadTodos(location,id,resultId);
-                    JSONArray items=edits!=null&&edits.getJSONArray("items").length()==actions.length()?edits.getJSONArray("items"):actions;
-                    for(int i=0;i<items.length();i++){JSONObject item=items.getJSONObject(i);if(item.optBoolean("done"))continue;
-                        found.add(new JSONObject().put("location",location).put("id",id).put("resultId",resultId).put("title",result.optString("title")).put("date",record.optString("date")).put("createdAt",record.optLong("createdAt")).put("index",i).put("task",item.getString("task")).put("owner",item.opt("owner")).put("due",item.opt("due")));}
-                }catch(Exception ex){skipped++;}
-            }
-        }
-        found.sort((a,b)->{int order=b.optString("date").compareTo(a.optString("date"));return order!=0?order:Long.compare(b.optLong("createdAt"),a.optLong("createdAt"));});
-        JSONArray all=new JSONArray();for(JSONObject item:found)all.put(item);return new JSONObject().put("items",all).put("skipped",skipped);
     }
     private void carryTodos(String location,String id,String previousId,JSONObject minutes,String resultId)throws Exception {
         JSONObject edits=loadTodos(location,id,previousId);if(edits==null)return;

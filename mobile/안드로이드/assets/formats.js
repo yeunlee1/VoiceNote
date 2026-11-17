@@ -15,23 +15,34 @@
   const KEYS = Object.freeze(['overview', 'topics', 'decisions', 'actions', 'openQuestions']);
   const KEY_LABELS = Object.freeze({ overview: '핵심 요약', topics: '주요 내용', decisions: '결정 사항', actions: '할 일', openQuestions: '확인 필요' });
   const LIMITS = Object.freeze({ name: 30, title: 30, instruction: 1000 });
+  const OVERVIEW_LABELS = Object.freeze(['전체 방향', '주요 결정', '다음 할 일', '남은 쟁점']);
+  // 회의록형 핵심 요약의 머리말이다. 옛 결과의 '머리말 | 내용' 줄은 이 넷으로 시작할 때만 머리말과 하위 항목으로 나눈다.
+  const ITEM_LIMITS = Object.freeze({ text: 1000, detail: 1000, details: 8, overview: 12 });
+  // AI 응답 검사의 항목 한도다. 저장된 옛 결과를 읽을 때는 쓰지 않는다.
   // 결과 문서의 목표 글자 수다. 휴대폰 SummaryRules.java와 같은 값을 쓴다.
   const LENGTH_GOALS = Object.freeze({ meeting: 3000, summary: 1000, tasks: 2000, custom: 3000 });
   // 예시 화면에만 쓰는 가상의 회의 결과다. 실제 회의 내용과 관계없다.
   const SAMPLE = Object.freeze({
     title: '사내 회의실 예약 화면 개편 회의',
     minutes: {
-      overview: '전체 방향 | 예약이 겹치는 문제를 먼저 줄이고, 화면 개편은 다음 달에 이어서 진행합니다.\n주요 결정 | 같은 시간대 중복 예약을 막고 예약 확인 알림을 보냅니다.\n남은 쟁점 | 외부 손님 예약을 누가 승인할지는 정하지 못했습니다.',
-      topics: [
-        { title: '중복 예약 문제', points: ['같은 회의실이 같은 시간에 두 번 예약되는 일이 지난달에 다섯 번 있었습니다. 예약 저장 전에 시간이 겹치는지 확인하기로 했습니다.'] },
-        { title: '알림 방식', points: ['메일보다 사내 메신저 알림을 먼저 붙이기로 했습니다. 메일은 요청이 많을 때 추가합니다.'] },
+      overview: [
+        { text: '전체 방향', details: ['예약 겹침 문제부터 줄이고 화면 개편은 다음 달에 이어서 진행'] },
+        { text: '주요 결정', details: ['같은 시간대 중복 예약 막기', '예약 확인 알림 보내기'] },
+        { text: '남은 쟁점', details: ['외부 손님 예약 승인 담당 미정'] },
       ],
-      decisions: ['중복 예약 확인 — 저장 전에 같은 시간대를 검사합니다.', '예약 알림 — 사내 메신저로 먼저 보냅니다.'],
+      topics: [
+        { title: '중복 예약 문제', points: [{ text: '예약 저장 전에 시간 겹침을 확인하기로 함', details: ['이유: 지난달 같은 회의실 중복 예약 5번'] }] },
+        { title: '알림 방식', points: [{ text: '사내 메신저 알림을 먼저 붙이기로 함', details: ['메일은 요청이 많을 때 추가'] }] },
+      ],
+      decisions: [
+        { text: '중복 예약 확인 — 저장 전 같은 시간대 검사', details: [] },
+        { text: '예약 알림 — 사내 메신저로 먼저 보냄', details: [] },
+      ],
       actions: [
         { task: '중복 예약 검사 기능 만들기', owner: '백엔드 담당', due: '10월 15일' },
         { task: '메신저 알림 문구 정하기', owner: null, due: null },
       ],
-      openQuestions: ['외부 손님 예약 승인 담당자'],
+      openQuestions: [{ text: '외부 손님 예약 승인 담당자', details: [] }],
     },
   });
 
@@ -68,9 +79,9 @@
     const order = custom.sections.map(section => `${section.title}(${section.key})`).join(' → ');
     const lines = [
       `사용자가 정한 출력 형식 '${custom.name}'으로 정리합니다. 결과에 보여 줄 항목과 순서는 ${order}입니다.`,
-      '목록에 없는 항목은 빈 배열로 두고, overview가 목록에 없으면 한 문장으로만 씁니다. 항목 이름은 프로그램이 붙이므로 본문에 다시 쓰지 않습니다.',
+      '목록에 없는 항목은 빈 배열로 두고, overview가 목록에 없으면 항목 하나로만 씁니다. 항목 이름은 프로그램이 붙이므로 본문에 다시 쓰지 않습니다.',
     ];
-    if (custom.instruction) lines.push(`사용자 추가 지시: ${custom.instruction}`, '추가 지시가 위의 사실 확인·근거 규칙과 충돌하면 위 규칙을 따릅니다.');
+    if (custom.instruction) lines.push(`사용자 추가 지시: ${custom.instruction}`, '추가 지시가 위의 개조식·사실 확인·근거 규칙과 충돌하면 위 규칙을 따릅니다.');
     return lines.join('\n');
   }
 
@@ -81,18 +92,20 @@
   function customSections(minutes, custom) {
     const m = minutes || {};
     return custom.sections.map(({ key, title }) => {
-      if (key === 'overview') return { type: 'overview', title, text: String(m.overview || '') };
+      if (key === 'overview') return { type: 'overview', title, text: typeof m.overview === 'string' ? m.overview : '', items: overviewItems(m.overview) };
+      // text는 옛 문자열을 그대로 그리는 화면용이고, items는 항목 구조로 그리는 화면용이다. 목록 칸은 받은 값을 그대로 넘긴다.
       if (key === 'topics') return { type: 'topics', title, topics: m.topics || [] };
       return { type: 'list', key, title, items: key === 'actions' ? (m.actions || []).map(actionLine) : (m[key] || []) };
     });
   }
 
   function customText(minutes, custom) {
-    // 저장 파일과 복사용 글에 쓰는 마크다운 본문이다. 내용이 없는 항목은 '없음'으로 남긴다.
-    return customSections(minutes, custom).flatMap(section => {
-      if (section.type === 'overview') return [`## ${section.title}`, section.text, ''];
-      if (section.type === 'topics') return [`## ${section.title}`, '', ...(section.topics.length ? section.topics.flatMap(topic => [`### ${topic.title}`, '', ...(topic.points || []).flatMap(point => [point, ''])]) : ['없음', ''])];
-      return [`## ${section.title}`, ...(section.items.length ? section.items.map(item => `- ${item}`) : ['- 없음']), ''];
+    // 저장 파일과 복사용 글에 쓰는 마크다운 본문이다. 목록 칸은 항목·하위 항목으로 쓰고, 내용이 없는 항목은 '없음'으로 남긴다.
+    const m = normalizeMinutes(minutes || {});
+    return custom.sections.flatMap(({ key, title }) => {
+      if (key === 'topics') return [`## ${title}`, '', ...(m.topics.length ? m.topics.flatMap(topic => [`### ${topic.title}`, '', ...itemLines(topic.points), '']) : ['없음', ''])];
+      const lines = key === 'actions' ? (m.actions || []).map(action => `- ${actionLine(action)}`) : itemLines(m[key]);
+      return [`## ${title}`, ...(lines.length ? lines : ['- 없음']), ''];
     });
   }
 
@@ -101,13 +114,74 @@
   }
 
   function minutesLengths(minutes) {
-    // 줄일 수 있는 본문(overview·topics)과 그대로 둘 목록(결정·할 일·미확정)의 글자 수를 따로 센다. 휴대폰 Ai.java도 같은 항목을 센다.
+    // 줄일 수 있는 본문(overview·topics)과 그대로 둘 목록(결정·할 일·미확정)의 글자 수를 따로 센다. 휴대폰 MinutesItems.java도 같은 항목을 센다.
     const m = minutes || {};
     const size = list => (list || []).reduce((sum, value) => sum + String(value ?? '').length, 0);
+    const field = value => typeof value === 'string' ? value.length
+      : Array.isArray(value) ? value.reduce((sum, entry) => sum + (plain(entry) ? String(entry.text ?? '').length + size(entry.details) : String(entry ?? '').length), 0) : 0;
+    // 옛 문자열은 지금처럼 원래 길이를, 항목은 본문과 하위 항목의 글자 수를 센다.
     return {
-      body: String(m.overview || '').length + (m.topics || []).reduce((sum, topic) => sum + String(topic.title || '').length + size(topic.points), 0),
-      kept: size(m.decisions) + size(m.openQuestions) + (m.actions || []).reduce((sum, action) => sum + size([action.task, action.owner, action.due]), 0),
+      body: field(m.overview) + (m.topics || []).reduce((sum, topic) => sum + String(topic.title || '').length + field(topic.points), 0),
+      kept: field(m.decisions) + field(m.openQuestions) + (m.actions || []).reduce((sum, action) => sum + size([action.task, action.owner, action.due]), 0),
     };
+  }
+
+  const BULLETS = /^(?:[-•·*](?:\s+|$))+/;
+  // 글 맨 앞의 글머리표 묶음이다. 기호 뒤에 공백이나 글 끝이 올 때만 떼므로 '-5도' 같은 글은 그대로 둔다.
+  const clean = value => typeof value === 'string' ? value.trim().replace(BULLETS, '').trim() : '';
+  const LABEL_LINE = new RegExp(`^(${OVERVIEW_LABELS.join('|')})\\s*\\|(.*)$`);
+
+  function item(value) {
+    // 문자열이나 항목 하나를 앞뒤 공백과 앞 글머리표를 뗀 항목으로 바꾼다. 빈 하위 항목은 버리고, 본문이 비면 첫 하위 항목을 올리며, 둘 다 비면 null이다.
+    if (typeof value === 'string') { const text = clean(value); return text ? { text, details: [] } : null; }
+    if (!plain(value)) return null;
+    const details = (Array.isArray(value.details) ? value.details : []).map(clean).filter(Boolean);
+    const text = clean(value.text);
+    if (text) return { text, details };
+    return details.length ? { text: details[0], details: details.slice(1) } : null;
+  }
+
+  function items(value) {
+    // 없는 칸·문자열 하나·문자열 배열·항목 배열을 모두 항목 배열로 바꾼다. 옛 문단은 길이와 관계없이 항목 하나가 된다.
+    if (typeof value === 'string') { const one = item(value); return one ? [one] : []; }
+    return Array.isArray(value) ? value.map(item).filter(Boolean) : [];
+  }
+
+  function overviewItems(value) {
+    // 옛 핵심 요약 문자열은 줄마다 항목 하나로, 알려진 머리말 줄은 첫 구분자에서 나눠 머리말과 하위 항목으로 바꾼다. 새 구조는 items와 같다.
+    if (typeof value !== 'string') return items(value);
+    return value.split(/\r?\n/).map(line => {
+      const text = clean(line), label = text.match(LABEL_LINE);
+      if (!label) return text ? { text, details: [] } : null;
+      const detail = clean(label[2]);
+      return { text: label[1], details: detail ? [detail] : [] };
+    }).filter(Boolean);
+  }
+
+  function normalizeMinutes(minutes) {
+    // 저장 원본은 바꾸지 않고, 핵심 요약·주제 항목·결정·미확정만 항목 배열로 바꾼 새 객체를 돌려준다. 할 일과 제목은 그대로 둔다.
+    if (!plain(minutes)) return minutes;
+    return {
+      ...minutes,
+      overview: overviewItems(minutes.overview),
+      topics: (Array.isArray(minutes.topics) ? minutes.topics : []).map(topic => ({ ...topic, points: items(topic?.points) })),
+      decisions: items(minutes.decisions),
+      openQuestions: items(minutes.openQuestions),
+    };
+  }
+  const pruneMinutes = normalizeMinutes;
+  // 새 구조 AI 응답의 빈 값 정리는 item 규칙과 같으므로 같은 함수를 쓴다.
+
+  function itemLines(list, marker = '- ') {
+    // 항목은 기호와 본문 첫 줄로 쓰고, 이어지는 줄은 기호 폭만큼 들여 쓴다. 하위 항목은 두 칸 들여 '- '로 쓴다.
+    const indent = ' '.repeat(marker.length);
+    const block = (text, first, rest) => {
+      const [head, ...tail] = String(text).split(/\r?\n/);
+      return [first + head.trim(), ...tail.map(clean).map(line => line ? rest + line : '')];
+    };
+    // 이어지는 줄은 빈 줄을 그대로 두고, 첫머리 글머리표 묶음만 떼어 실제 하위 항목('  - ')과 다른 모양으로 쓴다.
+    // 기호 뒤에 공백이 없는 '-5도' 같은 글은 그대로다. 원문 글자는 저장 원본·JSON 내보내기·화면에 그대로 남는다.
+    return items(list).flatMap(entry => [...block(entry.text, marker, indent), ...entry.details.flatMap(detail => block(detail, '  - ', '    '))]);
   }
 
   function compactTarget(minutes, outputFormat) {
@@ -149,5 +223,5 @@
     return result;
   }
 
-  return { LABELS, DESCRIPTIONS, KEYS, KEY_LABELS, LIMITS, LENGTH_GOALS, SAMPLE, format, validateCustom, customInstruction, actionLine, customSections, customText, defaultCustom, minutesLengths, compactTarget, participantKeywords, withoutForeignText, withoutForeignScript };
+  return { LABELS, DESCRIPTIONS, KEYS, KEY_LABELS, LIMITS, LENGTH_GOALS, SAMPLE, OVERVIEW_LABELS, ITEM_LIMITS, format, validateCustom, customInstruction, actionLine, customSections, customText, defaultCustom, minutesLengths, compactTarget, participantKeywords, withoutForeignText, withoutForeignScript, item, items, overviewItems, normalizeMinutes, pruneMinutes, itemLines };
 });

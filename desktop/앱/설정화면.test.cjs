@@ -153,11 +153,13 @@ const html = fs.readFileSync(path.join(__dirname, '화면/index.html'), 'utf8');
 const settingsValue = (change = {}) => ({ summaryModel: 'gpt-6.1-sol', defaultOutputFormat: 'meeting', storage: { audio: '', transcript: '', summary: '' }, ...change });
 const LEGACY = '이전 버전의 프로젝트 설정 파일입니다. 프로젝트 기능이 없어져 불러올 수 없습니다.';
 
-test('설정 버튼이 다섯 구역의 설정 창을 연다(웹뷰가 아니면 회의자료 폴더 구역이 없다)', () => {
+test('설정 버튼이 여섯 구역의 설정 창을 연다(웹뷰가 아니면 회의자료 폴더 구역이 없다)', () => {
   const start = html.indexOf('<dialog id="settings"');
   assert.ok(start > 0, '설정 창이 있다');
   const dialog = html.slice(start, html.indexOf('</dialog>', start));
-  for (const id of ['settings-ai', 'settings-format', 'settings-storage', 'settings-file', 'settings-data']) assert.match(dialog, new RegExp(`id="${id}"`), id);
+  for (const id of ['settings-ai', 'settings-me', 'settings-format', 'settings-storage', 'settings-file', 'settings-data']) assert.match(dialog, new RegExp(`id="${id}"`), id);
+  const at = (id) => dialog.indexOf(`id="${id}"`);
+  assert.ok(at('settings-ai') < at('settings-me') && at('settings-me') < at('settings-format'), '내 이름은 AI 연결 다음, 출력 형식 앞에 둔다');
   assert.match(html, /<button id="open-settings"[^>]*>[\s\S]*?<span>설정<\/span>/);
   assert.doesNotMatch(html, /id="ai-settings"|id="open-ai-settings"|>AI 설정</);
   assert.doesNotMatch(html.slice(0, start), /id="custom-editor"|id="open-data-folder"/, '내 형식 편집과 회의자료 폴더 열기는 설정 창으로 옮긴다');
