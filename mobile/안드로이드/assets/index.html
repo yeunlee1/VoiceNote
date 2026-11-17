@@ -233,6 +233,16 @@
   </div>
 </dialog>
 
+<dialog id="finish-choice" aria-labelledby="finish-choice-title" aria-describedby="finish-choice-note">
+  <div class="modal">
+    <div class="modal-head"><h2 id="finish-choice-title">회의록을 어디까지 만들까요?</h2><button class="link close-dialog" type="button" data-close="finish-choice">닫기</button></div>
+    <p id="finish-choice-note" class="choice-note">음성은 저장했습니다.</p>
+    <div class="choice-list">
+      <button id="finish-minutes" class="button primary choice-button" type="button"><span class="choice-label">회의록까지 만들기</span><span class="choice-hint">전사한 뒤 회의록으로 정리합니다.</span></button>
+      <button id="finish-transcript" class="button choice-button" type="button"><span class="choice-label">전사까지만</span><span class="choice-hint">전사문만 저장합니다. 회의록은 나중에 정리본 탭에서 만들 수 있습니다.</span></button>
+    </div>
+  </div>
+</dialog>
 <dialog id="share" aria-labelledby="share-title">
   <div class="modal">
     <div class="modal-head"><h2 id="share-title">사람별 할 일 복사</h2><button class="link close-dialog" type="button" data-close="share">닫기</button></div>

@@ -7,8 +7,12 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
   const fields = () => evaluate("JSON.stringify(['title','participants','notes'].map(id=>document.getElementById(id).value))");
   const mode = (name, delay = 0) => evaluate(`__mock.importMode=${js(name)};__mock.importDelay=${delay};true`);
   const workflow = text => until(`document.getElementById('workflow').textContent.includes(${js(text)})`);
-  const press = () => evaluate("(()=>{const e=document.getElementById('import-audio');if(e)e.click();return !!e})()");
-  // 단추가 없으면 누르지 않는다. 그때는 아래 확인이 실패로 남고 다른 검사는 이어 간다.
+  const press = async () => {
+    const pressed = await evaluate("(()=>{const e=document.getElementById('import-audio');if(e)e.click();return !!e})()");
+    if (pressed && await until("document.getElementById('finish-choice')?.open")) await evaluate("document.getElementById('finish-minutes').click();true");
+    return pressed;
+  };
+  // 단추가 없으면 누르지 않는다. 그때는 아래 확인이 실패로 남고 다른 검사는 이어 간다. 1.7.0부터는 파일을 고르기 전에 뜨는 창에서 회의록까지를 고른다.
   const attempt = () => evaluate("__mock.calls.filter(c=>c.method==='importAudio').at(-1)?.data?.attemptId||''");
   const serviceState = async (active, meeting) => evaluate(`__mock.active=${active};__mock.meeting=Object.assign(${js(meeting)},{attemptId:${js(await attempt())},createdAt:Date.now()});true`);
   // 서비스가 이번 불러오기의 시도 번호를 실은 상태를 내놓는 것을 흉내 낸다.
