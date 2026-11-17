@@ -60,6 +60,7 @@
       "update-chip", "update-chip-label", "open-about", "about", "about-version", "about-version-meta", "about-update", "update-state", "update-progress-row", "update-progress",
       "update-progress-text", "update-detail", "update-lock", "update-install", "update-check", "update-page", "update-note", "release-list",
       "desk-work", "recording-info", "people-preview", "history-search",
+      "finish-choice", "finish-choice-note", "finish-minutes", "finish-transcript",
     ].map((id) => [id, $(id)]),
   );
   const Formats = window.MeetingFormats;
@@ -122,6 +123,8 @@
     transcriptShown: null,
     access: { accessMode: "none", trialLimit: 3, trialRemaining: 0, mustRegister: true, unlocked: false, trialError: "" },
     analysisId: null,
+    finishMode: null,
+    // 이 회의에서 고른 분석 방식(minutes·transcript)이다. 실패 뒤 다시 시도는 같은 방식으로 이어 가고, 새 회의·다른 회의·불러오기에서 지운다.
     // 같은 녹음(회의)의 결과 목록과 지금 결과의 평가·반영한 의견·사본 저장 결과다. 평가는 결과마다 따로 저장한다.
     versions: [], feedback: "", review: null, reviewStars: null, reviewBusy: false, copies: null, copyBusy: false,
     // 앱 업데이트 상태(서버가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 설치 시작 잠금, 상태 조회 간격이다.
@@ -920,6 +923,7 @@
       state.projectName = "";
       state.recordingMetadata = recordingMetadata();
       state.audioStored = false;
+      state.finishMode = null;
       state.setupOpen = false;
       ui["retry-analysis"].hidden = true;
       state.recordingStopping = false;
@@ -1064,6 +1068,7 @@
     state.projectName = "";
     state.recordingMetadata = null;
     state.audioStored = false;
+    state.finishMode = null;
     ui["retry-analysis"].hidden = false;
     workflow("음성을 불러왔습니다. ‘저장·분석 다시 시도’를 누르면 보관하고 분석합니다.");
     announce(`${files.length}개 파일을 이름 순서대로 불러왔습니다. 전사할 때만 외부로 전송됩니다.`);
@@ -1158,6 +1163,52 @@
       assertAI(signal);
       await settleTrial("finish", state.analysisId);
       announce(withTrialWarning("전사를 받았습니다. 내용을 검토하고 수정할 수 있습니다."));
+    });
+  }
+
+  function chooseFinishMode(note) {
+    // 회의록까지 만들지(minutes) 전사까지만 할지(transcript) 고르는 창을 열고 고른 값을 돌려준다. 고르지 않고 닫으면 null이다.
+    const dialog = ui["finish-choice"];
+    ui["finish-choice-note"].textContent = note;
+    return new Promise((resolve) => {
+      let chosen = null;
+      const minutes = () => { chosen = "minutes"; dialog.close(); };
+      const transcript = () => { chosen = "transcript"; dialog.close(); };
+      const done = () => {
+        ui["finish-minutes"].removeEventListener("click", minutes);
+        ui["finish-transcript"].removeEventListener("click", transcript);
+        dialog.removeEventListener("close", done);
+        resolve(chosen);
+      };
+      ui["finish-minutes"].addEventListener("click", minutes);
+      ui["finish-transcript"].addEventListener("click", transcript);
+      dialog.addEventListener("close", done);
+      openDialog(dialog, document.activeElement);
+      ui["finish-minutes"].focus();
+      // 창의 공통 열기는 닫기 단추에 초점을 주므로, 대부분 고르는 회의록까지 단추로 옮긴다.
+    });
+  }
+
+  async function transcribeOnly() {
+    // 전사까지만 고른 회의다. 원음을 전사해 녹음 기록에 보관하고 회의록은 만들지 않는다. 받아 둔 전사는 다시 요청하지 않는다.
+    return await paidTask(async (signal) => {
+      const transcript = (await requestTranscription(signal)).trim();
+      assertAI(signal);
+      if (!transcript) throw new Error("전사 내용이 비어 있습니다.");
+      await api(`/api/recordings/${state.location}/${state.recordingId}/transcript`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: transcript }), signal,
+      });
+      assertAI(signal);
+      for (const part of state.parts) part.applied = true;
+      state.notesSaved = true;
+      // 전사를 녹음 기록에 보관했으므로 창을 닫거나 다른 회의로 옮길 때 미저장으로 묻지 않는다.
+      await settleTrial("finish", state.analysisId);
+      ui["archive-status"].textContent = "음성과 전사 원문을 저장했습니다.";
+      ui["retry-analysis"].hidden = true;
+      renderMinutes();
+      await loadHistory();
+      workflow("전사를 저장했습니다. 회의록이 필요하면 정리본 탭의 ‘회의록 만들기’를 누르세요.");
+      announce(withTrialWarning("전사를 저장했습니다. 회의록이 필요하면 정리본 탭의 ‘회의록 만들기’를 누르세요."));
     });
   }
 
@@ -2173,6 +2224,7 @@
     state.projectName = "";
     state.recordingMetadata = null;
     state.audioStored = false;
+    state.finishMode = null;
     ui["retry-analysis"].hidden = true;
     ui.title.value = "";
     ui.participants.value = "";
@@ -2304,6 +2356,7 @@
       state.projectName = "";
       state.recordingMetadata = null;
       state.audioStored = false;
+      state.finishMode = null;
       ui.title.value = "";
       ui["output-format"].value = defaultFormat();
       state.meetingCustom = null;
@@ -2405,6 +2458,7 @@
       state.recordingMetadata = { title: meeting.title, date: meeting.date, participants: meeting.participants, notes: meeting.notes || "",
         outputFormat: outputFormat(meeting.outputFormat), ...(state.meetingCustom ? { customFormat: state.meetingCustom } : {}) };
       state.audioStored = parts.length > 0 && (!meeting.expectedParts || meeting.expectedParts === parts.length);
+      state.finishMode = null;
       state.minutes = meeting.minutes;
       state.minutesFormat = outputFormat(meeting.outputFormat);
       state.dailySequence = meeting.dailySequence;
@@ -2588,6 +2642,8 @@
   async function finishMeeting() {
     if (state.flowBusy || state.historyBusy || state.archiveBusy || state.aiController) return;
     state.flowBusy = true;
+    const savedNow = !state.audioStored;
+    // 이번에 원음을 저장하는지(회의 종료·불러오기), 이미 저장된 음성으로 다시 하는지에 따라 고르는 창의 안내를 다르게 쓴다.
     cancelPendingImport();
     ui["retry-analysis"].hidden = true;
     const pending = [...state.recorders].map(context => context.done);
@@ -2621,8 +2677,22 @@
         throw new Error("새로운 API키를 등록하세요.");
       }
       if (!canAnalyze()) throw new Error("음성은 저장했습니다. 아래 ‘설정’에서 API 키를 확인한 뒤 다시 분석하세요.");
-      workflow("음성 저장 완료. 전사와 회의록을 분석하고 있습니다…");
-      await summarize();
+      if (!state.finishMode && state.parts.some((part) => part.blob && !part.applied)) {
+        state.finishMode = await chooseFinishMode(savedNow ? "음성은 저장했습니다." : "저장된 음성으로 만듭니다.");
+        if (!state.finishMode) {
+          workflow("음성은 저장했습니다. 회의록이나 전사가 필요하면 ‘저장·분석 다시 시도’를 누르세요.");
+          ui["retry-analysis"].hidden = false;
+          return;
+        }
+      }
+      // 아직 전사하지 않은 음성이 있으면 이 회의의 분석 방식을 고른다. 고른 방식은 실패 뒤 다시 시도에도 이어 쓰고, 전사가 이미 있으면 묻지 않고 회의록을 만든다.
+      if (state.finishMode === "transcript") {
+        workflow("음성 저장 완료. 전사하고 있습니다…");
+        await transcribeOnly();
+      } else {
+        workflow("음성 저장 완료. 전사와 회의록을 분석하고 있습니다…");
+        await summarize();
+      }
     } catch (error) {
       workflow(`${state.audioStored ? "음성 저장 완료. " : "저장을 완료하지 못했습니다. 창을 닫지 마세요. "}${error.message}`);
       ui["retry-analysis"].hidden = false;
@@ -3224,7 +3294,7 @@
       refresh();
       ui.prepare.focus();
     });
-    for (const dialog of [ui["meeting-detail"], ui.settings, ui["settings-import"], ui.about, ui["share-dialog"]]) bindDialog(dialog);
+    for (const dialog of [ui["meeting-detail"], ui.settings, ui["settings-import"], ui.about, ui["share-dialog"], ui["finish-choice"]]) bindDialog(dialog);
     ui["share-open"].addEventListener("click", () => openShare(ui["share-open"]));
     ui["update-chip"].addEventListener("click", () => openAbout(ui["update-chip"]));
     ui["open-about"].addEventListener("click", () => openAbout(ui["open-about"]));

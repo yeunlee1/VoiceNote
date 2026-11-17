@@ -306,6 +306,20 @@
   </div>
 </dialog>
 
+<dialog id="finish-choice" class="modal modal-choice" aria-labelledby="finish-choice-title" aria-describedby="finish-choice-note">
+  <div class="modal-head">
+    <h2 id="finish-choice-title" class="modal-title">회의록을 어디까지 만들까요?</h2>
+    <button class="icon-button" type="button" data-close aria-label="회의록 만들기 방식 고르기 닫기"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span>닫기</span></button>
+  </div>
+  <div class="modal-body">
+    <p id="finish-choice-note" class="fine-print">음성은 저장했습니다.</p>
+    <div class="choice-list">
+      <button id="finish-minutes" class="button button-primary choice-button" type="button"><span class="choice-label">회의록까지 만들기</span><span class="choice-hint">전사한 뒤 회의록으로 정리합니다.</span></button>
+      <button id="finish-transcript" class="button button-outline choice-button" type="button"><span class="choice-label">전사까지만</span><span class="choice-hint">전사문만 저장합니다. 회의록은 나중에 정리본 탭에서 만들 수 있습니다.</span></button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="settings-import" class="modal" aria-labelledby="settings-import-title">
   <div class="modal-head">
     <h2 id="settings-import-title" class="modal-title">설정 불러오기</h2>

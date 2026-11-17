@@ -5,11 +5,19 @@ const path = require('node:path');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-function fixture(summaryResponse, responses = {}, extra = {}) {
-  const element = (tag = '') => ({ tagName: String(tag).toUpperCase(), value: '', checked: true, hidden: false, disabled: false, open: false, textContent: '', dataset: {}, style: {}, children: [],
-    classList: { add() {}, remove() {} }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
-    addEventListener() {}, setAttribute() {}, removeAttribute() {}, querySelectorAll() { return []; }, querySelector() { return null; },
-    focus() {}, show() { this.open = true; }, showModal() { this.open = true; }, close() { this.open = false; } });
+function fixture(summaryResponse, responses = {}, { finishMode = 'minutes', ...extra } = {}) {
+  const seen = { focused: null };
+  const element = (tag = '') => {
+    const listeners = {};
+    return { tagName: String(tag).toUpperCase(), value: '', checked: true, hidden: false, disabled: false, open: false, textContent: '', dataset: {}, style: {}, children: [],
+      classList: { add() {}, remove() {} }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+      addEventListener(type, handler) { (listeners[type] ||= []).push(handler); }, removeEventListener(type, handler) { listeners[type] = (listeners[type] || []).filter(item => item !== handler); },
+      dispatch(type) { for (const handler of [...(listeners[type] || [])]) handler({ type, target: this, currentTarget: this, preventDefault() {} }); },
+      click() { if (!this.disabled) this.dispatch('click'); },
+      setAttribute() {}, removeAttribute() {}, querySelectorAll() { return []; }, querySelector() { return null; },
+      focus() { seen.focused = this; }, show() { this.open = true; }, showModal() { this.open = true; }, close() { if (!this.open) return; this.open = false; this.dispatch('close'); } };
+  };
+  // 처리기를 기억했다가 click()·close()로 부른다. 고르는 창은 열릴 때 finishMode의 단추를 누르고(null이면 닫고, 'manual'이면 시험이 직접 누름), 열린 때의 안내 글을 choices에 모은다.
   const nodes = new Map(), calls = [], summaryBodies = [], posts = [], requests = [];
   const sandbox = { crypto, Blob, File, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: { MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js') },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
@@ -23,7 +31,7 @@ function fixture(summaryResponse, responses = {}, extra = {}) {
         if (summaryResponse) return summaryResponse(summaryBodies.at(-1), summaryBodies.length);
       }
       if (responses[url] instanceof Response) return responses[url];
-      if (typeof responses[url] === 'function') return responses[url](JSON.parse(options.body));
+      if (typeof responses[url] === 'function') return responses[url](typeof options.body === 'string' ? JSON.parse(options.body) : options.body);
       let body = {};
       if (Object.hasOwn(responses, url)) body = responses[url];
       else if (url === '/api/meetings') body = { meetings: [], skipped: 0 };
@@ -33,14 +41,21 @@ function fixture(summaryResponse, responses = {}, extra = {}) {
     } };
   Object.assign(sandbox.window, extra.window);
   Object.assign(sandbox, { ...extra, window: sandbox.window });
+  const choices = [], node = id => sandbox.document.getElementById(id);
+  node('finish-choice').showModal = function () {
+    this.open = true;
+    choices.push(node('finish-choice-note').textContent);
+    if (finishMode === 'manual') return;
+    queueMicrotask(() => finishMode ? node(finishMode === 'transcript' ? 'finish-transcript' : 'finish-minutes').click() : this.close());
+  };
   // 시험마다 필요한 브라우저 기능(예: 가짜 마이크)을 더한다. window는 이미 있는 내용에 합친다.
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
-  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, renderMinutesInto, plainText, loadHistory, openMeeting, importAudio, finishMeeting, clearLocal, archiveResult, startRecording };\n})();');
+  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, renderMinutesInto, plainText, loadHistory, openMeeting, importAudio, finishMeeting, clearLocal, archiveResult, startRecording, bindDialog };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const { state, ui } = sandbox.review;
   ui.title.value = '시험 회의'; ui.date.value = '2026-09-15';
-  return { ...sandbox.review, calls, summaryBodies, posts, requests, closeStatus: sandbox.window.meetingDesktopStatus };
+  return { ...sandbox.review, calls, summaryBodies, posts, requests, closeStatus: sandbox.window.meetingDesktopStatus, choices, focused: () => seen.focused };
 }
 const texts = node => [node.textContent, ...(node.children || []).flatMap(texts)].filter(Boolean);
 const historyItems = ui => ui['meeting-history'].children.map(button => texts(button).join(' | '));
@@ -642,4 +657,175 @@ test('JSON 저장은 옛 결과도 원본 그대로 내고 화면 그리기·복
   assert.equal(JSON.stringify(exportDocument().minutes), snapshot);
   assert.equal(JSON.stringify(state.minutes), snapshot);
   assert.equal(typeof exportDocument().minutes.overview, 'string');
+});
+
+// 회의 종료·불러오기 뒤 '회의록까지 만들기'와 '전사까지만'을 고르는 창(tm 37)
+const recorded = () => ({ blob: new Blob(['시험 원음'], { type: 'audio/webm' }), saved: false, transcript: '', applied: false });
+const transcriptSaves = posts => posts.filter(post => /^\/api\/recordings\/main\/[0-9a-f-]{36}\/transcript$/.test(post.url));
+const count = (calls, url) => calls.filter(item => item === url).length;
+const waitFor = async (check) => { for (let i = 0; i < 200 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 5)); };
+const failed = message => Response.json({ error: { message } }, { status: 500 });
+const TRANSCRIBED = '전사를 저장했습니다. 회의록이 필요하면 정리본 탭의 ‘회의록 만들기’를 누르세요.';
+
+test('회의 종료 뒤 전사까지만을 고르면 전사를 녹음에 저장하고 요약은 요청하지 않는다', async () => {
+  const { state, ui, finishMeeting, calls, posts, choices } = fixture(null, {}, { finishMode: 'transcript' });
+  state.keyConfigured = true;
+  state.parts = [recorded()];
+  await finishMeeting();
+  assert.deepEqual(choices, ['음성은 저장했습니다.']);
+  assert.equal(count(calls, '/api/transcribe'), 1);
+  assert.equal(count(calls, '/api/summary'), 0);
+  assert.deepEqual(transcriptSaves(posts).map(post => post.body), [{ text: '시험 회의 발언입니다.' }]);
+  assert.equal(count(calls, '/api/trial/finish'), 1);
+  assert.equal(calls.includes('/api/meetings/main'), false, '회의록을 보관하지 않는다');
+  assert.equal(ui['workflow-status'].textContent, TRANSCRIBED);
+  assert.equal(ui['retry-analysis'].hidden, true);
+});
+
+test('회의 종료 뒤 회의록까지를 고르면 저장→전사→전사 저장→요약→결과 저장 순서로 한다', async () => {
+  const { state, finishMeeting, calls, posts, choices } = fixture();
+  state.keyConfigured = true;
+  state.parts = [recorded()];
+  await finishMeeting();
+  assert.deepEqual(choices, ['음성은 저장했습니다.']);
+  const at = pattern => calls.findIndex(url => pattern.test(url));
+  const order = [at(/\/recordings\/main\/[^/]+\/audio\/1$/), calls.indexOf('/api/transcribe'), at(/\/recordings\/main\/[^/]+\/transcript$/), calls.indexOf('/api/summary'), calls.indexOf('/api/meetings/main')];
+  assert.ok(order.every((value, index) => value >= 0 && (index === 0 || value > order[index - 1])), JSON.stringify(calls));
+  assert.deepEqual(transcriptSaves(posts).map(post => post.body), [{ text: '시험 회의 발언입니다.' }]);
+});
+
+test('고르는 창을 닫으면 AI 요청 없이 음성만 저장하고 다시 시도 단추를 보인다', async () => {
+  const { state, ui, finishMeeting, calls, choices } = fixture(null, {}, { finishMode: null });
+  state.keyConfigured = true;
+  state.parts = [recorded()];
+  await finishMeeting();
+  assert.equal(choices.length, 1);
+  assert.equal(state.audioStored, true);
+  assert.equal(count(calls, '/api/transcribe') + count(calls, '/api/summary'), 0);
+  assert.equal(ui['retry-analysis'].hidden, false);
+  assert.equal(ui['workflow-status'].textContent, '음성은 저장했습니다. 회의록이나 전사가 필요하면 ‘저장·분석 다시 시도’를 누르세요.');
+});
+
+test('전사가 이미 있으면 창 없이 회의록을 만든다', async () => {
+  const { state, ui, finishMeeting, calls, choices } = fixture();
+  state.keyConfigured = true;
+  state.parts = [{ ...recorded(), saved: true, applied: true, transcript: '이미 받은 전사' }];
+  state.audioStored = true; state.recordingStored = true; state.recordingId = crypto.randomUUID(); state.location = 'main';
+  ui.transcript.value = '이미 받은 전사';
+  await finishMeeting();
+  assert.equal(choices.length, 0);
+  assert.equal(count(calls, '/api/transcribe'), 0);
+  assert.equal(count(calls, '/api/summary'), 1);
+});
+
+test('원음을 불러온 뒤 저장·분석 다시 시도를 누르면 저장한 뒤 고르는 창이 뜬다', async () => {
+  const { state, importAudio, finishMeeting, calls, choices } = fixture(null, {}, { finishMode: 'transcript' });
+  state.keyConfigured = true;
+  await importAudio(picked(['통화 녹음.m4a', 'audio/x-m4a', mp4Head()]));
+  await finishMeeting();
+  assert.deepEqual(choices, ['음성은 저장했습니다.']);
+  assert.ok(calls.some(url => /\/recordings\/main\/[^/]+\/audio\/1$/.test(url)));
+  assert.equal(count(calls, '/api/transcribe'), 1);
+  assert.equal(count(calls, '/api/summary'), 0);
+});
+
+test('전사까지만에서 전사 요청이 실패하면 체험 예약을 돌려주고 다시 시도는 창 없이 전사만 이어 간다', async () => {
+  let fail = true;
+  const { state, finishMeeting, calls, posts, choices } = fixture(null, { '/api/transcribe': () => fail ? failed('전사 실패') : Response.json({ text: '다시 받은 전사' }) }, { finishMode: 'transcript' });
+  state.keyConfigured = true;
+  state.parts = [recorded()];
+  await finishMeeting();
+  assert.equal(count(calls, '/api/trial/release'), 1);
+  assert.equal(transcriptSaves(posts).length, 0);
+  fail = false;
+  await finishMeeting();
+  assert.equal(choices.length, 1, '다시 시도는 고른 방식을 이어 간다');
+  assert.equal(count(calls, '/api/transcribe'), 2);
+  assert.equal(count(calls, '/api/summary'), 0);
+  assert.deepEqual(transcriptSaves(posts).map(post => post.body), [{ text: '다시 받은 전사' }]);
+});
+
+test('전사까지만에서 전사 저장이 실패해도 다시 시도는 요약하지 않고 전사 저장만 다시 한다', async () => {
+  let fail = true;
+  const id = crypto.randomUUID(), route = `/api/recordings/main/${id}/transcript`;
+  const { state, finishMeeting, calls, choices, closeStatus } = fixture(null, { [route]: () => fail ? failed('저장 실패') : Response.json({}) }, { finishMode: 'transcript' });
+  state.keyConfigured = true; state.location = 'main'; state.recordingId = id;
+  state.parts = [recorded()];
+  await finishMeeting();
+  assert.equal(count(calls, '/api/transcribe'), 1);
+  assert.equal(closeStatus().unsaved, true, '보관하지 못한 전사는 미저장으로 남는다');
+  fail = false;
+  await finishMeeting();
+  assert.equal(choices.length, 1);
+  assert.equal(count(calls, '/api/transcribe'), 1, '받은 전사를 다시 요청하지 않는다');
+  assert.equal(count(calls, '/api/summary'), 0);
+  assert.equal(count(calls, route), 2);
+  assert.equal(closeStatus().unsaved, false);
+});
+
+test('전사만 저장이 끝나면 미저장 경고가 없다', async () => {
+  const { state, finishMeeting, closeStatus } = fixture(null, {}, { finishMode: 'transcript' });
+  state.keyConfigured = true;
+  state.parts = [recorded()];
+  await finishMeeting();
+  assert.equal(closeStatus().unsaved, false);
+});
+
+test('고르는 창이 열려 있는 동안과 원음 저장 전에는 AI를 요청하지 않고 한 번 고르면 분석은 한 번만 시작한다', async () => {
+  const id = crypto.randomUUID();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const { state, ui, finishMeeting, calls, choices, focused } = fixture(null, { [`/api/recordings/main/${id}/audio/1`]: () => gate.then(() => Response.json({})) }, { finishMode: 'manual' });
+  state.keyConfigured = true; state.location = 'main'; state.recordingId = id;
+  state.parts = [recorded()];
+  const running = finishMeeting();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(choices.length, 0, '원음 저장 전에는 창을 띄우지 않는다');
+  release();
+  await waitFor(() => ui['finish-choice'].open);
+  assert.equal(ui['finish-choice'].open, true);
+  assert.equal(focused(), ui['finish-minutes'], '처음 초점은 회의록까지 만들기');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(count(calls, '/api/transcribe') + count(calls, '/api/summary'), 0, '고르기 전에는 AI를 부르지 않는다');
+  ui['finish-transcript'].click();
+  ui['finish-minutes'].click();
+  await running;
+  assert.equal(count(calls, '/api/transcribe'), 1);
+  assert.equal(count(calls, '/api/summary'), 0);
+  assert.equal(ui['finish-choice'].open, false);
+});
+
+test('summarize 우회 경로에서도 회의록까지·전사까지만·닫기가 각각 동작한다', async () => {
+  for (const [mode, transcribed, summarized] of [['minutes', 1, 1], ['transcript', 1, 0], [null, 0, 0]]) {
+    const { state, summarize, calls, choices } = fixture(null, {}, { finishMode: mode });
+    state.keyConfigured = true;
+    state.parts = [recorded()];
+    await summarize();
+    assert.equal(choices.length, 1, String(mode));
+    assert.equal(count(calls, '/api/transcribe'), transcribed, String(mode));
+    assert.equal(count(calls, '/api/summary'), summarized, String(mode));
+  }
+});
+
+test('창의 배경을 눌러 닫으면 AI 요청이 없고 초점이 회의 준비로 돌아간다', async () => {
+  const { state, ui, finishMeeting, bindDialog, calls, focused } = fixture(null, {}, { finishMode: 'manual' });
+  bindDialog(ui['finish-choice']);
+  state.keyConfigured = true;
+  state.parts = [recorded()];
+  const running = finishMeeting();
+  await waitFor(() => ui['finish-choice'].open);
+  ui['finish-choice'].click();
+  await running;
+  assert.equal(count(calls, '/api/transcribe') + count(calls, '/api/summary'), 0);
+  assert.equal(focused(), ui.prepare);
+});
+
+test('키가 없으면 고르는 창을 띄우지 않는다', async () => {
+  const { state, finishMeeting, calls, choices } = fixture();
+  state.keyConfigured = false;
+  state.parts = [recorded()];
+  await finishMeeting();
+  assert.equal(state.audioStored, true);
+  assert.equal(choices.length, 0);
+  assert.equal(count(calls, '/api/transcribe') + count(calls, '/api/summary'), 0);
 });
