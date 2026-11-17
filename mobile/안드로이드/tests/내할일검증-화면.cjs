@@ -161,8 +161,10 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
   await closeResult();
 
   await prepare(); await openFirst(); await press('#tab-minutes');
-  await evaluate("(()=>{__mock.refineOutcome='success';const c=document.getElementById('review-comment');c.value='담당자를 다시 보아 주세요.';c.dispatchEvent(new Event('input'));return true})()");
-  await press('#refine'); await press('#tab-mine');
+  await evaluate("(()=>{__mock.refineOutcome='hold';const c=document.getElementById('review-comment');c.value='담당자를 다시 보아 주세요.';c.dispatchEvent(new Event('input'));return true})()");
+  await press('#refine'); await until("__mock.calls.some(c=>c.method==='refine')"); await press('#tab-mine');
+  await evaluate("__mock.refineOutcome='success';__mock.finishRefine();true");
+  // 내 할 일 탭으로 옮긴 뒤에 의견 반영이 끝나게 해, 끝난 결과가 정리본 탭으로 열리는지 순서와 관계없이 본다.
   check('의견 반영이 끝나 새 결과가 열리면 정리본 탭이다', await until(`document.getElementById('result-version').value==='1235'&&${selected('minutes')}`));
   await closeResult();
 
