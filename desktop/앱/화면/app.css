@@ -128,9 +128,9 @@ body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; 
 .button-danger-quiet:hover:not(:disabled) { background: var(--rec-wash); }
 .button-small { min-height: 36px; padding: 4px 12px; font-size: 13px; }
 .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.modal-choice { width: min(440px, calc(100vw - 32px)); }
+.modal.modal-choice { width: min(440px, calc(100vw - 32px)); }
 .choice-list { display: grid; gap: 8px; }
-.choice-button { display: grid; gap: 2px; justify-items: start; width: 100%; min-height: 56px; padding: 10px 16px; text-align: left; }
+.choice-button { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; justify-items: start; gap: 2px; width: 100%; min-height: 56px; padding: 10px 16px; text-align: left; }
 .choice-label { font-size: 15px; font-weight: 600; }
 .choice-hint { font-size: 13px; font-weight: 400; line-height: 1.45; }
 .button-primary .choice-hint { color: rgba(255, 255, 255, 0.86); }
