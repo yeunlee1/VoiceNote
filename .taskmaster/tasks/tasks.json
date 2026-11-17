@@ -1376,11 +1376,11 @@
         "description": "사용자 원문 \"그리고 회의종료했을때 이거 회의록을 전사문까지만 요청할지. 아니면 회의록요약까지 요청할지 선택해서 진행하게해주면 좋을거같음.\"(2026-11-16). 회의를 끝낼 때 전사만 받을지, 전사 뒤 회의록 요약까지 받을지 고르게 한다. Windows·휴대폰 같은 규칙.",
         "details": "2026-11-16 등록만 함(조사·설계·구현 안 함). tm 36(개조식) 다음 차례로 둠. 볼 것: 지금은 회의 종료 뒤 전사와 요약을 자동으로 이어 함(Windows 회의 종료, 휴대폰 알림의 '회의 종료 · 분석'). 요약이 실패하면 전사를 남기고 '다시 분석'이 저장된 전사로 요약만 다시 하는 경로가 이미 있음. 정할 것: 매번 묻는지 설정에 기본값을 두는지, 전사만 받은 회의에서 나중에 요약을 요청하는 단추, 체험 횟수를 언제 세는지, 회의 시작 전 칸(출력 형식 등)과의 관계. 동작이 바뀌는 일이라 설계부터 하고 짝 확인을 받는다.",
         "testStrategy": "",
-        "status": "in-progress",
+        "status": "done",
         "dependencies": [],
         "priority": "medium",
         "subtasks": [],
-        "updatedAt": "2026-11-17T04:44:44.658Z"
+        "updatedAt": "2026-11-17T07:13:20.717Z"
       },
       {
         "id": "38",
@@ -1388,19 +1388,20 @@
         "description": "사용자 원문 \"수정 완료되면 배포까지 진행해줘\"(2026-11-16, tm 36 진행 중 받음). tm 36(회의 결과 개조식)을 마친 뒤 develop 합치기 → main 병합·vX.Y.Z 태그 → 이 PC 실제 서명 빌드(Windows·Android) → update.json → gh release → 배포준비.ps1로 배포\\최신 갱신까지.",
         "details": "- 절차 근거: 프로젝트-작업규칙.md 「브랜치와 릴리즈」, desktop\\소스안내.txt, 메모리 릴리즈-로컬서명(1.6.0 릴리즈실행.ps1을 본으로 기대값만 바꿈)\n- 현재 develop의 Android 버전은 1.7.0(versionCode 9), 마지막 태그 v1.6.0 — 릴리즈 버전 번호는 배포 단계에서 확인\n- push(develop·main·태그)와 gh release 게시는 저장소·브랜치·커밋을 적어 사용자 허락을 받은 뒤에만 함\n- push 전 깨끗한 복제본에서 데스크톱(VN_PLAYWRIGHT=없음)·모바일·Java·헤드리스 화면 검사, 가상기기 업데이트 시험(7→8 본)\n- tm 37(회의 종료 때 전사만/요약까지 선택)을 이번 배포에 넣을지는 배포 허락을 물을 때 함께 확인\n- 짝 Codex가 배포 산출물(해시·서명·update.json)을 검증",
         "testStrategy": "",
-        "status": "pending",
+        "status": "in-progress",
         "dependencies": [
           "36"
         ],
         "priority": "high",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-17T07:13:21.155Z"
       }
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-17T05:21:21.300Z",
+      "lastModified": "2026-11-17T07:13:21.155Z",
       "taskCount": 38,
-      "completedCount": 18,
+      "completedCount": 19,
       "tags": [
         "master"
       ]
