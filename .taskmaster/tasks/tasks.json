@@ -1395,13 +1395,25 @@
         "priority": "high",
         "subtasks": [],
         "updatedAt": "2026-11-17T07:13:21.155Z"
+      },
+      {
+        "id": "39",
+        "title": "앱·Windows 프로그램을 켜면 새 버전을 감지해 업데이트할지 묻기",
+        "description": "사용자 요청(2026-11-17): \"앱이나, 윈도우에서 프로그램 켜지면 자동으로 업데이트가 있는지 감지해서 새로운버전이 있습니다. 업데이트하시겠습니까? 이렇게 물어볼수있는거 있으면 좋을거같아\". 1.7.0 배포 전에 넣을지 사용자와 정함.",
+        "details": "기존 1.5.0 앱 안 업데이트(Windows 화면 위쪽 알림·지금 업데이트, Android 첫 화면 알림)를 확인한 뒤 켤 때 묻는 창을 설계함. tm 38(1.7.0 배포) 전에 하는지 사용자 결정.",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [],
+        "updatedAt": "2026-11-17T09:16:07.905Z"
       }
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-17T07:13:21.155Z",
-      "taskCount": 38,
-      "completedCount": 19,
+      "lastModified": "2026-11-17T09:16:07.905Z",
+      "taskCount": 39,
+      "completedCount": 20,
       "tags": [
         "master"
       ]
