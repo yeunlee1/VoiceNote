@@ -143,18 +143,20 @@ public final class MainActivity extends Activity {
                 // 회의 시작과 같은 막힘을 본 뒤 문서 선택 창으로 녹음 파일 하나를 고르게 한다. 답은 고른 뒤 audioResult에서 한다.
                 if(MeetingService.active)throw new IOException("이미 진행 중인 회의가 있습니다.");
                 if(Updates.installing())throw new IOException(UPDATE_WAIT);
-                fileIdle();store.requireAccess();Store.notes(data);Store.checkNew(data);
+                fileIdle();store.requireAccess();Store.notes(data);Store.checkNew(data);MeetingService.mode(data.optString("mode",null));
                 {String attempt=data.optString("attemptId");if(attempt.isEmpty()||attempt.length()>128)throw new IOException("불러오기 시도를 확인할 수 없습니다. 다시 시도하세요.");}
                 // 화면은 이 시도 번호가 실린 상태만 이번 불러오기의 것으로 본다.
                 importInput=data;fileRequest=id;
                 runOnUiThread(()->{try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*").putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"audio/*","video/mp4"}),IMPORT_AUDIO);}
                     catch(Exception ex){fileRequest=null;importInput=null;answer(id,null,"파일 선택 창을 열지 못했습니다.");}});break;
-            case "finish": runOnUiThread(()->startService(new Intent(this,MeetingService.class).setAction("finish")));answer(id,true,null);break;
+            case "finish":{boolean hold=data.optBoolean("hold");runOnUiThread(()->startService(new Intent(this,MeetingService.class).setAction("finish").putExtra("hold",hold)));answer(id,true,null);break;}
             case "analyze":{
                 if(MeetingService.active)throw new IOException("진행 중인 회의가 있습니다.");
                 if(Updates.installing())throw new IOException(UPDATE_WAIT);
                 fileIdle();store.requireAccess();
-                String meetingId=data.getString("id");store.load(location,meetingId);launch(id,"analyze",location,meetingId);break;
+                String meetingId=data.getString("id");store.load(location,meetingId);String mode=MeetingService.mode(data.optString("mode",null)),attemptId=data.optString("attemptId");
+                if(attemptId.length()>128)throw new IOException("분석 시도를 확인할 수 없습니다. 다시 시도하세요.");
+                launch(id,"analyze",location,meetingId,mode,attemptId);break;
             }
             case "refine":{
                 if(MeetingService.active)throw new IOException("진행 중인 회의가 있습니다.");
@@ -308,10 +310,13 @@ public final class MainActivity extends Activity {
     private void begin(String id,JSONObject data)throws Exception {
         store.draft();JSONObject record=store.create(data);store.clearDraft();launch(id,"record","main",record.getString("id"));
     }
-    private void launch(String id,String action,String location,String meetingId){
+    private void launch(String id,String action,String location,String meetingId){launch(id,action,location,meetingId,null,null);}
+    private void launch(String id,String action,String location,String meetingId,String mode,String attemptId){
         // 서비스가 active를 켜기 전까지 업데이트 설치가 끼어들지 못하게 시작 중임을 먼저 표시한다.
         MeetingService.startingAt=System.currentTimeMillis();
-        runOnUiThread(()->{try{startForegroundService(new Intent(this,MeetingService.class).setAction(action).putExtra("location",location).putExtra("id",meetingId));answer(id,new JSONObject().put("id",meetingId),null);}catch(Exception ex){MeetingService.startingAt=0;answer(id,null,"녹음 또는 분석 서비스를 시작하지 못했습니다. 마이크 권한을 확인하세요.");}});
+        Intent request=new Intent(this,MeetingService.class).setAction(action).putExtra("location",location).putExtra("id",meetingId);
+        if(mode!=null)request.putExtra("mode",mode);if(attemptId!=null&&!attemptId.isEmpty())request.putExtra("attemptId",attemptId);
+        runOnUiThread(()->{try{startForegroundService(request);answer(id,new JSONObject().put("id",meetingId),null);}catch(Exception ex){MeetingService.startingAt=0;answer(id,null,"녹음 또는 분석 서비스를 시작하지 못했습니다. 마이크 권한을 확인하세요.");}});
     }
     @Override protected void onResume(){super.onResume();Updates.resumed(this);}
     @Override protected void onPause(){Updates.paused(this);super.onPause();}

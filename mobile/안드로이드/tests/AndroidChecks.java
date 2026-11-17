@@ -79,6 +79,34 @@ public final class AndroidChecks extends Instrumentation {
         expect(store.defaultOutputFormat().equals("summary"),"기본 출력 형식만 저장할 수 있다");
         try{store.saveSettings(new JSONObject().put("defaultOutputFormat",new JSONArray().put("meeting")));throw new AssertionError("배열 형식은 거절합니다.");}catch(IOException ex){expect(store.defaultOutputFormat().equals("summary"),"잘못된 기본 형식은 기존 값을 보존한다");}
     }
+    static JSONObject heardRecord(Store store,String title)throws Exception{
+        // 전사하지 않은 원음 하나가 있는 회의 기록을 만든다. 가짜 응답이 받으므로 원음 내용은 실제 소리가 아니어도 된다.
+        JSONObject record=store.create(new JSONObject().put("date","2099-07-01").put("title",title));record.getJSONArray("audio").put("원음-001.m4a");store.save(record);
+        Store.write(new File(store.directory("main",record.getString("id")),"원음-001.m4a"),"합성 원음");return record;
+    }
+    static void transcriptOnlyChecks(Store store)throws Exception{
+        // 전사까지만: 전사 요청만 보내고 전사 파일과 transcribed 상태를 저장본에 남긴다. 받아 둔 조각 전사는 다시 요청하지 않고, 실패하면 체험 예약을 돌려준다.
+        android.content.SharedPreferences prefs=store.context.getSharedPreferences("connection",0);String savedKey=prefs.getString("key",null);
+        TrialAccess previousTrial=Store.trial;String previousSession=Store.sessionKey;
+        try{
+            Store.sessionKey=null;prefs.edit().remove("key").commit();
+            Store.testDefaultKey="sk-mock-default-000000000000";Store.trial=new TrialAccess(new File(store.context.getCacheDir(),"trial-transcript-"+UUID.randomUUID()+".json"));
+            JSONObject record=heardRecord(store,"전사까지만 합성");String id=record.getString("id");File dir=store.directory("main",id);
+            int sent=routes.size();replies.add("{\"text\":\"합성 전사만\"}");
+            new Ai(store,message->{}).transcribeOnly(record);
+            expect(new ArrayList<>(routes.subList(sent,routes.size())).equals(Collections.singletonList("/v1/audio/transcriptions")),"전사까지만은 전사 요청 하나만 보낸다");
+            JSONObject saved=store.load("main",id);
+            expect(saved.getString("state").equals("transcribed")&&saved.getString("message").equals(Ai.TRANSCRIBED)&&Store.read(new File(dir,"전사-001.txt")).equals("합성 전사만")&&Store.read(new File(dir,"전사.txt")).equals("합성 전사만"),"다시 읽은 저장본에 전사 파일과 transcribed 상태가 있다");
+            expect(store.access().trialUsed==1&&store.access().trialReserved==0,"전사까지만도 체험 1회로 센다");
+            sent=routes.size();new Ai(store,message->{}).transcribeOnly(store.load("main",id));
+            expect(routes.size()==sent&&store.access().trialUsed==1,"받아 둔 조각 전사는 다시 요청하지 않고 체험도 더 세지 않는다");
+            JSONObject failing=heardRecord(store,"전사까지만 실패");code=500;replies.add("{}");
+            try{new Ai(store,message->{}).transcribeOnly(failing);throw new AssertionError("전사 실패가 필요합니다.");}catch(IOException ex){expect(ex.getMessage().contains("HTTP 500"),"전사 실패를 알린다");}
+            code=200;expect(store.access().trialUsed==1&&store.access().trialReserved==0&&!store.load("main",failing.getString("id")).optString("state").equals("transcribed"),"전사 실패는 예약을 돌려주고 transcribed로 남기지 않는다");
+            expect(MeetingService.mode(null).equals("minutes")&&MeetingService.mode("").equals("minutes")&&MeetingService.mode("minutes").equals("minutes")&&MeetingService.mode("transcript").equals("transcript"),"분석 방식 값을 읽는다");
+            try{MeetingService.mode("summary");throw new AssertionError("모르는 분석 방식이 통과했습니다.");}catch(IOException ex){expect(ex.getMessage().equals("분석 방식을 확인할 수 없습니다."),"모르는 분석 방식은 거절한다");}
+        }finally{code=200;Store.testDefaultKey=null;Store.trial=previousTrial;Store.sessionKey=previousSession;if(savedKey!=null)prefs.edit().putString("key",savedKey).commit();}
+    }
     static void settingsFormatAndTrial(Store store)throws Exception{
         android.content.SharedPreferences prefs=store.context.getSharedPreferences("connection",0);String savedKey=prefs.getString("key",null);
         TrialAccess previousTrial=Store.trial;String previousSession=Store.sessionKey;
@@ -792,6 +820,57 @@ public final class AndroidChecks extends Instrumentation {
             }
         }finally{code=200;Store.sessionKey=previousKey;MeetingService.snapshot=previousSnapshot;}
     }
+    void launchService(android.content.Intent intent){
+        // 녹음·분석 서비스를 화면이 하듯 앞 화면에서 시작한다. 업데이트 설치가 끼지 않게 시작 중 표시를 먼저 켠다.
+        MeetingService.startingAt=System.currentTimeMillis();runOnMainSync(()->getTargetContext().startForegroundService(intent));
+    }
+    static JSONObject waitState(String id,String state,long millis)throws Exception{
+        // 서비스가 이 회의의 끝 상태(state)를 내놓고 쉬게 될 때까지 기다린다. 제한 시간이 지나면 마지막 상태를 돌려준다.
+        long deadline=System.currentTimeMillis()+millis;JSONObject event;
+        do{Thread.sleep(20);event=new JSONObject(MeetingService.snapshot==null?"{}":MeetingService.snapshot);}while(System.currentTimeMillis()<deadline&&(MeetingService.active||!id.equals(event.optString("id"))||!state.equals(event.optString("state"))));
+        return event;
+    }
+    void serviceModeChecks()throws Exception{
+        // 실제 서비스로 분석 방식을 본다. 화면 analyze의 전사까지만·회의록까지, 불러오기 전사까지만, 회의 종료 hold, 알림 종료(hold 없음)를 다시 읽은 저장본과 AI 경로로 확인한다.
+        android.content.Context context=getTargetContext();Store store=new Store(context);String previousKey=Store.sessionKey,previousSnapshot=MeetingService.snapshot;
+        File source=new File(context.getCacheDir(),"서비스방식-"+UUID.randomUUID());source.mkdirs();
+        try{
+            Store.sessionKey="sk-test-00000000000000000000";showMain();
+            JSONObject heard=heardRecord(store,"합성 서비스 전사만");String id=heard.getString("id");File dir=store.directory("main",id);
+            int sent=routes.size();replies.add("{\"text\":\"서비스 전사\"}");
+            launchService(new android.content.Intent(context,MeetingService.class).setAction("analyze").putExtra("location","main").putExtra("id",id).putExtra("mode","transcript").putExtra("attemptId","합성분석-전사"));
+            JSONObject event=waitState(id,"transcribed",15000);
+            expect("transcribed".equals(event.optString("state"))&&event.optString("attemptId").equals("합성분석-전사")&&new ArrayList<>(routes.subList(sent,routes.size())).equals(Collections.singletonList("/v1/audio/transcriptions")),"화면 analyze transcript는 전사 요청만 보내고 끝 상태에 시도 번호를 싣는다");
+            JSONObject stored=store.load("main",id);
+            expect(stored.getString("state").equals("transcribed")&&!stored.has("attemptId")&&Store.read(new File(dir,"전사.txt")).equals("서비스 전사"),"다시 읽은 저장본이 transcribed이고 시도 번호는 저장하지 않는다");
+            sent=routes.size();replies.add(completed());waitForIdleSync();Thread.sleep(100);
+            launchService(new android.content.Intent(context,MeetingService.class).setAction("analyze").putExtra("location","main").putExtra("id",id).putExtra("attemptId","합성분석-회의록"));
+            event=waitState(id,"complete",15000);
+            expect("complete".equals(event.optString("state"))&&event.optString("attemptId").equals("합성분석-회의록")&&new ArrayList<>(routes.subList(sent,routes.size())).equals(Collections.singletonList("/v1/responses")),"방식 없는 analyze는 회의록까지이고 받아 둔 전사로 요약만 요청한다");
+            sent=routes.size();replies.add("{\"text\":\"불러온 전사\"}");waitForIdleSync();Thread.sleep(100);
+            JSONObject input=new JSONObject().put("date","2099-07-02").put("title","합성 불러오기 전사만").put("participants","김민수").put("notes","").put("outputFormat","meeting").put("attemptId","합성불러오기-전사").put("mode","transcript");
+            launchService(new android.content.Intent(context,MeetingService.class).setAction("import").setData(Uri.fromFile(syntheticAac(source,"전사만.m4a",2))).putExtra("input",input.toString()).putExtra("attemptId","합성불러오기-전사"));
+            long deadline=System.currentTimeMillis()+15000;
+            do{Thread.sleep(20);event=new JSONObject(MeetingService.snapshot);}while(System.currentTimeMillis()<deadline&&(MeetingService.active||!"합성불러오기-전사".equals(event.optString("attemptId"))||!"transcribed".equals(event.optString("state"))));
+            expect("transcribed".equals(event.optString("state"))&&new ArrayList<>(routes.subList(sent,routes.size())).equals(Collections.singletonList("/v1/audio/transcriptions"))&&store.load("main",event.getString("id")).getString("state").equals("transcribed"),"불러오기 transcript는 전사만 하고 다시 읽은 저장본이 transcribed다");
+            getUiAutomation().grantRuntimePermission(context.getPackageName(),android.Manifest.permission.RECORD_AUDIO);
+            for(boolean hold:new boolean[]{true,false}){
+                waitForIdleSync();Thread.sleep(100);
+                JSONObject live=store.create(new JSONObject().put("date","2099-07-03").put("title",hold?"합성 종료 보류":"합성 알림 종료"));String liveId=live.getString("id");
+                launchService(new android.content.Intent(context,MeetingService.class).setAction("record").putExtra("location","main").putExtra("id",liveId));
+                deadline=System.currentTimeMillis()+5000;
+                do{Thread.sleep(20);event=new JSONObject(MeetingService.snapshot);}while(System.currentTimeMillis()<deadline&&!(MeetingService.active&&liveId.equals(event.optString("id"))&&"recording".equals(event.optString("state"))));
+                expect(MeetingService.active&&"recording".equals(event.optString("state")),"합성 녹음이 시작된다 "+event.optString("message"));
+                Thread.sleep(1500);sent=routes.size();
+                if(!hold){replies.add("{\"text\":\"알림 종료 전사\"}");replies.add(completed());}
+                final android.content.Intent finish=new android.content.Intent(context,MeetingService.class).setAction("finish");if(hold)finish.putExtra("hold",true);
+                runOnMainSync(()->context.startService(finish));
+                event=waitState(liveId,hold?"saved":"complete",15000);stored=store.load("main",liveId);
+                if(hold)expect("saved".equals(event.optString("state"))&&routes.size()==sent&&stored.getString("state").equals("saved")&&new File(store.directory("main",liveId),"원음-001.m4a").length()>0,"회의 종료 hold는 녹음을 저장만 하고 AI를 부르지 않는다");
+                else expect("complete".equals(event.optString("state"))&&new ArrayList<>(routes.subList(sent,routes.size())).equals(Arrays.asList("/v1/audio/transcriptions","/v1/responses"))&&stored.getString("state").equals("complete"),"알림 종료(hold 없음)는 지금처럼 전사 뒤 회의록까지 만든다");
+            }
+        }finally{code=200;replies.clear();Store.sessionKey=previousKey;MeetingService.snapshot=previousSnapshot;MeetingService.startingAt=0;deleteTree(source);}
+    }
     void serviceImportChecks()throws Exception{
         // 실제 녹음 서비스로 합성 녹음 파일을 불러와 분석까지 끝내고, 성공·실패로 끝난 상태에도 이번 시도 번호가 남는지 본다. 화면은 이 번호로 이번 불러오기의 끝을 알아본다.
         android.content.Context context=getTargetContext();Store store=new Store(context);String previousKey=Store.sessionKey,previousSnapshot=MeetingService.snapshot;
@@ -1087,7 +1166,7 @@ public final class AndroidChecks extends Instrumentation {
             public InputStream getInputStream()throws IOException{requests.add(new String(sent.toByteArray(),StandardCharsets.UTF_8));routes.add(url.getPath());auths.add(lastAuth);String next=replies.poll();if(next==null)throw new IOException("Unexpected network request");return new ByteArrayInputStream(next.getBytes(StandardCharsets.UTF_8));}
             public InputStream getErrorStream(){try{return getInputStream();}catch(IOException ex){throw new RuntimeException(ex);}}
         };}}:null);
-        if(probe.startsWith("f-")){if(probe.equals("f-attempt"))serviceAttemptChecks();else if(probe.equals("f-import"))serviceImportChecks();else dispatchFCopyChecks();result.putString("stream","PASS "+checks+" Dispatch F checks: "+probe+"\n");finish(-1,result);return;}
+        if(probe.startsWith("f-")){if(probe.equals("f-attempt"))serviceAttemptChecks();else if(probe.equals("f-import"))serviceImportChecks();else if(probe.equals("f-mode"))serviceModeChecks();else dispatchFCopyChecks();result.putString("stream","PASS "+checks+" Dispatch F checks: "+probe+"\n");finish(-1,result);return;}
         if(probe.startsWith("g-")){copyInspectionChecks(new Store(testContext()),probe.equals("g-file"));result.putString("stream","PASS "+checks+" Dispatch G checks\n");finish(-1,result);return;}
         Store store=new Store(testContext());
         String previousModel=store.summaryModel();store.summaryModel(null);
@@ -1140,6 +1219,7 @@ public final class AndroidChecks extends Instrumentation {
         expect(record.getString("state").equals("complete"),"analysis finished");
         expect(replies.isEmpty(),"all mock responses consumed");
         settingsFormatAndTrial(store);
+        transcriptOnlyChecks(store);
         requestContract(new Store(testContext()));
         refinementChecks(new Store(testContext()));
         shortenChecks(new Store(testContext()));

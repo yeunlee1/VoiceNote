@@ -26,15 +26,15 @@ public final class MeetingService extends Service {
         if(intent==null){stopSelf();return START_NOT_STICKY;}
         String action=intent.getAction();
         try{
-            if("finish".equals(action)){if(recorder!=null){stopAudio();analyze();}else if(!active)stopSelf();return START_NOT_STICKY;}
+            if("finish".equals(action)){if(recorder!=null){stopAudio();if(intent.getBooleanExtra("hold",false))hold();else analyze("minutes");}else if(!active)stopSelf();return START_NOT_STICKY;}
             if(active)return START_NOT_STICKY;
             if("import".equals(action)){startImport(intent);return START_NOT_STICKY;}
-            refining="refine".equals(action);attemptId=refining?intent.getStringExtra("attemptId"):null;
+            refining="refine".equals(action);attemptId=(refining||"analyze".equals(action))?intent.getStringExtra("attemptId"):null;
             record=new JSONObject().put("location",intent.getStringExtra("location")).put("id",intent.getStringExtra("id"));
             record=store.load(intent.getStringExtra("location"),intent.getStringExtra("id"));analyzing=refining||"analyze".equals(action);active=true;
             show(analyzing?"회의록 분석 준비 중":"회의 녹음 중",!analyzing);
             wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"MeetingJournal:work");wake.acquire(4*60*60*1000L);
-            if(refining)refine(intent.getStringExtra("resultId"),intent.getStringExtra("feedback"));else if(analyzing)analyze();else startAudio();
+            if(refining)refine(intent.getStringExtra("resultId"),intent.getStringExtra("feedback"));else if(analyzing)analyze(mode(intent.getStringExtra("mode")));else startAudio();
         }catch(Exception ex){fail(ex);}
         finally{startingAt=0;}
         return START_NOT_STICKY;
@@ -61,9 +61,20 @@ public final class MeetingService extends Service {
         if(audioFile==null||audioFile.length()==0)throw new IOException("저장된 음성이 없습니다.");
         status("saved","음성 저장 완료");
     }
-    private void analyze() throws Exception {
-        analyzing=true;show("회의록 분석 중",false);status("analyzing","음성 저장 완료 · 분석을 시작합니다.");
-        worker.submit(()->{try{new Ai(store,message->{status("analyzing",message);show(message,false);}).run(record);publish();}catch(Exception ex){try{status("failed",safeMessage(ex));}catch(Exception ignored){}}finally{active=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}});
+    static String mode(String value) throws IOException {
+        // 화면이 고른 분석 방식이다. 값이 없으면 지금처럼 회의록까지(minutes)이고, 전사까지만(transcript) 말고 다른 값은 받지 않는다.
+        if(value==null||value.isEmpty()||"minutes".equals(value))return "minutes";
+        if("transcript".equals(value))return "transcript";
+        throw new IOException("분석 방식을 확인할 수 없습니다.");
+    }
+    private void hold(){
+        // 화면의 회의 종료는 녹음을 저장만 하고 서비스를 끝낸다. 화면이 방식을 고른 뒤 analyze로 다시 시작한다.
+        active=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();
+    }
+    private void analyze(String mode) throws Exception {
+        boolean transcriptOnly="transcript".equals(mode);
+        analyzing=true;show(transcriptOnly?"전사 중":"회의록 분석 중",false);status("analyzing",transcriptOnly?"음성 저장 완료 · 전사를 시작합니다.":"음성 저장 완료 · 분석을 시작합니다.");
+        worker.submit(()->{try{Ai ai=new Ai(store,message->{status("analyzing",message);show(message,false);});if(transcriptOnly)ai.transcribeOnly(record);else ai.run(record);publish();}catch(Exception ex){try{status("failed",safeMessage(ex));}catch(Exception ignored){}}finally{active=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}});
     }
     static final String PREPARING="녹음 파일을 준비하는 중";
     private void startImport(Intent intent)throws Exception {
@@ -87,7 +98,7 @@ public final class MeetingService extends Service {
             record=store.createImported(fields,parts);
             try{store.clearDraft();}catch(Exception ignored){}
             // 회의를 실제로 만든 뒤에야 작성 중 초안을 지운다. 그 전에 실패하면 사용자가 적은 칸 값이 초안에 남는다. 초안을 못 지워도 회의는 그대로 분석한다.
-            analyze();
+            analyze(mode(fields.optString("mode",null)));
         }catch(Exception ex){fail(ex);}
         finally{AudioImport.cleanTemp(this);}
         // 화면에서 확인한 뒤 파일이 바뀌었을 수 있어 서비스에서도 다시 판정한다. 남은 임시 폴더는 성공·실패와 관계없이 지운다.
