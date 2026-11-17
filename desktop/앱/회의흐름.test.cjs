@@ -829,3 +829,43 @@ test('키가 없으면 고르는 창을 띄우지 않는다', async () => {
   assert.equal(choices.length, 0);
   assert.equal(count(calls, '/api/transcribe') + count(calls, '/api/summary'), 0);
 });
+
+// 전사만 저장한 회의의 목록 꼬리표와 정리본 탭의 회의록 만들기(tm 37)
+const draftMeeting = (extra = {}) => ({ id: extra.id, location: 'main', title: '고객 응답 회의', date: '2026-11-17', participants: '김민수, 박서연', transcript: '전사만 저장한 발언입니다.',
+  minutes: null, dailySequence: 1, outputFormat: 'meeting', audio: [{ index: 1 }], expectedParts: 1, ...extra });
+
+test('전사만 저장한 회의는 목록에 전사만으로 보이고 음성만 있는 회의는 분석 대기 그대로다', async () => {
+  const { ui, loadHistory } = fixture(null, { '/api/meetings': { skipped: 0, meetings: [
+    { location: 'main', id: crypto.randomUUID(), title: '첫 회의', date: '2026-11-17', dailySequence: 1, outputFormat: 'meeting', analyzed: false, transcribed: true, audioCount: 1, expectedParts: 1, refined: false },
+    { location: 'main', id: crypto.randomUUID(), title: '둘째 회의', date: '2026-11-17', dailySequence: 2, outputFormat: 'meeting', analyzed: false, audioCount: 1, expectedParts: 1, refined: false }] } });
+  await loadHistory();
+  const [heard, blank] = historyItems(ui);
+  assert.match(heard, /1차 · 전사만 · 음성 1개/);
+  assert.match(blank, /2차 · 분석 대기 · 음성 1개/);
+});
+
+test('전사만 저장한 회의를 열면 정리본 탭에 안내와 회의록 만들기 단추가 보이고 누르면 요약만 요청한다', async () => {
+  const id = crypto.randomUUID();
+  const { state, ui, openMeeting, calls } = fixture(null, { [`/api/meetings/main/${id}`]: { meeting: draftMeeting({ id }), versions: [] } });
+  state.keyConfigured = true;
+  await openMeeting('main', id);
+  assert.equal(state.resultTab, 'minutes');
+  assert.ok(texts(ui.minutes).includes('전사만 저장한 회의입니다. 전사문은 옆 ‘전사문’ 탭에 있습니다.'), JSON.stringify(texts(ui.minutes)));
+  const make = walk(ui.minutes).find(node => node.tagName === 'BUTTON' && String(node.className).includes('make-minutes'));
+  assert.equal(make?.textContent, '회의록 만들기');
+  make.click();
+  make.click();
+  await waitFor(() => state.resultStored);
+  assert.equal(count(calls, '/api/transcribe'), 0, '저장된 전사를 다시 쓴다');
+  assert.equal(count(calls, '/api/summary'), 1, '빠르게 두 번 눌러도 요약은 한 번');
+  assert.ok(calls.includes('/api/meetings/main'));
+});
+
+test('음성만 있는 회의의 정리본 안내는 실제 상자 이름을 가리킨다', async () => {
+  const id = crypto.randomUUID();
+  const { state, ui, openMeeting } = fixture(null, { [`/api/meetings/main/${id}`]: { meeting: draftMeeting({ id, transcript: '' }), versions: [] } });
+  await openMeeting('main', id);
+  assert.equal(state.resultTab, 'minutes');
+  assert.deepEqual(texts(ui.minutes), ['아직 회의록이 없습니다. 전사문 탭의 ‘전사 고치기 · 다시 분석’에서 분석을 요청할 수 있습니다.']);
+  assert.equal(walk(ui.minutes).some(node => String(node.className).includes('make-minutes')), false);
+});

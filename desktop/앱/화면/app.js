@@ -542,6 +542,7 @@
     ui["save-archive"].disabled = locked || !state.minutes || stale() || state.resultStored;
     ui["save-archive"].hidden = !state.minutes || state.resultStored;
     ui["retry-analysis"].disabled = locked;
+    for (const button of ui.minutes.querySelectorAll(".make-minutes")) button.disabled = locked;
     ui.clear.disabled = locked;
     ui.shutdown.disabled = state.flowBusy || state.archiveBusy || state.historyBusy;
     for (const id of ["title", "date", "output-format", "participants", "meeting-notes", "transcript", "audio-file"])
@@ -1451,11 +1452,22 @@
     ui.minutes.replaceChildren();
     const minutes = state.minutes;
     if (!minutes) {
+      if (state.audioStored && ui.transcript.value.trim()) {
+        const box = element("div", "", "empty-state transcript-only");
+        const make = element("button", "회의록 만들기", "button button-primary make-minutes");
+        make.type = "button";
+        make.disabled = Boolean(state.aiController || state.flowBusy);
+        make.addEventListener("click", () => { if (!todoHolding()) summarize(true); });
+        box.append(element("p", "전사만 저장한 회의입니다. 전사문은 옆 ‘전사문’ 탭에 있습니다."), make);
+        ui.minutes.append(box);
+        // 전사만 저장한 회의는 저장된 전사로 요약만 요청한다. 같은 회의의 분석이 도는 동안에는 누를 수 없다.
+        return;
+      }
       ui.minutes.append(
         element(
           "p",
           ui.transcript.value.trim() || state.audioStored
-          ? "아직 회의록이 없습니다. 아래 ‘전사 원문 확인 · 다시 분석’에서 분석을 다시 요청할 수 있습니다."
+          ? "아직 회의록이 없습니다. 전사문 탭의 ‘전사 고치기 · 다시 분석’에서 분석을 요청할 수 있습니다."
           : "회의록을 만들면 회의 핵심, 다음 할 일, 합의된 방향, 주제별 설명, 미확정 사항이 여기에 표시됩니다.",
           "empty-state",
         ),
@@ -1932,11 +1944,11 @@
   const RESULT_TABS = ["mine", "minutes", "transcript"];
 
   function availableTab(wanted) {
-    // 내 할 일 탭은 정리본이 있는 결과에만 있다. 바라는 탭을 열 수 없으면 지금처럼 정리본을, 정리본 없이 전사만 있으면 전사문을 연다.
+    // 내 할 일 탭은 정리본이 있는 결과에만 있다. 바라는 탭을 열 수 없으면 정리본 탭을 연다. 정리본이 없으면 그 탭에 전사만 저장한 회의의 안내와 회의록 만들기 단추가 있다.
     const transcript = Boolean(ui.transcript.value.trim());
     if (wanted === "mine" && state.minutes) return "mine";
     if (wanted === "transcript" && transcript) return "transcript";
-    return state.minutes || !transcript ? "minutes" : "transcript";
+    return "minutes";
   }
 
   function showResultTab(tab) {
@@ -2384,7 +2396,7 @@
         const button = element("button", "", "history-button");
         button.type = "button";
         const format = outputFormat(meeting.outputFormat);
-        const status = [`${meeting.date || "날짜 미입력"} · ${meeting.dailySequence || 1}차`, meeting.analyzed ? (format === "meeting" ? "회의록" : formatLabels[format]) : "분석 대기", `음성 ${meeting.audioCount}개`, meeting.stars && `별 ${meeting.stars}개`];
+        const status = [`${meeting.date || "날짜 미입력"} · ${meeting.dailySequence || 1}차`, meeting.analyzed ? (format === "meeting" ? "회의록" : formatLabels[format]) : meeting.transcribed ? "전사만" : "분석 대기", `음성 ${meeting.audioCount}개`, meeting.stars && `별 ${meeting.stars}개`];
         const title = meeting.title || "제목 미정 회의";
         const name = element("strong", title), top = element("span", "", "history-top");
         name.title = title;
