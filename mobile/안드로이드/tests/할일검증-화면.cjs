@@ -71,8 +71,9 @@ module.exports = async ({ viewport, load, key, click, evaluate, until, wait, sho
   await load(); await key();
   await evaluate("for(let i=0;i<12;i++)__mock.history.push({id:'aaaaaaaa-0000-4000-8000-'+String(i).padStart(12,'0'),location:'main',resultId:'1234',date:'2026-10-'+String(10+i),dailySequence:1,title:'목록 확인 '+i,state:'complete',outputFormat:'meeting',createdAt:1,audio:[]})");
   await evaluate(`__mock.todoActions=${actions};__mock.todoParticipants='김민수, 박서연';__mock.savedTodos={}`);
-  await click('#refresh'); await click('#tab-records'); await wait(80);
-  const listY = await evaluate("(()=>{document.querySelectorAll('#history button')[8].scrollIntoView({block:'center'});return Math.round(scrollY)})()");
+  await click('#refresh'); await click('#tab-records'); await until("document.querySelectorAll('#history button').length>=9");
+  // 목록 새로 읽기가 끝나 아홉째 줄이 생길 때까지 기다린다. 고정 대기는 느린 실행에서 줄이 모자라 멈췄다.
+  const listY =await evaluate("(()=>{document.querySelectorAll('#history button')[8].scrollIntoView({block:'center'});return Math.round(scrollY)})()");
   const reads = () => evaluate("__mock.calls.filter(c=>c.method==='history').length"), readsBefore = await reads();
   await evaluate("document.querySelectorAll('#history button')[8].click()"); await wait(150);
   await evaluate(`{const c=document.querySelector('[data-todo-focus="0:check"]');c.checked=true;c.dispatchEvent(new Event('change'))}`); await wait(200);

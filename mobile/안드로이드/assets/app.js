@@ -4,6 +4,8 @@
   const state = { settings: {}, connection: { keyConfigured: false, keySource: 'none', models: [], summaryModel: '' }, active: false, recording: false, busy: false, opened: null, lastState: '', lastHistory: '', lastMeetingState: '', removeArmed: false, deleteArmed: false, opener: null,
     // 앱 업데이트 상태(네이티브가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 실행 중 여부와 마지막 오류다.
     update: null, updateIntent: false, updateRunning: false, updateError: '',
+    // 켤 때 새 버전을 이번 실행에서 이미 물었는지(나중에·업데이트·프로그램 정보 열기 모두 포함), 묻기 판단을 미뤄 둔 중인지다.
+    updateAsked: false, updateAskQueued: false,
     // 업데이트로 앱이 닫히면 사라질 입력이다. 평가 의견·별점, 내 형식 편집, 회의 준비 저장 실패를 따로 기억한다.
     reviewDirty: false, customDirty: false, draftSaving: null, draftFailed: false,
     // 지금 보는 탭과, 사람이 고친 할 일 수정본·고치는 중인 줄·저장 중인 요청 수다.
@@ -99,6 +101,8 @@
     // 받는 동안 녹음 시작·분석·저장 같은 작업이 끼면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 '설치'를 다시 누른다.
     if (state.updateIntent && (state.active || state.refining || state.busy)) state.updateIntent = false;
     renderBlockers(); renderStage(); renderUpdate();
+    askUpdateSoon();
+    // 녹음·분석·작업이 끝나 미뤄 둔 업데이트 묻기를 다시 판단한다.
   }
   // 체험 횟수를 다 쓴 뒤 분석을 시도하면 안내 문구를 보이고 AI 설정을 연다.
   async function task(work) { if (state.busy) return; state.busy = true; lock(); let exhausted = false; try { await work(); } catch (error) { message(error.message); exhausted = error.message === Flow.EXHAUSTED_MESSAGE; } finally { state.busy = false; lock(); } if (exhausted && !$('settings').open) openSettings(); }
@@ -119,6 +123,8 @@
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { const opener = dialog.returnFocus; dialog.returnFocus = null; if (opener && document.contains(opener) && !opener.hidden) opener.focus(); else if (dialog.id === 'about') $('open-settings').focus(); else if (!$('result').hidden) focusResultControl(opener?.dataset?.todoFocus); });
   // 결과 화면에서 연 창의 단추가 그사이 다시 그려졌으면 같은 열쇠의 새 단추로 돌아가고, 그런 단추가 없으면(설정에 내 이름을 적어 나를 알게 된 경우 등) 내 할 일의 바꾸기·후보나 보고 있던 탭으로 간다.
   for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => $(button.dataset.close).close());
+  for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => askUpdateSoon());
+  // 다른 창이 열려 있어 미뤄 둔 업데이트 묻기를 창이 닫힐 때 다시 판단한다.
 
   function renderAccess() {
     const c = state.connection, text = Flow.accessText(c), ready = Flow.canAnalyze(c);
@@ -972,7 +978,7 @@
     const before = state.update?.status;
     state.update = update;
     if (update.status === 'available' && update.error) state.updateIntent = false;
-    renderUpdate();
+    renderUpdate(); askUpdateSoon();
     // 한 번 누른 '지금 업데이트'는 받기가 끝나면 설치 화면까지 이어 간다. 그 사이 회의를 시작했으면 이유를 보이고 멈춘다.
     if (update.status === 'ready' && before !== 'ready' && state.updateIntent) runUpdate('install');
   }
@@ -1003,6 +1009,7 @@
   }
   async function runUpdate(kind) {
     if (state.updateRunning || !kind) return;
+    state.updateAsked = true;
     state.updateRunning = true; state.updateError = ''; renderUpdate();
     try {
       if (kind === 'download') {
@@ -1043,7 +1050,32 @@
       return item;
     }));
   }
-  function openAbout(opener) { renderAbout(); renderUpdate(); openDialog('about', opener); }
+  function openAbout(opener) { state.updateAsked = true; renderAbout(); renderUpdate(); openDialog('about', opener); }
+  // 프로그램 정보에서 업데이트를 이미 보았으면 이번 실행에서는 따로 묻지 않는다.
+  function askUpdateSoon() {
+    // 하던 화면 갱신이나 창 열기가 끝난 뒤 판단한다. 다른 창을 여는 중이면 그 창이 열린 것을 보고 미룬다.
+    if (state.updateAsked || state.updateAskQueued) return;
+    state.updateAskQueued = true;
+    Promise.resolve().then(() => { state.updateAskQueued = false; askUpdate(); });
+  }
+  function askUpdate() {
+    // 켤 때 확인한 새 버전을 앱에서 바로 받을 수 있으면 이번 실행에서 한 번 업데이트할지 묻는다.
+    // 녹음·분석·작업 중이거나 다른 창이 열려 있으면 미뤘다가, 그 일이 끝나 화면이 바뀌거나 창이 닫힐 때 다시 판단한다.
+    const update = state.update;
+    if (state.updateAsked || update?.status !== 'available' || update.error) return;
+    if (state.busy || state.active || state.refining || state.importing) return;
+    if ([...document.querySelectorAll('dialog')].some(dialog => dialog.open)) return;
+    state.updateAsked = true;
+    setText($('update-ask-version'), update.version || ''); setText($('update-ask-current'), update.currentVersion || '');
+    openDialog('update-ask', document.activeElement);
+    // 묻지 않고 뜬 창이라 처음 초점은 다른 창처럼 맨 위 닫기에 둔다.
+  }
+  async function acceptUpdate() {
+    // 프로그램 정보의 '지금 업데이트'와 같이 받는다. 받는 정도와 설치를 막는 이유는 프로그램 정보에서 보인다.
+    $('update-ask').close(); openAbout($('update-note')); await runUpdate('download');
+  }
+  $('update-ask-yes').onclick = acceptUpdate;
+  $('update-ask-notes').onclick = () => call('updatePage').catch(error => message(error.message));
   $('update-note').onclick = event => openAbout(event.currentTarget);
   $('open-about').onclick = event => openAbout(event.currentTarget);
   $('update-action').onclick = () => runUpdate($('update-action').dataset.kind);

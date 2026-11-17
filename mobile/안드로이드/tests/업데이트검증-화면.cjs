@@ -33,6 +33,8 @@ module.exports = async ({ viewport, load, click, evaluate, until, wait, shot, ch
 
     // 새 버전이 있으면 첫 화면 본문 흐름 안에 안내 줄을 보이고, 누르면 프로그램 정보가 열린다.
     await load('?update=available');
+    // 1.7.0부터 켤 때 새 버전이 있으면 업데이트할지 묻는 창이 먼저 뜬다. 이 검사는 안내 줄과 프로그램 정보를 보므로 나중에로 닫는다.
+    await until("document.getElementById('update-ask').open"); await click('#update-ask-later');
     check(width + 'px 새 버전이 있으면 첫 화면에 안내 줄을 보인다', (await shown('update-note')) && (await text('update-note-label')) === '새 버전 1.7.1');
     check(width + 'px 안내 줄은 조작부 위 본문 흐름 안에 있고 가로로 넘치지 않는다', await evaluate("(()=>{const e=document.getElementById('update-note'),n=e.getBoundingClientRect(),c=document.querySelector('.console').getBoundingClientRect(),w=document.documentElement.clientWidth;return n.bottom<=c.top+0.5&&n.left>=0&&n.right<=w&&n.height>=44&&document.documentElement.scrollWidth<=w&&getComputedStyle(e).position==='static'})()"));
     check(width + 'px 안내 줄은 읽기 프로그램에 무엇을 여는지 알린다', await evaluate("document.getElementById('update-note').getAttribute('aria-label')==='새 버전 1.7.1, 프로그램 정보 열기'"));
@@ -52,6 +54,8 @@ module.exports = async ({ viewport, load, click, evaluate, until, wait, shot, ch
 
     // 받는 동안 녹음이 시작됐다가 받기 전에 끝나도, 받은 뒤에는 사람이 설치를 다시 누르게 한다.
     await load('?update=available');
+    // 1.7.0부터 켤 때 새 버전이 있으면 업데이트할지 묻는 창이 먼저 뜬다. 이 검사는 안내 줄과 프로그램 정보를 보므로 나중에로 닫는다.
+    await until("document.getElementById('update-ask').open"); await click('#update-ask-later');
     await click('#update-note');
     await click('#update-action');
     await until("!document.getElementById('update-progress-row').hidden");

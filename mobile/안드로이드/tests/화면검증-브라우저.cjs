@@ -58,6 +58,7 @@ function check(label,ok,detail){results.push((ok?'PASS ':'FAIL ')+label+(detail?
     await require('./내할일검증-화면.cjs')({viewport,load,key,tap,evaluate,until,wait,shot,check});
     await require('./후속검증-화면.cjs')({viewport,load,key,click,evaluate,until,wait,shot,check});
     await require('./업데이트검증-화면.cjs')({viewport,load,click,evaluate,until,wait,shot,check});
+    await require('./업데이트묻기검증-화면.cjs')({viewport,load,tap,evaluate,until,wait,shot,check});
     await require('./불러오기검증-화면.cjs')({viewport,load,key,tap,evaluate,until,wait,shot,check});
     await require('./개조식검증-화면.cjs')({viewport,load,key,click,evaluate,wait,shot,check});
     await require('./전사만검증-화면.cjs')({viewport,load,key,tap,evaluate,until,wait,shot,check});

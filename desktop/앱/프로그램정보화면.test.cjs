@@ -419,3 +419,122 @@ test('상단 표시로 연 프로그램 정보를 닫을 때 그 표시가 숨�
   review.ui.about.close();
   assert.equal(review.focused.at(-1), review.ui['open-settings']);
 });
+
+// 켤 때 새 버전을 확인하면 업데이트할지 묻는 창(tm 39)
+test('켜서 새 버전이 확인되면 업데이트할지 묻는 창을 열고 새 버전과 지금 버전을 보인다', async () => {
+  const review = fixture({ updates: [snapshot('available')] });
+  await review.loadUpdate();
+  assert.equal(review.ui['update-ask'].open, true);
+  assert.equal(review.ui['update-ask-version'].textContent, '1.5.1');
+  assert.equal(review.ui['update-ask-current'].textContent, '1.5.0');
+});
+
+test('나중에를 누르면 받지 않고 이번 실행에서는 다시 묻지 않는다', async () => {
+  const review = fixture({ updates: [snapshot('available')] });
+  await review.loadUpdate();
+  review.ui['update-ask'].close();
+  await review.loadUpdate();
+  review.refresh();
+  assert.equal(review.ui['update-ask'].open, false);
+  assert.equal(review.count('/api/update/download'), 0);
+  assert.equal(review.ui['update-chip'].hidden, false);
+});
+
+test('앱에서 바로 받을 수 없거나 최신이거나 확인하지 못했으면 묻지 않는다', async () => {
+  for (const update of [snapshot('manual'), snapshot('latest'), snapshot('unknown'), snapshot('unsupported'), snapshot('available', { error: { code: 'X', message: '받지 못했습니다.' } })]) {
+    const review = fixture({ updates: [update] });
+    await review.loadUpdate();
+    assert.equal(review.ui['update-ask'].open, false, update.status);
+  }
+});
+
+test('녹음 중에는 묻지 않고 녹음이 끝나 화면이 바뀌면 묻는다', async () => {
+  const review = fixture({ updates: [snapshot('available')] });
+  review.state.recorders.add({ recorder: { state: 'recording' } });
+  await review.loadUpdate();
+  assert.equal(review.ui['update-ask'].open, false);
+  review.state.recorders.clear();
+  review.refresh();
+  await review.wait(0);
+  assert.equal(review.ui['update-ask'].open, true);
+});
+
+test('분석이나 저장 중에는 묻지 않고 끝난 뒤 묻는다', async () => {
+  for (const flag of ['flowBusy', 'archiveBusy', 'historyBusy']) {
+    const review = fixture({ updates: [snapshot('available')] });
+    review.state[flag] = true;
+    await review.loadUpdate();
+    assert.equal(review.ui['update-ask'].open, false, flag);
+    review.state[flag] = false;
+    review.refresh();
+    await review.wait(0);
+    assert.equal(review.ui['update-ask'].open, true, flag);
+  }
+});
+
+test('다른 창이 열려 있으면 그 창을 닫은 뒤 묻는다', async () => {
+  const review = fixture({ updates: [snapshot('available')] });
+  review.ui.settings.showModal();
+  await review.loadUpdate();
+  assert.equal(review.ui['update-ask'].open, false);
+  review.ui.settings.close();
+  await review.wait(0);
+  assert.equal(review.ui['update-ask'].open, true);
+});
+
+test('프로그램 정보를 이미 열어 업데이트를 보고 있으면 따로 묻지 않는다', async () => {
+  const review = fixture({ updates: [snapshot('available')] });
+  review.openAbout(review.ui['open-about']);
+  await review.loadUpdate();
+  review.ui.about.close();
+  assert.equal(review.ui['update-ask'].open, false);
+});
+
+test('업데이트를 누르면 받기를 시작하고 프로그램 정보에서 진행을 보여 준다', async () => {
+  const review = fixture({ updates: [snapshot('available')] });
+  await review.loadUpdate();
+  review.ui['update-ask-yes'].click();
+  await review.wait();
+  assert.equal(review.ui['update-ask'].open, false);
+  assert.equal(review.count('/api/update/download'), 1);
+  assert.equal(review.state.updateIntent, true);
+  assert.equal(review.ui.about.open, true);
+});
+
+test('설치를 막는 이유가 있으면 업데이트를 눌러도 받아 두기만 하고 프로그램 정보에서 이유를 보인다', async () => {
+  const review = fixture({ updates: [snapshot('available')] });
+  await review.loadUpdate();
+  review.ui['api-key'].value = 'test-key';
+  review.ui['update-ask-yes'].click();
+  await review.wait();
+  assert.equal(review.count('/api/update/download'), 1);
+  assert.equal(review.state.updateIntent, false);
+  assert.equal(review.ui.about.open, true);
+  assert.equal(review.ui['update-lock'].hidden, false);
+  assert.match(review.ui['update-lock'].textContent, /API 키/);
+});
+
+test('바뀐 점 보기는 깃허브 페이지를 열고 묻는 창은 그대로 둔다', async () => {
+  const review = fixture({ updates: [snapshot('available')] });
+  await review.loadUpdate();
+  review.ui['update-ask-notes'].click();
+  assert.deepEqual(review.messages, ['open-update-page']);
+  assert.equal(review.ui['update-ask'].open, true);
+  const browser = fixture({ updates: [snapshot('available')], webview: false });
+  assert.equal(browser.ui['update-ask-notes'].hidden, true);
+});
+
+test('미뤄 둔 묻기는 다른 창을 여는 순간 그 창 위에 겹쳐 뜨지 않고 그 창을 닫은 뒤 뜬다', async () => {
+  const review = fixture({ updates: [snapshot('available')] });
+  review.state.recorders.add({ recorder: { state: 'recording' } });
+  await review.loadUpdate();
+  review.state.recorders.clear();
+  // 녹음이 끝난 뒤 화면 갱신 없이 바로 설정을 연다. 설정 열기도 화면을 갱신하므로 묻기를 다시 판단한다.
+  review.ui['open-settings'].click();
+  await review.wait(0);
+  assert.equal(review.ui.settings.open, true);
+  assert.equal(review.ui['update-ask'].open, false);
+  review.ui.settings.close();
+  await review.wait(0);
+  assert.equal(review.ui['update-ask'].open, true);
+});
