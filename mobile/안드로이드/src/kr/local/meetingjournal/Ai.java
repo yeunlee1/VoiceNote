@@ -70,6 +70,7 @@ final class Ai {
         return sent(record,c,AiUsage.TRANSCRIPTION,AiModels.TRANSCRIPTION_MODEL).getString("text");
     }
     void field(OutputStream out,String boundary,String name,String value) throws IOException {out.write(("--"+boundary+"\r\nContent-Disposition: form-data; name=\""+name+"\"\r\n\r\n"+value+"\r\n").getBytes(StandardCharsets.UTF_8));}
+    static final String TRANSCRIBED="전사 저장 완료 · 회의록이 필요하면 정리본 탭의 ‘회의록 만들기’를 누르세요.";
     void run(JSONObject record) throws Exception {
         // 회의록까지 저장하면 체험 1회로 확정하고, 실패·취소면 예약만 돌려준다.
         try{analyze(record);}catch(Exception ex){store.trial().release(analysisId);throw ex;}
@@ -141,7 +142,8 @@ final class Ai {
         List<String> reasons=new ArrayList<>();for(Map.Entry<String,Set<String>> group:groups.entrySet())reasons.add(String.join("·",group.getValue())+" — "+group.getKey());
         return "고른 폴더에 저장하지 못했습니다: "+String.join(", ",reasons)+". 설정에서 폴더를 확인한 뒤 ‘고른 폴더에 다시 저장’을 누르세요.";
     }
-    void analyze(JSONObject record) throws Exception {
+    String transcribeAll(JSONObject record) throws Exception {
+        // 원음마다 받아 둔 전사-NNN.txt가 있으면 다시 쓰고 없으면 전사해 저장한다. 이어 붙인 전사는 전사.txt로 갱신하고 돌려준다.
         File dir=store.directory(Store.location(record),record.getString("id"));JSONArray audio=record.getJSONArray("audio");StringBuilder transcript=new StringBuilder();
         for(int i=0;i<audio.length();i++){
             check();progress.update("음성을 글로 변환 중 · "+(i+1)+" / "+audio.length());File saved=new File(dir,String.format(Locale.ROOT,"전사-%03d.txt",i+1));
@@ -149,7 +151,16 @@ final class Ai {
             if(!saved.exists())Store.write(saved,text);if(transcript.length()>0)transcript.append("\n\n");transcript.append(text);Store.write(new File(dir,"전사.txt"),transcript.toString());
         }
         if(transcript.toString().trim().isEmpty())throw new IOException("인식된 발언이 없습니다. 원음은 보관했습니다.");
-        JSONObject previous=null;List<String> chunks=TextChunks.split(transcript.toString(),24000);
+        return transcript.toString();
+    }
+    void transcribeOnly(JSONObject record) throws Exception {
+        // 전사까지만 고른 회의다. 전사 파일만 남기고 요약은 요청하지 않는다. 실패·취소면 체험 예약만 돌려주고, 끝나면 transcribed로 저장한 뒤 체험을 확정한다.
+        try{transcribeAll(record);record.put("state","transcribed").put("message",TRANSCRIBED);store.save(record);}catch(Exception ex){store.trial().release(analysisId);throw ex;}
+        finishAccess(record);
+    }
+    void analyze(JSONObject record) throws Exception {
+        File dir=store.directory(Store.location(record),record.getString("id"));String transcript=transcribeAll(record);
+        JSONObject previous=null;List<String> chunks=TextChunks.split(transcript,24000);
         for(int i=0;i<chunks.size();i++){progress.update(model.label+" 회의록 분석 중 · "+(i+1)+" / "+chunks.size());previous=section(record,chunks.get(i),previous,dir,0);}
         previous=shorten(record,previous,dir,null);
         analysis(record).put("summaryModel",model.id);store.finish(record,previous,null);

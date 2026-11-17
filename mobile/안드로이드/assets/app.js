@@ -50,7 +50,7 @@
   }
   function renderStage() {
     const order = ['prepare', 'record', 'analyze', 'done'];
-    const current = state.recording ? 'record' : state.active || state.importing ? 'analyze' : state.lastMeetingState === 'complete' ? 'done' : 'prepare';
+    const current = state.recording ? 'record' : state.active || state.importing ? 'analyze' : ['complete', 'transcribed'].includes(state.lastMeetingState) ? 'done' : 'prepare';
     for (const li of $('stage').children) {
       const index = order.indexOf(li.dataset.stage), at = order.indexOf(current);
       li.classList.toggle('done', index < at || current === 'done');
@@ -72,6 +72,7 @@
     $('start-label').textContent = state.active && !state.recording ? '분석 중' : '회의 시작';
     $('finish').disabled = state.busy || !state.recording;
     $('retry').disabled = !idle || !state.opened;
+    for (const button of document.querySelectorAll('.make-minutes')) button.disabled = !idle || !state.opened;
     $('save-key').disabled = !idle;
     $('remove-key').disabled = !idle || !state.connection.keyConfigured;
     $('settings-lock').hidden = idle;
@@ -174,7 +175,7 @@
     if (draftTimer || state.draftSaving) throw new Error('회의 준비 내용을 저장하는 중입니다. 잠시 뒤 다시 눌러 주세요.');
     if (state.draftFailed) throw new Error('회의 준비 내용을 저장하지 못했습니다. 잠시 뒤 다시 눌러 주세요.');
   }
-  const stateLabels = { complete: '회의록', failed: '분석 실패', interrupted: '녹음 중단', saved: '음성 저장', analyzing: '분석 중', recording: '녹음 중' };
+  const stateLabels = { complete: '회의록', transcribed: '전사만', failed: '분석 실패', interrupted: '녹음 중단', saved: '음성 저장', analyzing: '분석 중', recording: '녹음 중' };
   async function history() {
     const data = await call('history'), entries = data.meetings, rows = [];
     if (data.skipped) rows.push(node('p', '읽지 못한 기록 ' + data.skipped + '개', 'hint'));
@@ -510,7 +511,12 @@
     state.todos = data.todos || null; state.todoConfirmed = state.todos; state.todoEditing = null; state.me = data.me ?? null; state.mePicking = false; if (data.todosUnreadable) message('저장된 할 일 수정본을 읽지 못해 AI 결과를 보여 줍니다. 원본 파일은 보존합니다.');
     state.result = { label, minutes: !!minutes, transcript: !!transcript, data: minutes || null, format, custom, participants: record.participants || '', title: record.title || '', date: record.date || '' };
     renderMinutes();
-    if (!minutes) $('minutes').append(node('p', `아직 ${label}${format === 'tasks' ? '가' : '이'} 없습니다. 아래 재분석으로 다시 만들 수 있습니다.`, 'hint'));
+    if (!minutes && transcript) {
+      const box = node('div', null, 'transcript-only'), make = node('button', '회의록 만들기', 'button primary make-minutes');
+      make.type = 'button'; make.onclick = () => analyzeOpened(true);
+      box.append(node('p', '전사만 저장한 회의입니다. 전사문은 옆 ‘전사문’ 탭에 있습니다.'), make); $('minutes').append(box);
+      // 전사만 저장한 회의는 저장된 전사로 요약만 요청한다.
+    } else if (!minutes) $('minutes').append(node('p', `아직 ${label}${format === 'tasks' ? '가' : '이'} 없습니다. 아래 재분석으로 다시 만들 수 있습니다.`, 'hint'));
     renderUsage(record);
     const versions = data.versions || []; $('result-version').replaceChildren(...versions.map((version,index) => {
       const option = node('option', [`${index + 1}번째 결과`, savedLabel(version.savedAt), Flow.FORMAT_LABELS[Flow.outputFormat(version.outputFormat)], version.refined && '의견 반영본', version.stars && `별 ${version.stars}개`].filter(Boolean).join(' · ')); option.value = version.id; return option;
@@ -692,7 +698,9 @@
     try {
       const status = await call('status'), meeting = status.meeting;
       if (state.busy && !force) return;
-      const mine = !!state.importing && meeting.attemptId === state.importing, watching = !!state.lastState || mine;
+      const analysis = state.analyzing && meeting.attemptId === state.analyzing.attemptId ? state.analyzing : null;
+      const mine = !!state.importing && meeting.attemptId === state.importing, watching = !!state.lastState || mine || !!analysis;
+      // 다시 분석·회의록 만들기·종료 뒤 고른 분석은 시도 번호로 따라간다. 첫 조회 전에 끝나도 그 끝 상태로 결과를 연다.
       // 녹음 파일 불러오기는 이번 시도 번호가 실린 상태만 이번 불러오기의 것으로 본다. 그 상태가 끝 상태면 앞선 진행 상태를 못 봤어도 녹음 뒤 분석이 끝났을 때와 같이 안내하고 결과를 연다.
       state.active = status.active; state.recording = status.active && meeting.state === 'recording';
       // 받는 동안 녹음·분석이 시작되면 '지금 업데이트'의 자동 설치 예약을 취소한다. 받은 뒤에는 사람이 다시 눌러야 설치한다.
@@ -710,11 +718,11 @@
         if (!$('prep').hidden) setPrep(false);
       } else if (watching) {
         state.lastMeetingState = meeting.state || '';
-        $('record-state').textContent = meeting.state === 'complete' ? '보관 완료' : '확인 필요';
+        $('record-state').textContent = meeting.state === 'complete' ? '보관 완료' : meeting.state === 'transcribed' ? '전사 저장 완료' : '확인 필요';
         $('workflow').textContent = meeting.message || '다음 회의를 준비하세요.'; $('timer').textContent = '00:00';
       }
       if (state.importing) {
-        if (mine && meeting.id) { state.importing = null; clearNewMeeting(); }
+        if (mine && meeting.id) { state.chosenMode = { location: meeting.location, id: meeting.id, mode: state.importMode }; state.importing = null; clearNewMeeting(); }
         else if (mine && !status.active) { state.importing = null; $('workflow').textContent = meeting.message || '녹음 파일을 불러오지 못했습니다. 다시 골라 주세요.'; }
         else if (!mine) { $('record-state').textContent = '분석 중'; $('workflow').textContent = '녹음 파일을 준비하는 중'; }
       }
@@ -734,6 +742,9 @@
         // 녹음 뒤 자동 분석이 체험 소진으로 멈췄으면 같은 안내와 함께 AI 설정을 연다.
         if (!state.active && watching && meeting.state === 'failed' && meeting.message === Flow.EXHAUSTED_MESSAGE && !$('settings').open) { message(meeting.message); openSettings(); }
       }
+      if (analysis && !status.active && ['complete', 'failed', 'transcribed'].includes(meeting.state)) state.analyzing = null;
+      if (!status.active && state.chosenMode && state.chosenMode.id === meeting.id && ['complete', 'transcribed'].includes(meeting.state)) state.chosenMode = null;
+      // 고른 방식은 그 회의의 분석이 실패한 동안만 다시 분석에 이어 쓴다. 성공해 끝나면 지운다.
       // 체험 남은 횟수가 분석 뒤 바뀌므로 상태 조회 때 연결 정보도 함께 갱신한다.
       if (status.connection) { state.connection = status.connection; renderAccess(); }
       // 업데이트 확인·받기 진행도 같은 상태 조회로 받는다.
@@ -773,16 +784,75 @@
   // 회의가 만들어진 뒤 새 회의 칸을 비운다. 회의 시작은 요청이 끝나면 곧바로, 녹음 파일 불러오기는 서비스가 회의를 만든 것을 상태 조회로 본 뒤에 부른다.
   $('import-audio').onclick = () => task(async () => {
     await flushDraft();
+    const mode = await chooseMode('녹음 파일을 고르기 전에 어디까지 만들지 정합니다.');
+    if (!mode) return;
+    state.importMode = mode;
     const attemptId = crypto.randomUUID();
-    const started = await call('importAudio', { date: $('date').value, title: $('title').value.trim(), participants: $('participants').value, notes: $('notes').value, ...formatFields(), attemptId });
+    const started = await call('importAudio', { date: $('date').value, title: $('title').value.trim(), participants: $('participants').value, notes: $('notes').value, ...formatFields(), mode, attemptId });
     if (!started || started.cancelled) return;
     state.importing = attemptId; setPrep(false); await poll(true);
   });
   // 파일 선택 창이 열린 동안에는 task가 화면을 잠그고, 시작된 뒤에는 시도 번호로 이번 불러오기를 따라간다. 칸 값은 회의가 실제로 만들어진 뒤에 비우므로 그 전에 실패하면 적은 값이 그대로 남는다.
-  $('finish').onclick = () => task(async () => { await call('finish'); $('workflow').textContent = '녹음을 저장하고 분석합니다.'; });
-  $('retry').onclick = () => { if (!todoHolding()) task(async () => {
-    if (!Flow.canAnalyze(state.connection)) { openSettings(null, 'ai'); throw new Error(state.connection.accessMode === 'exhausted' ? Flow.EXHAUSTED_MESSAGE : '설정의 AI 연결에서 API 키를 먼저 등록하세요.'); }
-    await call('analyze', { ...state.opened }); await poll(true); }); };
+  function requireAnalysis() { if (!Flow.canAnalyze(state.connection)) { openSettings(null, 'ai'); throw new Error(state.connection.accessMode === 'exhausted' ? Flow.EXHAUSTED_MESSAGE : '설정의 AI 연결에서 API 키를 먼저 등록하세요.'); } }
+  function chooseMode(note) {
+    // 회의록까지 만들지(minutes) 전사까지만 할지(transcript) 고르는 창을 열고 고른 값을 돌려준다. 닫기·뒤로로 닫으면 null이다.
+    const dialog = $('finish-choice'); $('finish-choice-note').textContent = note;
+    return new Promise(resolve => {
+      let chosen = null;
+      const pick = value => () => { if (chosen) return; chosen = value; dialog.close(); };
+      const minutes = pick('minutes'), transcript = pick('transcript');
+      const done = () => { $('finish-minutes').removeEventListener('click', minutes); $('finish-transcript').removeEventListener('click', transcript); dialog.removeEventListener('close', done); resolve(chosen); };
+      $('finish-minutes').addEventListener('click', minutes); $('finish-transcript').addEventListener('click', transcript); dialog.addEventListener('close', done);
+      openDialog('finish-choice', document.activeElement); $('finish-minutes').focus();
+      // 창이 닫히는 이벤트는 조금 뒤에 오므로 그 사이 다른 단추가 눌려도 처음 고른 값을 지킨다. 처음 초점은 대부분 고르는 회의록까지 단추다.
+    });
+  }
+  async function waitSaved(id) {
+    // 회의 종료는 서비스에 맡겨지므로 같은 회의의 녹음이 저장되고 서비스가 쉬는 상태를 볼 때까지 기다린다. 저장에 실패했으면 null이다.
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      const status = await call('status'), meeting = status.meeting || {};
+      if (status.connection) { state.connection = status.connection; renderAccess(); }
+      // 녹음하는 동안 키나 체험 상태가 바뀌었을 수 있어 고르기 전에 최신 연결 정보로 맞춘다.
+      if (!status.active && (!id || meeting.id === id)) return meeting.state === 'saved' ? meeting : null;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    throw new Error('녹음 저장을 확인하지 못했습니다. 회의 기록에서 저장된 음성을 확인하세요.');
+  }
+  async function startAnalysis(target, mode) {
+    // 고른 방식으로 분석을 시작하고 시도 번호로 이번 분석의 끝을 따라간다.
+    const attemptId = crypto.randomUUID();
+    state.analyzing = { location: target.location, id: target.id, attemptId };
+    try { await call('analyze', { location: target.location, id: target.id, mode, attemptId }); } catch (error) { state.analyzing = null; throw error; }
+    await poll(true);
+  }
+  function analyzeOpened(minutesOnly) {
+    // 열린 회의를 다시 분석한다. 전사가 없으면 방식을 고르고, 전사가 있거나 회의록 만들기를 누르면 묻지 않고 회의록까지 만든다.
+    if (todoHolding()) return;
+    task(async () => {
+      requireAnalysis();
+      const chosen = state.chosenMode && state.chosenMode.id === state.opened?.id && state.chosenMode.location === state.opened?.location ? state.chosenMode.mode : null;
+      const mode = minutesOnly ? 'minutes' : chosen || (state.result?.transcript ? 'minutes' : await chooseMode('저장된 음성으로 만듭니다.'));
+      // 이 회의에서 고른 방식이 실패했으면 같은 방식으로 이어 간다. 회의록 만들기는 늘 회의록까지다.
+      if (!mode) return;
+      state.chosenMode = { location: state.opened.location, id: state.opened.id, mode };
+      await startAnalysis(state.opened, mode);
+    });
+  }
+  $('finish').onclick = () => task(async () => {
+    const before = (await call('status')).meeting || {};
+    await call('finish', { hold: true }); $('workflow').textContent = '녹음을 멈추고 음성을 저장합니다.';
+    const saved = await waitSaved(before.id);
+    if (!saved) return;
+    // 저장에 실패했으면 상태 조회가 그 안내를 보여 준다.
+    requireAnalysis();
+    const mode = await chooseMode('음성은 저장했습니다.');
+    if (!mode) { state.lastState = ''; $('workflow').textContent = '음성을 저장했습니다. 회의 기록에서 열어 분석할 수 있습니다.'; return; }
+    // 창을 닫으면 저장한 회의를 끝난 분석처럼 열지 않고 안내만 남긴다.
+    state.chosenMode = { location: saved.location, id: saved.id, mode };
+    await startAnalysis(saved, mode);
+  });
+  $('retry').onclick = () => analyzeOpened(false);
   $('refresh').onclick = () => task(history);
   $('tab-new').onclick = () => showView('new');
   $('tab-records').onclick = () => showView('records');

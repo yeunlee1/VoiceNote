@@ -162,11 +162,11 @@ test('상태마다 다른 말로 보여 준다', async () => {
   }
 });
 
-test('분석하지 않은 녹음에는 내 할 일 탭이 없고 지금처럼 열린다', async () => {
+test('분석하지 않은 녹음에는 내 할 일 탭이 없고 정리본 탭으로 열린다(전사만 있어도 정리본 탭의 안내로)', async () => {
   const blank = await openWith(meeting({ minutes: null, transcript: '' }));
   assert.deepEqual([blank.ui['tab-mine'].hidden, blank.state.resultTab], [true, 'minutes']);
   const heard = await openWith(meeting({ minutes: null, transcript: '전사만 있음' }));
-  assert.deepEqual([heard.ui['tab-mine'].hidden, heard.state.resultTab], [true, 'transcript']);
+  assert.deepEqual([heard.ui['tab-mine'].hidden, heard.state.resultTab], [true, 'minutes']);
 });
 
 test('체크 저장이 실패하면 저장이 확인된 상태로 되돌리고 알린다', async () => {
@@ -356,10 +356,11 @@ test('좌우 화살표는 보이는 탭만 돈다', async () => {
   review.ui['tab-transcript'].dispatch('keydown', { key: 'ArrowRight' });
   assert.equal(review.state.resultTab, 'mine');
   const draft = await openWith(meeting({ minutes: null, transcript: '전사만 있음' }));
-  draft.ui['tab-transcript'].dispatch('keydown', { key: 'ArrowRight' });
-  assert.equal(draft.state.resultTab, 'minutes');
+  assert.equal(draft.state.resultTab, 'minutes', '전사만 있는 회의는 정리본 탭으로 열린다');
   draft.ui['tab-minutes'].dispatch('keydown', { key: 'ArrowRight' });
-  assert.equal(draft.state.resultTab, 'transcript', '내 할 일 탭은 감춰져 있어 건너뛴다');
+  assert.equal(draft.state.resultTab, 'transcript');
+  draft.ui['tab-transcript'].dispatch('keydown', { key: 'ArrowRight' });
+  assert.equal(draft.state.resultTab, 'minutes', '내 할 일 탭은 감춰져 있어 건너뛴다');
 });
 
 test('옛 결과 버전을 보면 그 결과의 할 일과 참석자로 내 일을 센다', async () => {
