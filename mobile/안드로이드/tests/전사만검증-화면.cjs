@@ -39,6 +39,12 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
   const fast = { opens: (await calls('open')).filter(d => d.id === RECORDING).length, state: await evaluate("document.getElementById('record-state').textContent") };
   check('첫 상태 조회 전에 끝나는 빠른 분석도 시도 번호로 결과를 한 번 열고 끝 문구를 낸다', fast.opens === 1 && fast.state === '전사 저장 완료', js(fast));
 
+  await record({ stale: 1, fail: true }); await press('#finish'); await choiceOpen('음성은 저장했습니다.');
+  await press('#finish-transcript'); await until("!document.getElementById('result').hidden"); await wait(300);
+  await evaluate("(()=>{const d=document.querySelector('#result details.more');if(d)d.open=true;return true})()"); await press('#retry'); await wait(500);
+  const again = await calls('analyze');
+  check('전사까지만이 일부 전사 뒤 실패해도 다시 분석은 창 없이 전사까지만으로 이어 간다', !await evaluate("document.getElementById('finish-choice').open") && again.length === 2 && again[1].mode === 'transcript' && again[1].id === RECORDING, js(again));
+
   await record({ stale: 1 }); await press('#finish'); await choiceOpen('음성은 저장했습니다.');
   await press('#finish-choice [data-close]'); await wait(900);
   const closed = await evaluate(`({analyze:__mock.calls.filter(c=>c.method==='analyze').length,workflow:document.getElementById('workflow').textContent,result:!document.getElementById('result').hidden,label:[...document.querySelectorAll('#history button')].find(b=>b.dataset.id===${js(RECORDING)})?.innerText||''})`);
@@ -79,6 +85,14 @@ module.exports = async ({ viewport, load, key, tap, evaluate, until, wait, shot,
   await evaluate("(()=>{const d=document.querySelector('#result details.more');if(d)d.open=true;return true})()"); await press('#retry'); await wait(400);
   const direct = (await calls('analyze')).at(-1) || {};
   check('전사가 있는 회의의 다시 분석은 묻지 않고 회의록까지 요청한다', !await evaluate("document.getElementById('finish-choice').open") && direct.mode === 'minutes' && direct.id === HEARD, js(direct));
+
+  await load(); await key();
+  await evaluate(`__mock.modeTest={fast:true};__mock.history.unshift({id:${js(HEARD)},location:'main',date:'2026-11-17',dailySequence:5,title:'전사만 회의',state:'transcribed',createdAt:3,audio:['원음-001.m4a']});true`);
+  await press('#refresh'); await until(`!!document.querySelector('#history button[data-id=${js(HEARD)}]')`);
+  await press(`#history button[data-id="${HEARD}"]`); await until("!!document.querySelector('#minutes .make-minutes')");
+  await press('#minutes .make-minutes');
+  check('녹음을 보지 않은 기존 회의에서 첫 조회 전에 끝나는 회의록 만들기도 결과를 다시 열어 정리본을 보인다', await until("document.getElementById('minutes').innerText.includes('회의 내용을 보존')"));
+  // 활성 상태를 한 번도 보지 못해도 시도 번호로 이번 분석의 끝을 알아봐야 결과를 다시 연다.
 
   for (const width of [360, 412]) {
     await viewport(width); await record({ stale: 0 }); await press('#finish'); await choiceOpen('음성은 저장했습니다.'); await wait(200);

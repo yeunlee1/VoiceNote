@@ -27,6 +27,8 @@ module.exports = '(' + function () {
     // 분석은 fast면 첫 상태 조회 전에 끝 상태로, 아니면 진행 상태를 거쳐 끝 상태로 간다. 끝나면 목록 기록의 상태도 바꾼다.
     const transcript = d.mode === 'transcript';
     const end = { id: d.id, location: d.location, state: transcript ? 'transcribed' : 'complete', message: transcript ? '전사 저장 완료 · 회의록이 필요하면 정리본 탭의 ‘회의록 만들기’를 누르세요.' : '회의록 저장 완료', attemptId: d.attemptId, createdAt: Date.now() };
+    if (t.fail) Object.assign(end, { state: 'failed', message: '인터넷에 연결할 수 없습니다. 연결을 확인한 뒤 지난 회의에서 다시 분석하세요. 녹음은 저장되어 있습니다.' });
+    // fail은 앞 원음의 전사만 남기고 실패한 상태다. 회의를 열면 남은 전사가 함께 온다.
     const finish = () => { m.active = false; m.meeting = end; const record = m.history.find(r => r.id === d.id && r.location === d.location); if (record) { record.state = end.state; delete record.noTranscript; } };
     if (t.fast) finish(); else { m.active = true; m.meeting = { ...end, state: 'analyzing', message: transcript ? '음성을 글로 변환 중 · 1 / 1' : '회의록 분석 중' }; setTimeout(finish, 300); }
     return reply({ id: d.id });

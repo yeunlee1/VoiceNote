@@ -155,8 +155,7 @@ final class Ai {
     }
     void transcribeOnly(JSONObject record) throws Exception {
         // 전사까지만 고른 회의다. 전사 파일만 남기고 요약은 요청하지 않는다. 실패·취소면 체험 예약만 돌려주고, 끝나면 transcribed로 저장한 뒤 체험을 확정한다.
-        try{transcribeAll(record);}catch(Exception ex){store.trial().release(analysisId);throw ex;}
-        record.put("state","transcribed").put("message",TRANSCRIBED);store.save(record);
+        try{transcribeAll(record);record.put("state","transcribed").put("message",TRANSCRIBED);store.save(record);}catch(Exception ex){store.trial().release(analysisId);throw ex;}
         finishAccess(record);
     }
     void analyze(JSONObject record) throws Exception {
