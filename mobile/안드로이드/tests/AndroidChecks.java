@@ -588,12 +588,12 @@ public final class AndroidChecks extends Instrumentation {
         expect(new JSONObject(requests.get(before+1)).getJSONArray("input").getJSONObject(1).getString("content").equals(Store.custom(custom).instruction()),"내 형식 지시를 줄이기 지침 바로 다음에 넣는다");
         JSONObject named=store.create(new JSONObject().put("date","2099-01-07").put("title","이름 힌트").put("participants","김과장, <이대리>"));
         File audio=new File(store.directory("main",named.getString("id")),"원음-시험.m4a");Store.write(audio,"시험 원음");
-        before=requests.size();replies.add("{\"text\":\"전사\"}");new Ai(store,message->{}).transcribe(named,audio);
+        before=requests.size();replies.add("{\"text\":\"전사\"}");new Ai(store,message->{}).transcribe(named,audio,1,1);
         String multipart=requests.get(before);
         expect(multipart.contains("name=\"keywords[]\"\r\n\r\n김과장\r\n")&&multipart.contains("name=\"keywords[]\"\r\n\r\n이대리\r\n")&&multipart.indexOf("name=\"languages[]\"")<multipart.indexOf("name=\"keywords[]\"")&&multipart.indexOf("name=\"keywords[]\"")<multipart.indexOf("name=\"response_format\""),"참석자 이름을 전사 힌트로 보낸다");
         JSONObject anonymous=store.create(new JSONObject().put("date","2099-01-07").put("title","힌트 없음"));
         File silent=new File(store.directory("main",anonymous.getString("id")),"원음-시험.m4a");Store.write(silent,"시험 원음");
-        before=requests.size();replies.add("{\"text\":\"전사\"}");new Ai(store,message->{}).transcribe(anonymous,silent);
+        before=requests.size();replies.add("{\"text\":\"전사\"}");new Ai(store,message->{}).transcribe(anonymous,silent,1,1);
         expect(!requests.get(before).contains("keywords[]"),"참석자가 없으면 힌트를 보내지 않는다");
     }
     static void templateCacheChecks(Store store)throws Exception{
@@ -605,10 +605,10 @@ public final class AndroidChecks extends Instrumentation {
         String original=assets.get("summary-meeting.json");JSONObject changed=new JSONObject(original);changed.getJSONArray("input").getJSONObject(0).put("content","새 기준으로 전사만 요약하세요.");assets.put("summary-meeting.json",changed.toString());replies.add(completed());
         new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0);expect(requests.size()==before+2,"일반 지시문 내용이 바뀌면 이전 캐시를 쓰지 않는다");
         assets.put("summary-meeting.json",original);replies.add(completed());
-        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인");
-        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인");expect(requests.size()==before+3,"같은 의견과 지시문의 성공 캐시를 재사용한다");
+        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인",1,1);
+        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인",1,1);expect(requests.size()==before+3,"같은 의견과 지시문의 성공 캐시를 재사용한다");
         JSONObject feedback=new JSONObject(assets.get("summary-feedback.json"));feedback.put("content","의견은 전사에서 다시 확인하세요.");assets.put("summary-feedback.json",feedback.toString());replies.add(completed());
-        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인");expect(requests.size()==before+4,"의견 지시문 내용이 바뀌면 이전 캐시를 쓰지 않는다");
+        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인",1,1);expect(requests.size()==before+4,"의견 지시문 내용이 바뀌면 이전 캐시를 쓰지 않는다");
         JSONArray messages=new JSONObject(requests.get(before+3)).getJSONArray("input");expect(messages.getJSONObject(messages.length()-2).getString("content").equals("의견은 전사에서 다시 확인하세요."),"변경한 실제 의견 지시문으로 요청한다");
     }
     static void itemChecks(Store store)throws Exception{

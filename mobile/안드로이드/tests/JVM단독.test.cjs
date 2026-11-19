@@ -24,6 +24,8 @@ const plain = { SettingsFileTest: ['JsonText', 'CustomFormat', 'SettingsFile'], 
 for (const [name, sources] of Object.entries(plain)) test(`JVM 시험 ${name}`, () => run(name, sources.map(source)));
 // 요청 감시도 java.*만 쓴다. 고장 나 요청이 멈추면 시험 전체가 끝나지 않으므로 90초 제한을 둔다.
 test('JVM 시험 AiRequestTest', () => run('AiRequestTest', [source('AiRequest')], null, [], { timeout: 90_000 }));
+// 진행 기록 문구는 데스크톱 진행기록.js와 같은 공통 예시로 대조한다. java.*와 JsonText만 쓴다.
+test('JVM 시험 ActivityLogTest', () => run('ActivityLogTest', ['JsonText', 'ActivityLog'].map(source), null, [[path.join(__dirname, '..', '..', '..', 'desktop', 'tests', 'fixtures', '진행기록-예시.json'), 'activity-cases.json']]));
 // 아래 셋은 android.jar 스텁으로 컴파일하고, 실행 경로는 java.*만 쓰는 정적 메서드다.
 for (const name of ['AiResponseModelTest', 'AiFeedbackTest', 'CopyFilesTest', 'TextFileNameTest', 'AudioImportTest']) test(`JVM 시험 ${name}`, () => run(name, allSources(), androidJar));
 // 아래 둘은 데스크톱과 같은 공통 예시로 항목 규칙과 회의 문서를 대조한다. org.json을 거치지 않는 Map·List 경로를 PC에서 돌린다.
