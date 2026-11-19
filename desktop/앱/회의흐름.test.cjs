@@ -25,7 +25,7 @@ function fixture(summaryResponse, responses = {}, { finishMode = 'minutes', ...e
   };
   // 처리기를 기억했다가 click()·close()로 부른다. 브라우저처럼 close 이벤트는 조금 뒤에 보낸다. 고르는 창은 열릴 때 finishMode의 단추를 누르고(null이면 닫고, 'manual'이면 시험이 직접 누름), 열린 때의 안내 글을 choices에 모은다.
   const nodes = new Map(), calls = [], summaryBodies = [], posts = [], requests = [];
-  const sandbox = { crypto, Blob, File, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: { MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js'), addEventListener() {}, removeEventListener() {} },
+  const sandbox = { crypto, Blob, File, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval, confirm: () => true, window: { MeetingFormats: require('./출력형식.js'), MeetingTodos: require('./할일정리.js'), MeetingActivity: require('./진행기록.js'), addEventListener() {}, removeEventListener() {} },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
     document: { getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element },
     async fetch(url, options = {}) {
@@ -34,10 +34,10 @@ function fixture(summaryResponse, responses = {}, { finishMode = 'minutes', ...e
       if (options.method === 'POST' && typeof options.body === 'string') posts.push({ url, body: JSON.parse(options.body) });
       if (url === '/api/summary') {
         summaryBodies.push(JSON.parse(options.body));
-        if (summaryResponse) return summaryResponse(summaryBodies.at(-1), summaryBodies.length);
+        if (summaryResponse) return summaryResponse(summaryBodies.at(-1), summaryBodies.length, options);
       }
       if (responses[url] instanceof Response) return responses[url];
-      if (typeof responses[url] === 'function') return responses[url](typeof options.body === 'string' ? JSON.parse(options.body) : options.body);
+      if (typeof responses[url] === 'function') return responses[url](typeof options.body === 'string' ? JSON.parse(options.body) : options.body, options);
       let body = {};
       if (Object.hasOwn(responses, url)) body = responses[url];
       else if (url === '/api/meetings') body = { meetings: [], skipped: 0 };
@@ -56,7 +56,7 @@ function fixture(summaryResponse, responses = {}, { finishMode = 'minutes', ...e
   };
   // 시험마다 필요한 브라우저 기능(예: 가짜 마이크)을 더한다. window는 이미 있는 내용에 합친다.
   const original = fs.readFileSync(path.join(__dirname, '화면/app.js'), 'utf8');
-  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, renderMinutesInto, plainText, loadHistory, openMeeting, importAudio, finishMeeting, clearLocal, archiveResult, startRecording, bindDialog, bind };\n})();');
+  const source = original.replace(/  init\(\);\s*\}\)\(\);\s*$/, '  globalThis.review = { state, ui, summarize, lines, exportDocument, documentObject, renderMinutesInto, plainText, loadHistory, openMeeting, importAudio, finishMeeting, clearLocal, archiveResult, startRecording, bindDialog, bind, transcribe, resetMeetingForm, tickActivity: typeof tickActivity === \'function\' ? tickActivity : undefined };\n})();');
   assert.notEqual(source, original);
   vm.runInNewContext(source, sandbox);
   const { state, ui } = sandbox.review;
@@ -901,4 +901,153 @@ test('음성만 있는 회의의 정리본 안내는 실제 상자 이름을 가
   assert.equal(state.resultTab, 'minutes');
   assert.deepEqual(texts(ui.minutes), ['아직 회의록이 없습니다. 전사문 탭의 ‘전사 고치기 · 다시 분석’에서 분석을 요청할 수 있습니다.']);
   assert.equal(walk(ui.minutes).some(node => String(node.className).includes('make-minutes')), false);
+});
+
+// ── 진행 기록(B안): 분석 흐름이 AI 요청 보냄·받음·실패·저장 줄을 차례로 남기는지 검증한다.
+const activityLines = state => (state.activity ? state.activity.entries.map(entry => entry.text) : []);
+const failureCount = state => (state.activity ? state.activity.entries.filter(entry => ['timeout', 'uploadStall', 'requestStall', 'disconnected', 'apiError', 'badFormat', 'saveFailed', 'failed', 'canceled'].includes(entry.type)).length : 0);
+const spoken = '시험 회의 발언입니다.';
+const abortable = options => new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new DOMException('요청 취소', 'AbortError'))));
+
+test('보통 분석은 음성 저장·전사·회의록·저장 줄을 차례로 남긴다', async () => {
+  const { state, finishMeeting } = fixture();
+  state.keyConfigured = true;
+  state.parts = [recorded(), recorded()];
+  await finishMeeting();
+  assert.deepEqual(activityLines(state), [
+    '음성 저장함 · 1/2개', '음성 저장함 · 2/2개',
+    '전사 요청 보냄 · 조각 1/2 · 0.1MB', `전사 받음 · 조각 1/2 · ${spoken.length}자`,
+    '전사 요청 보냄 · 조각 2/2 · 0.1MB', `전사 받음 · 조각 2/2 · ${spoken.length}자`,
+    '회의록 정리 요청 보냄 · 구간 1/1', '회의록 정리 받음 · 구간 1/1', '회의록 저장함']);
+  assert.equal(state.activity.open, null);
+});
+
+test('받아 둔 전사·회의록은 보냄 줄이 없다', async () => {
+  let transcribeCalls = 0;
+  const transcriptView = fixture(null, { '/api/transcribe': () => (++transcribeCalls === 2 ? failed('전사 실패') : Response.json({ text: spoken })) });
+  transcriptView.state.keyConfigured = true;
+  transcriptView.state.parts = [recorded(), recorded()];
+  await transcriptView.finishMeeting();
+  await transcriptView.finishMeeting();
+  const retried = activityLines(transcriptView.state);
+  assert.ok(retried.includes('받아 둔 전사 씀 · 조각 1/2'), retried.join(' | '));
+  assert.ok(!retried.includes('전사 요청 보냄 · 조각 1/2 · 0.1MB'), retried.join(' | '));
+  let archiveCalls = 0;
+  const minutesView = fixture(null, { '/api/meetings/main': () => (++archiveCalls === 1 ? failed('저장 실패') : Response.json({ meeting: {} })) });
+  minutesView.state.keyConfigured = true;
+  minutesView.ui.transcript.value = spoken;
+  await minutesView.summarize(true);
+  await minutesView.summarize(true);
+  const reused = activityLines(minutesView.state);
+  assert.ok(reused.includes('받아 둔 회의록 씀 · 구간 1/1'), reused.join(' | '));
+  assert.ok(!reused.includes('회의록 정리 요청 보냄 · 구간 1/1'), reused.join(' | '));
+  assert.equal(reused.at(-1), '회의록 저장함');
+});
+
+test('취소하면 마지막 줄이 분석 취소함이다', async () => {
+  const { state, finishMeeting, calls } = fixture(null, { '/api/transcribe': (body, options) => abortable(options) });
+  state.keyConfigured = true;
+  state.parts = [recorded()];
+  const running = finishMeeting();
+  await waitFor(() => calls.includes('/api/transcribe') && state.aiController);
+  state.aiController.abort();
+  await running;
+  assert.equal(activityLines(state).at(-1), '분석 취소함');
+  assert.equal(failureCount(state), 1);
+});
+
+test('취소 뒤에 늦게 온 성공 응답은 받음으로 적지 않는다', async () => {
+  let release = null;
+  const { state, ui, summarize } = fixture(body => new Promise(resolve => { release = () => resolve(successfulSummary(body)); }));
+  state.keyConfigured = true;
+  ui.transcript.value = spoken;
+  const running = summarize(true);
+  await waitFor(() => release && state.aiController);
+  state.aiController.abort();
+  release();
+  await running;
+  const lines = activityLines(state);
+  assert.ok(lines.includes('회의록 정리 요청 보냄 · 구간 1/1'), lines.join(' | '));
+  assert.ok(!lines.some(line => line.startsWith('회의록 정리 받음') || line === '회의록 저장함'), lines.join(' | '));
+  assert.equal(lines.at(-1), '분석 취소함');
+  assert.equal(failureCount(state), 1);
+});
+
+test('시간 초과는 응답 없음 줄로 한 번만 끝난다', async () => {
+  const { state, ui, summarize } = fixture(() => Response.json({ error: { code: 'AI_TIMEOUT', message: 'AI 응답 시간이 초과됐습니다. 다시 시도하면 비용이 발생할 수 있습니다.' } }, { status: 503 }));
+  state.keyConfigured = true;
+  ui.transcript.value = spoken;
+  await summarize(true);
+  assert.equal(activityLines(state).at(-1), '응답 없음 · 5분 기다린 뒤 멈춤');
+  assert.equal(failureCount(state), 1);
+});
+
+test('회의록 저장에 실패하면 받음 줄 뒤에 저장 실패 줄이 한 번 온다', async () => {
+  const { state, ui, summarize } = fixture(null, { '/api/meetings/main': () => failed('저장 실패') });
+  state.keyConfigured = true;
+  ui.transcript.value = spoken;
+  await summarize(true);
+  assert.deepEqual(activityLines(state).slice(-2), ['회의록 정리 받음 · 구간 1/1', '실패 · 저장하지 못함']);
+  assert.equal(failureCount(state), 1);
+});
+
+test('원음 저장에 실패하면 저장 실패 줄로 끝난다', async () => {
+  const { state, finishMeeting } = fixture(null, { '/api/recordings/main/rec-activity/audio/1': () => failed('원음 저장 실패') });
+  state.keyConfigured = true;
+  state.location = 'main';
+  state.recordingId = 'rec-activity';
+  state.parts = [recorded()];
+  await finishMeeting();
+  assert.equal(activityLines(state).at(-1), '실패 · 저장하지 못함');
+  assert.equal(failureCount(state), 1);
+});
+
+test('길이 한도면 나눔 줄과 하위 구간 줄을 남긴다', async () => {
+  const { state, ui, summarize } = fixture((body, count) => count === 1 ? failedSummary('AI_OUTPUT_LIMIT') : successfulSummary(body));
+  state.keyConfigured = true;
+  ui.transcript.value = ('문장을 유지합니다. 다음 안건입니다.\n').repeat(250);
+  assert.equal(await summarize(true), true);
+  const lines = activityLines(state);
+  const split = lines.indexOf('길이 한도에 닿아 나눠 다시 보냄 · 구간 1');
+  assert.ok(split > 0, lines.join(' | '));
+  assert.equal(lines[split + 1], '회의록 정리 요청 보냄 · 구간 1-1/2');
+  assert.equal(failureCount(state), 0);
+  assert.equal(lines.at(-1), '회의록 저장함');
+});
+
+test('줄이기 결과를 못 쓰면 원래 길이로 저장 줄을 남긴다', async () => {
+  const { state, summarize } = analyzeLong(body => Response.json({ minutes: body.minutes, shortened: false }));
+  assert.equal(await summarize(true), true);
+  const lines = activityLines(state);
+  assert.deepEqual(lines.slice(-4), ['회의록 줄이기 요청 보냄', '회의록 줄이기 받음', '줄이기 결과를 못 써 원래 길이로 저장', '회의록 저장함']);
+});
+
+test('의견 반영은 의견 반영 줄을 쓴다', async () => {
+  const { state, ui, summarize } = fixture();
+  state.keyConfigured = true;
+  ui.transcript.value = spoken;
+  await summarize(true, '담당자를 고쳐 주세요');
+  const lines = activityLines(state);
+  assert.ok(lines.includes('의견 반영 요청 보냄 · 구간 1/1'), lines.join(' | '));
+  assert.ok(lines.includes('의견 반영 받음 · 구간 1/1'), lines.join(' | '));
+  assert.equal(state.activity.kind, 'refine');
+});
+
+test('전사만 하기는 전사 저장함으로 끝난다', async () => {
+  const { state, finishMeeting } = fixture(null, {}, { finishMode: 'transcript' });
+  state.keyConfigured = true;
+  state.parts = [recorded()];
+  await finishMeeting();
+  assert.deepEqual(activityLines(state), ['음성 저장함 · 1/1개', '전사 요청 보냄 · 조각 1/1 · 0.1MB', `전사 받음 · 조각 1/1 · ${spoken.length}자`, '전사 저장함']);
+});
+
+test('승계는 그 실행에만 쓰인다', async () => {
+  const { state, finishMeeting, transcribe } = fixture();
+  state.keyConfigured = true;
+  state.parts = [recorded()];
+  await finishMeeting();
+  const first = state.activity.id;
+  await transcribe();
+  assert.notEqual(state.activity.id, first);
+  assert.deepEqual(activityLines(state), ['받아 둔 전사 씀 · 조각 1/1']);
 });

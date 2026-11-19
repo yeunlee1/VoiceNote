@@ -66,6 +66,8 @@
   );
   const Formats = window.MeetingFormats;
   const Todos = window.MeetingTodos;
+  const Activity = window.MeetingActivity || null;
+  // AI 요청 기록 모듈이 없으면(옛 화면 시험 등) 기록만 건너뛰고 나머지는 그대로 동작한다.
   const TODO_NOTICES = { editing: "고치던 할 일을 저장하거나 취소해 주세요.", saving: "할 일을 저장하는 중입니다. 잠시 뒤 다시 눌러 주세요." };
   const formatLabels = Formats.LABELS;
   const outputFormat = (value) => (Object.hasOwn(formatLabels, value) ? value : "meeting");
@@ -262,15 +264,56 @@
     if (call.sent === true && typeof call.callId === "string") state.callIds = [...state.callIds, call.callId];
   }
 
-  async function aiApi(kind, path, options) {
+  function beginActivity(kind) {
+    state.activity = Activity ? Activity.create(kind, Date.now()) : null;
+    renderActivity();
+  }
+
+  function logActivity(event) {
+    if (!Activity || !state.activity) return;
+    Activity.add(state.activity, event, Date.now());
+    renderActivity();
+  }
+
+  function renderActivity() {}
+
+  const RECEIVED = { sendTranscript: "recvTranscript", sendSummary: "recvSummary", sendCompact: "recvCompact", sendRefine: "recvRefine" };
+
+  function cancelled(error) {
+    return error?.name === "AbortError" || error?.code === "AI_CANCELLED";
+  }
+
+  function requestFailure(error) {
+    // Windows 화면은 로컬 서버의 응답 번호만 알므로 OpenAI 번호 줄(apiError)은 쓰지 않는다.
+    if (error?.code === "AI_TIMEOUT") return { type: "timeout" };
+    if (error?.code === "AI_RESPONSE_INVALID") return { type: "badFormat" };
+    if (error instanceof TypeError) return { type: "disconnected" };
+    return { type: "failed", reason: error?.message };
+  }
+
+  async function aiApi(kind, path, options, event) {
+    const log = Activity && event ? state.activity : null;
+    if (log) {
+      Activity.openRequest(log, event, Date.now());
+      renderActivity();
+    }
     try {
       const result = await api(path, options);
       recordCall(result?.aiCall || { kind, sent: true, model: result?.model || (kind === "summary" ? state.summaryModel || "서버 기본 모델" : "서버 기본 전사 모델"), usage: result?.usage ?? null, audioSeconds: result?.audioSeconds });
       if (kind === "summary" && result?.model) state.analysisModel = result.model;
+      if (log && !options?.signal?.aborted) Activity.add(log, { ...event, type: RECEIVED[event.type], chars: String(result?.text || "").length }, Date.now());
+      // 취소한 뒤에 늦게 온 응답은 받음으로 적지 않는다. 취소 줄은 paidTask가 한 번 쓴다.
       return result;
     } catch (error) {
       if (error.aiCall) recordCall(error.aiCall);
+      if (log && !cancelled(error) && !["AI_OUTPUT_LIMIT", "AI_INPUT_LIMIT"].includes(error?.code)) Activity.add(log, requestFailure(error), Date.now());
+      // 길이 한도는 나눔 줄을 summarizeSection이 쓰고, 취소는 paidTask가 쓴다.
       throw error;
+    } finally {
+      if (log) {
+        Activity.closeRequest(log);
+        renderActivity();
+      }
     }
   }
 
@@ -1090,8 +1133,10 @@
   }
 
   async function requestTranscription(signal) {
-    for (const part of state.parts) {
+    const total = state.parts.length;
+    for (const [index, part] of state.parts.entries()) {
       assertAI(signal);
+      if (part.applied || part.transcript) logActivity({ type: "reuseTranscript", part: index + 1, total });
       if (part.applied) continue;
       if (part.transcript) {
         if (!part.applied) {
@@ -1114,7 +1159,7 @@
         body: part.blob,
         headers: { ...aiHeaders(type), ...(keywords.length ? { "X-Transcribe-Keywords": encodeURIComponent(keywords.join(",")) } : {}) },
         signal,
-      });
+      }, { type: "sendTranscript", part: index + 1, total, bytes: part.blob.size });
       assertAI(signal);
       part.transcript = result.text || "";
       if (ui.transcript.value !== before) {
@@ -1131,9 +1176,11 @@
     return ui.transcript.value;
   }
 
-  async function paidTask(task) {
+  async function paidTask(task, { continueActivity = false, kind = "analysis" } = {}) {
     if (needsNewKey() && !state.aiController) return promptNewKey();
     if (!canAnalyze() || state.aiController) return;
+    if (!continueActivity) beginActivity(kind);
+    // 회의 종료 흐름은 음성 저장 줄을 이어 쓰고, 그 밖의 시작은 새 일지를 연다. 승계는 이 인자로만 넘겨 다음 실행에 남지 않는다.
     state.trialWarning = "";
     const controller = new AbortController();
     // 분석 시도마다 새 식별자를 써서 분할·자동 재요청은 한 번으로, 명시적 재분석은 새 한 번으로 센다.
@@ -1145,6 +1192,8 @@
       return true;
     } catch (error) {
       if (state.finishAttempted !== analysisId) settleTrial("release", analysisId);
+      if (cancelled(error)) logActivity({ type: "canceled" });
+      else if (Activity && !Activity.lastIsFailure(state.activity)) logActivity({ type: "failed", reason: error.message });
       if (error.mustRegister) {
         announce(withTrialWarning(error.message));
         api("/api/config").then((config) => { applyAccess(config); refresh(); }).catch(() => {});
@@ -1194,16 +1243,22 @@
     });
   }
 
-  async function transcribeOnly() {
+  async function transcribeOnly({ continueActivity = false } = {}) {
     // 전사까지만 고른 회의다. 원음을 전사해 녹음 기록에 보관하고 회의록은 만들지 않는다. 받아 둔 전사는 다시 요청하지 않는다.
     return await paidTask(async (signal) => {
       const transcript = (await requestTranscription(signal)).trim();
       assertAI(signal);
       if (!transcript) throw new Error("전사 내용이 비어 있습니다.");
-      await api(`/api/recordings/${state.location}/${state.recordingId}/transcript`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: transcript }), signal,
-      });
+      try {
+        await api(`/api/recordings/${state.location}/${state.recordingId}/transcript`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: transcript }), signal,
+        });
+      } catch (error) {
+        if (!cancelled(error)) logActivity({ type: "saveFailed" });
+        throw error;
+      }
       assertAI(signal);
+      logActivity({ type: "savedTranscript" });
       for (const part of state.parts) part.applied = true;
       state.notesSaved = true;
       // 전사를 녹음 기록에 보관했으므로 창을 닫거나 다른 회의로 옮길 때 미저장으로 묻지 않는다.
@@ -1214,7 +1269,7 @@
       await loadHistory();
       workflow("전사를 저장했습니다. 회의록이 필요하면 정리본 탭의 ‘회의록 만들기’를 누르세요.");
       announce(withTrialWarning("전사를 저장했습니다. 회의록이 필요하면 정리본 탭의 ‘회의록 만들기’를 누르세요."));
-    });
+    }, { continueActivity });
   }
 
   function splitTranscript(value, maximum = 24_000) {
@@ -1250,7 +1305,7 @@
     return sections;
   }
 
-  async function summarize(useExistingText = false, feedback = "") {
+  async function summarize(useExistingText = false, feedback = "", { continueActivity = false } = {}) {
     // feedback이 있으면 의견 반영 다시 정리다. 모든 구간 요청에 같은 의견을 넣고, 새 결과에 그 의견을 함께 저장한다.
     if (state.parts.length && !state.audioStored) return await finishMeeting();
     state.finishMode = "minutes";
@@ -1277,14 +1332,17 @@
       }
       let previousMinutes = null;
       let additionalRequests = 0;
-      async function summarizeSection(text, depth = 0) {
+      async function summarizeSection(text, depth = 0, part = "1", total = 1) {
         assertAI(signal);
         if (summaryInput() !== source) throw new Error("전송 중 입력을 수정했습니다. 수정 내용은 유지했습니다. 다시 만들면 변경 내용을 반영합니다.");
         const body = JSON.stringify({ ...metadata, text, previousMinutes, ...(feedback ? { feedback } : {}), ...(state.models.length && state.summaryModel ? { model: state.summaryModel } : {}) });
         const cached = state.summarySteps.find((step) => step.body === body);
-        if (cached?.minutes) previousMinutes = cached.minutes;
+        if (cached?.minutes) {
+          previousMinutes = cached.minutes;
+          logActivity({ type: "reuseMinutes", part, total });
+        }
         else if (cached?.sections) {
-          for (const section of cached.sections) await summarizeSection(section, depth + 1);
+          for (const [index, section] of cached.sections.entries()) await summarizeSection(section, depth + 1, `${part}-${index + 1}`, cached.sections.length);
           cached.minutes = previousMinutes;
         }
         else {
@@ -1293,7 +1351,7 @@
           if (depth > 0) additionalRequests++;
           let result;
           try {
-            result = await aiApi("summary", "/api/summary", { method: "POST", body, headers: aiHeaders("application/json"), signal });
+            result = await aiApi("summary", "/api/summary", { method: "POST", body, headers: aiHeaders("application/json"), signal }, { type: feedback ? "sendRefine" : "sendSummary", part, total });
           } catch (error) {
             assertAI(signal);
             if (!["AI_OUTPUT_LIMIT", "AI_INPUT_LIMIT"].includes(error.code)) throw error;
@@ -1303,7 +1361,8 @@
             const step = { body, sections };
             state.summarySteps.push(step);
             workflow("요약 길이 한도에 도달해 해당 구간을 나눠 처리합니다. 자동 추가 요청은 최대 6회입니다.");
-            for (const section of sections) await summarizeSection(section, depth + 1);
+            logActivity({ type: "splitLimit", part });
+            for (const [index, section] of sections.entries()) await summarizeSection(section, depth + 1, `${part}-${index + 1}`, sections.length);
             step.minutes = previousMinutes;
           }
           if (result) {
@@ -1328,11 +1387,12 @@
         if (cached?.minutes) return cached.minutes;
         workflow("회의록이 길어 읽기 좋은 길이로 줄이는 중…");
         try {
-          const result = await aiApi("summary", "/api/summary/compact", { method: "POST", body, headers: aiHeaders("application/json"), signal });
+          const result = await aiApi("summary", "/api/summary/compact", { method: "POST", body, headers: aiHeaders("application/json"), signal }, { type: "sendCompact" });
           assertAI(signal);
           // 모델이 줄이지 못한 답을 주면 실패로 알리고, 성공으로 재사용하지 않게 저장하지 않는다.
           if (result.shortened === false) {
             shortenFailed = true;
+            logActivity({ type: "compactUnused" });
             return minutes;
           }
           state.summarySteps.push({ body, minutes: result.minutes });
@@ -1340,10 +1400,12 @@
         } catch {
           assertAI(signal);
           shortenFailed = true;
+          logActivity({ type: "compactUnused" });
           return minutes;
         }
       }
-      for (const text of splitTranscript(transcript)) await summarizeSection(text);
+      const sections = splitTranscript(transcript);
+      for (const [index, text] of sections.entries()) await summarizeSection(text, 0, String(index + 1), sections.length);
       previousMinutes = await shortenMinutes(previousMinutes);
       if (summaryInput() !== source)
         throw new Error("전송 중 입력을 수정했습니다. 수정 내용은 유지했습니다. 다시 만들면 변경 내용을 반영합니다.");
@@ -1365,12 +1427,18 @@
       clearReview();
       renderMinutes();
       refresh();
-      await archiveResult();
+      try {
+        await archiveResult();
+      } catch (error) {
+        logActivity({ type: "saveFailed" });
+        throw error;
+      }
+      logActivity({ type: "savedMinutes" });
       workflow(`회의록 저장 완료.${shortenNote}${shortenFailed ? " 의견 칸에 요청을 적고 ‘의견 반영해 다시 정리’를 누르면 다시 줄입니다." : ""} ‘지난 회의’에서 다시 열 수 있습니다.`);
       ui["retry-analysis"].hidden = true;
       const copyFailure = state.copies?.failed?.length ? ` ${copyMessage(state.copies)}` : "";
       announce(withTrialWarning(`${state.audioStored ? "음성과 " : ""}회의록을 보관했습니다. 내용을 검토하세요.${shortenNote}${copyFailure}`));
-    });
+    }, { continueActivity, kind: feedback ? "refine" : "analysis" });
   }
 
   function element(tag, text, className) {
@@ -2660,6 +2728,8 @@
   async function finishMeeting() {
     if (state.flowBusy || state.historyBusy || state.archiveBusy || state.aiController) return;
     state.flowBusy = true;
+    beginActivity("analysis");
+    // 진입 가드를 지난 뒤에 새 일지를 연다. 원음 저장 줄과 이어지는 전사·회의록 줄을 한 일지에 모은다.
     const savedNow = !state.audioStored;
     // 이번에 원음을 저장하는지(회의 종료·불러오기), 이미 저장된 음성으로 다시 하는지에 따라 고르는 창의 안내를 다르게 쓴다.
     cancelPendingImport();
@@ -2681,7 +2751,13 @@
         for (let i = 0; i < state.parts.length; i++) {
           const part = state.parts[i];
           workflow(`음성 저장 중 · ${i + 1}/${state.parts.length}개`);
-          await api(`/api/recordings/main/${state.recordingId}/audio/${i + 1}`, { method: "POST", headers: { "Content-Type": part.blob.type.split(";")[0] || "audio/webm" }, body: part.blob });
+          try {
+            await api(`/api/recordings/main/${state.recordingId}/audio/${i + 1}`, { method: "POST", headers: { "Content-Type": part.blob.type.split(";")[0] || "audio/webm" }, body: part.blob });
+          } catch (error) {
+            logActivity({ type: "saveFailed" });
+            throw error;
+          }
+          logActivity({ type: "saveAudio", part: i + 1, total: state.parts.length });
           part.saved = true;
           part.diskSaved = true;
         }
@@ -2706,12 +2782,13 @@
       // 아직 전사하지 않은 음성이 있으면 이 회의의 분석 방식을 고른다. 고른 방식은 실패 뒤 다시 시도에도 이어 쓰고, 전사가 이미 있으면 묻지 않고 회의록을 만든다.
       if (state.finishMode === "transcript") {
         workflow("음성 저장 완료. 전사하고 있습니다…");
-        await transcribeOnly();
+        await transcribeOnly({ continueActivity: true });
       } else {
         workflow("음성 저장 완료. 전사와 회의록을 분석하고 있습니다…");
-        await summarize();
+        await summarize(false, "", { continueActivity: true });
       }
     } catch (error) {
+      if (Activity && !Activity.lastIsFailure(state.activity)) logActivity({ type: "failed", reason: error.message });
       workflow(`${state.audioStored ? "음성 저장 완료. " : "저장을 완료하지 못했습니다. 창을 닫지 마세요. "}${error.message}`);
       ui["retry-analysis"].hidden = false;
     } finally { state.flowBusy = false; refresh(); }
