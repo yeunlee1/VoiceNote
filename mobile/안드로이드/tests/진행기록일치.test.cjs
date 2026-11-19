@@ -15,3 +15,11 @@ test('휴대폰 화면은 app.js보다 먼저 activity-log.js를 불러온다', 
   const log = html.indexOf('<script src="activity-log.js" defer></script>'), app = html.indexOf('<script src="app.js" defer></script>');
   assert.ok(log > 0 && log < app, `activity-log ${log}, app ${app}`);
 });
+
+test('cleartext 허용은 검증용 분기 안에만 있다', () => {
+  // 기기 시험의 가짜 OpenAI(http://127.0.0.1)만 평문으로 받는다. 설치본 매니페스트는 그대로 꺼 둔다.
+  assert.match(fs.readFileSync(path.join(android, 'AndroidManifest.xml'), 'utf8'), /android:usesCleartextTraffic="false"/);
+  const lines = fs.readFileSync(path.join(android, '빌드.ps1'), 'utf8').split(/\r?\n/).filter(line => line.includes('usesCleartextTraffic="true"'));
+  assert.ok(lines.length >= 1, '검증용 빌드가 cleartext를 켜는 줄이 있어야 한다');
+  for (const line of lines) assert.match(line.trim(), /^if\(\$DebugBuild\)\{/, `검증용 분기 밖에서 cleartext를 켜면 안 된다: ${line.trim()}`);
+});

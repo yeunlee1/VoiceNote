@@ -347,5 +347,10 @@ public final class MainActivity extends Activity {
         return MeetingDocument.text(record,store.appliedMinutes(location,id,record));
     }
     @Override public void onBackPressed(){view.evaluateJavascript("!!(window.handleBack&&window.handleBack())",handled->{if(!"true".equals(handled)&&!isFinishing())super.onBackPressed();});}
+    void readForTest(String js,ValueCallback<String> done){
+        // 기기 시험이 화면 글을 읽는 한 곳이다. 디버그로 만든 검증용 APK에서만 쓰고 설치본에서는 막는다. 화면 스레드에서 부른다.
+        if((getApplicationInfo().flags&android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)==0)throw new IllegalStateException("검증용 APK에서만 화면 글을 읽습니다.");
+        view.evaluateJavascript(js,done);
+    }
     @Override public void onDestroy(){view.removeJavascriptInterface("Native");view.destroy();worker.shutdown();super.onDestroy();}
 }
