@@ -20911,12 +20911,12 @@ function createMeetingServer(options = {}) {
         throw fail("NOT_FOUND", "\uC694\uCCAD \uACBD\uB85C\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", 404);
       }
       if (request.method !== "GET") throw fail("NOT_FOUND", "\uC694\uCCAD \uACBD\uB85C\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", 404);
-      const file2 = path === "/" || path === "/index.html" ? "index.html" : path === "/app.js" ? "app.js" : path === "/app.css" ? "app.css" : path === "/ai-usage.js" ? "ai-usage.js" : path === "/formats.js" ? "formats.js" : path === "/release-notes.js" ? "release-notes.js" : path === "/todos.js" ? "todos.js" : null;
+      const file2 = path === "/" || path === "/index.html" ? "index.html" : path === "/app.js" ? "app.js" : path === "/app.css" ? "app.css" : path === "/ai-usage.js" ? "ai-usage.js" : path === "/formats.js" ? "formats.js" : path === "/release-notes.js" ? "release-notes.js" : path === "/todos.js" ? "todos.js" : path === "/activity-log.js" ? "activity-log.js" : null;
       if (!file2) throw fail("NOT_FOUND", "\uD398\uC774\uC9C0\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", 404);
       let content;
       try {
         // \uBC84\uC804\uBCC4 \uBC14\uB010 \uC810(\uB9B4\uB9AC\uC988\uB178\uD2B8.js)\uC740 \uD734\uB300\uD3F0 \uD654\uBA74\uACFC \uAC19\uC740 \uD30C\uC77C\uC744 \uADF8\uB300\uB85C \uB0B4\uBCF4\uB0B8\uB2E4.
-        content = await (0, import_promises.readFile)(file2 === "ai-usage.js" ? (0, import_node_path.join)(__dirname, "AI\uC0AC\uC6A9\uB7C9.js") : file2 === "formats.js" ? (0, import_node_path.join)(__dirname, "\uCD9C\uB825\uD615\uC2DD.js") : file2 === "release-notes.js" ? (0, import_node_path.join)(__dirname, "\uB9B4\uB9AC\uC988\uB178\uD2B8.js") : file2 === "todos.js" ? (0, import_node_path.join)(__dirname, "\uD560\uC77C\uC815\uB9AC.js") : (0, import_node_path.join)(__dirname, "\uD654\uBA74", file2));
+        content = await (0, import_promises.readFile)(file2 === "ai-usage.js" ? (0, import_node_path.join)(__dirname, "AI\uC0AC\uC6A9\uB7C9.js") : file2 === "formats.js" ? (0, import_node_path.join)(__dirname, "\uCD9C\uB825\uD615\uC2DD.js") : file2 === "release-notes.js" ? (0, import_node_path.join)(__dirname, "\uB9B4\uB9AC\uC988\uB178\uD2B8.js") : file2 === "todos.js" ? (0, import_node_path.join)(__dirname, "\uD560\uC77C\uC815\uB9AC.js") : file2 === "activity-log.js" ? (0, import_node_path.join)(__dirname, "\uC9C4\uD589\uAE30\uB85D.js") : (0, import_node_path.join)(__dirname, "\uD654\uBA74", file2));
       } catch {
         throw fail("NOT_FOUND", "\uD398\uC774\uC9C0\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", 404);
       }

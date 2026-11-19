@@ -144,3 +144,23 @@ test('일지 번호가 바뀌면 칸을 새로 그린다', () => {
   assert.ok(!all.some(text => text.includes('음성 저장함')), all.join(' | '));
   assert.ok(all.includes('회의록 줄이기 요청 보냄'));
 });
+
+test('서버가 /activity-log.js로 진행기록.js를 그대로 준다', async t => {
+  const os = require('node:os');
+  const { createMeetingServer } = require('./서버.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'voicenote-activity-test-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const meeting = createMeetingServer({ dataDir: dir });
+  await new Promise(resolve => meeting.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => meeting.server.close(resolve)));
+  const response = await fetch(`http://127.0.0.1:${meeting.server.address().port}/activity-log.js`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') || '', /javascript/);
+  assert.equal(await response.text(), fs.readFileSync(path.join(__dirname, '진행기록.js'), 'utf8'));
+});
+
+test('Windows 화면은 app.js보다 먼저 activity-log.js를 불러온다', () => {
+  const html = fs.readFileSync(path.join(__dirname, '화면', 'index.html'), 'utf8');
+  const log = html.indexOf('<script src="./activity-log.js" defer></script>'), app = html.indexOf('<script src="./app.js" defer></script>');
+  assert.ok(log > 0 && log < app, `activity-log ${log}, app ${app}`);
+});
