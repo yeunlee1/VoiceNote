@@ -343,6 +343,8 @@
       return result;
     } catch (error) {
       if (error.aiCall) recordCall(error.aiCall);
+      if (options?.signal?.aborted && !cancelled(error)) throw Object.assign(new DOMException("요청 취소", "AbortError"), { cause: error });
+      // 사용자 취소가 먼저 확정됐으면 늦게 온 오류 응답도 취소로 끝낸다. 실패 줄을 쓰지 않고 부르는 쪽도 취소로 처리하게 한다. 사용량 기록은 위에서 이미 했다.
       if (log && !cancelled(error) && !["AI_OUTPUT_LIMIT", "AI_INPUT_LIMIT"].includes(error?.code)) Activity.add(log, requestFailure(error), Date.now());
       // 길이 한도는 나눔 줄을 summarizeSection이 쓰고, 취소는 paidTask가 쓴다.
       throw error;
@@ -1000,6 +1002,8 @@
       });
       clearParts();
       resetResult();
+      clearActivity();
+      // 새 녹음은 새 회의라 앞 회의의 일지를 지운다. resetResult 안에 넣지 않는 것은 같은 회의의 다른 결과 버전을 여는 openMeeting도 resetResult를 거치기 때문이다.
       state.recordingId = newOperationId();
       state.recordingStored = false;
       state.meetingId = null;
@@ -1144,6 +1148,8 @@
     });
     renderParts();
     resetResult();
+    clearActivity();
+    // 불러온 음성은 새 녹음 번호를 받는 새 회의라 앞 회의의 일지를 지운다.
     ui["record-state"].textContent = "파일 불러옴";
     state.recordingId = newOperationId();
     state.recordingStored = false;
@@ -1360,9 +1366,15 @@
       const source = summaryInput();
       const metadata = JSON.parse(source);
       if (!feedback && state.audioStored && state.recordingId) {
-        await api(`/api/recordings/${state.location}/${state.recordingId}/transcript`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: transcript }), signal,
-        });
+        try {
+          await api(`/api/recordings/${state.location}/${state.recordingId}/transcript`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: transcript }), signal,
+          });
+        } catch (error) {
+          if (!cancelled(error)) logActivity({ type: "saveFailed" });
+          throw error;
+        }
+        // 회의록 전에 전사 원문을 보관하지 못하면 전사만 하기와 같은 저장 실패 줄로 끝낸다.
         assertAI(signal);
         if (useExistingText === true) for (const part of state.parts) part.applied = true;
         ui["archive-status"].textContent = "음성과 전사 원문을 저장했습니다. 회의록을 분석하고 있습니다.";
@@ -1464,13 +1476,8 @@
       clearReview();
       renderMinutes();
       refresh();
-      try {
-        await archiveResult();
-      } catch (error) {
-        logActivity({ type: "saveFailed" });
-        throw error;
-      }
-      logActivity({ type: "savedMinutes" });
+      await archiveResult();
+      // 저장 줄은 저장 단추로 다시 저장할 때도 같도록 archiveResult가 쓴다.
       workflow(`회의록 저장 완료.${shortenNote}${shortenFailed ? " 의견 칸에 요청을 적고 ‘의견 반영해 다시 정리’를 누르면 다시 줄입니다." : ""} ‘지난 회의’에서 다시 열 수 있습니다.`);
       ui["retry-analysis"].hidden = true;
       const copyFailure = state.copies?.failed?.length ? ` ${copyMessage(state.copies)}` : "";
@@ -2473,6 +2480,8 @@
       closeResultForNewMeeting();
       clearParts();
       resetResult();
+      clearActivity();
+      // 새 회의를 준비하므로 앞 회의의 일지를 지운다.
       state.recordingId = null;
       state.recordingStored = false;
       state.meetingId = null;
@@ -2628,8 +2637,12 @@
     state.resultId ||= newOperationId();
     refresh();
     const document = { ...documentObject(), id: state.resultId, ...(state.recordingStored ? { recordingId: state.recordingId } : state.meetingId ? { meetingId: state.meetingId } : {}), ...(state.todoSource ? { sourceResultId: state.todoSource } : {}) };
+    let stored = false;
     try {
       const saved = await api(`/api/meetings/${state.location}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(document) });
+      stored = true;
+      logActivity({ type: "savedMinutes" });
+      // 분석 흐름과 저장 단추가 같은 이 자리에서 실제 저장 결과를 일지에 남긴다. 저장 뒤 목록 갱신이 실패해도 저장 줄은 그대로다.
       state.dailySequence = saved.meeting?.dailySequence;
       state.resultStored = true;
       state.notesSaved = true;
@@ -2645,6 +2658,7 @@
       ui["archive-status"].textContent = "전사 원문과 회의록 저장 완료";
       await loadHistory();
     } catch (error) {
+      if (!stored) logActivity({ type: "saveFailed" });
       ui["archive-status"].textContent = "회의록 저장 실패. 결과는 화면에 남아 있습니다. 저장을 다시 시도하세요.";
       throw error;
     } finally { state.archiveBusy = false; refresh(); }
@@ -2787,7 +2801,13 @@
         if (state.location !== "main" || !state.recordingId) { state.recordingId = null; state.recordingStored = false; state.meetingId = null; state.location = "main"; state.projectName = ""; }
         state.recordingId ||= newOperationId();
         state.recordingMetadata ||= recordingMetadata();
-        await api(`/api/recordings/main/${state.recordingId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...state.recordingMetadata, expectedParts: state.parts.length }) });
+        try {
+          await api(`/api/recordings/main/${state.recordingId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...state.recordingMetadata, expectedParts: state.parts.length }) });
+        } catch (error) {
+          logActivity({ type: "saveFailed" });
+          throw error;
+        }
+        // 녹음 등록도 원음 저장의 한 단계라 실패하면 원음 조각 저장과 같은 저장 실패 줄을 쓴다.
         state.recordingStored = true;
         for (let i = 0; i < state.parts.length; i++) {
           const part = state.parts[i];

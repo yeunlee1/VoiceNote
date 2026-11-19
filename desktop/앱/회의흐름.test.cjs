@@ -1155,3 +1155,109 @@ test('새 회의를 시작하면 일지를 지운다', async () => {
   assert.equal(view.ui['activity-log'].hidden, true);
   assert.equal(view.ui['detail-activity'].hidden, true);
 });
+
+// ── 끝 검토 반영: 취소가 먼저면 늦은 실패도 취소로, 새 회의로 바뀌면 일지를 지우고, 저장 줄은 실제 저장 결과를 따른다.
+const heldTimeout = holder => () => new Promise(resolve => { holder.release = () => resolve(Response.json({ error: { code: 'AI_TIMEOUT', message: 'AI 응답 시간이 초과됐습니다. 다시 시도하면 비용이 발생할 수 있습니다.' } }, { status: 503 })); });
+
+test('취소 뒤에 늦게 온 실패 응답도 실패 줄 없이 분석 취소함으로 끝난다', async () => {
+  const held = {};
+  const { state, ui, summarize } = fixture(heldTimeout(held));
+  state.keyConfigured = true;
+  ui.transcript.value = spoken;
+  const running = summarize(true);
+  await waitFor(() => held.release && state.aiController);
+  state.aiController.abort();
+  held.release();
+  await running;
+  const lines = activityLines(state);
+  assert.deepEqual(lines.slice(-2), ['회의록 정리 요청 보냄 · 구간 1/1', '분석 취소함'], lines.join(' | '));
+  assert.equal(failureCount(state), 1, lines.join(' | '));
+  assert.match(ui['workflow-status'].textContent, /분석을 취소했습니다/);
+});
+
+test('전사 중 취소 뒤에 늦게 온 실패 응답도 분석 취소함으로 끝난다', async () => {
+  const held = {};
+  const { state, finishMeeting } = fixture(null, { '/api/transcribe': heldTimeout(held) });
+  state.keyConfigured = true;
+  state.parts = [recorded()];
+  const running = finishMeeting();
+  await waitFor(() => held.release && state.aiController);
+  state.aiController.abort();
+  held.release();
+  await running;
+  const lines = activityLines(state);
+  assert.equal(lines.at(-1), '분석 취소함', lines.join(' | '));
+  assert.equal(failureCount(state), 1, lines.join(' | '));
+});
+
+test('새 음성을 불러오면 앞선 회의의 일지를 지운다', async () => {
+  const view = fixture();
+  view.state.keyConfigured = true;
+  view.ui.transcript.value = spoken;
+  await view.summarize(true);
+  assert.ok(view.state.activity);
+  await view.importAudio(picked(['새 회의.wav', 'audio/wav', wavHead()]));
+  assert.equal(view.state.parts.length, 1);
+  assert.equal(view.state.activity, null);
+  assert.equal(view.ui['activity-log'].hidden, true);
+});
+
+test('회의 준비를 누르면 앞선 회의의 일지를 지운다', async () => {
+  const view = fixture();
+  view.state.keyConfigured = true;
+  view.ui.transcript.value = spoken;
+  await view.summarize(true);
+  assert.ok(view.state.activity);
+  view.bind();
+  view.ui.prepare.click();
+  assert.equal(view.state.activity, null);
+  assert.equal(view.ui['activity-log'].hidden, true);
+});
+
+test('새 녹음을 시작하면 앞선 회의의 일지를 지운다', async () => {
+  class Recorder { static isTypeSupported() { return true; } constructor() { throw new Error('시험용 녹음기'); } }
+  const view = fixture(() => failed('요약 실패'), {}, { navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [] }) } }, MediaRecorder: Recorder, window: { MediaRecorder: Recorder } });
+  view.state.keyConfigured = true;
+  view.ui.transcript.value = spoken;
+  await view.summarize(true);
+  assert.ok(view.state.activity);
+  view.ui.transcript.value = '';
+  const before = view.state.recordingId;
+  await view.startRecording();
+  assert.notEqual(view.state.recordingId, before, '새 녹음 번호를 정하는 지점까지 갔다');
+  assert.equal(view.state.activity, null);
+});
+
+test('저장 실패 뒤 저장 단추로 다시 저장하면 일지 끝이 회의록 저장함이 된다', async () => {
+  let archiveCalls = 0;
+  const { state, ui, summarize, archiveResult } = fixture(null, { '/api/meetings/main': () => (++archiveCalls === 1 ? failed('저장 실패') : Response.json({ meeting: {} })) });
+  state.keyConfigured = true;
+  ui.transcript.value = spoken;
+  await summarize(true);
+  assert.equal(activityLines(state).at(-1), '실패 · 저장하지 못함');
+  await archiveResult();
+  assert.equal(state.resultStored, true);
+  assert.equal(activityLines(state).at(-1), '회의록 저장함');
+  assert.equal(activityLines(state).filter(line => line === '회의록 저장함').length, 1);
+});
+
+test('회의록 전에 전사 원문 저장에 실패하면 저장 실패 줄로 끝난다', async () => {
+  const { state, ui, summarize } = fixture(null, { '/api/recordings/main/rec-saved/transcript': () => failed('전사 저장 실패') });
+  state.keyConfigured = true;
+  Object.assign(state, { location: 'main', recordingId: 'rec-saved', audioStored: true });
+  ui.transcript.value = spoken;
+  await summarize(true);
+  assert.equal(activityLines(state).at(-1), '실패 · 저장하지 못함', activityLines(state).join(' | '));
+  assert.equal(failureCount(state), 1);
+});
+
+test('녹음 등록에 실패하면 저장 실패 줄로 끝난다', async () => {
+  const { state, finishMeeting } = fixture(null, { '/api/recordings/main/rec-register': () => failed('녹음 등록 실패') });
+  state.keyConfigured = true;
+  state.location = 'main';
+  state.recordingId = 'rec-register';
+  state.parts = [recorded()];
+  await finishMeeting();
+  assert.equal(activityLines(state).at(-1), '실패 · 저장하지 못함', activityLines(state).join(' | '));
+  assert.equal(failureCount(state), 1);
+});

@@ -17,8 +17,9 @@ public final class AiRequestTest {
         volatile boolean closed;
         volatile boolean releasedByDisconnect;
         volatile int disconnects;
-        int writesBeforeBlock = Integer.MAX_VALUE;
-        boolean blockOnClose, blockOnResponse, trickle;
+        int writesBeforeBlock = Integer.MAX_VALUE, failWritesAfter = -1;
+        boolean blockOnClose, blockOnResponse, trickle, closeReturnsAfterDisconnect;
+        volatile boolean responseRead;
         long responseDelayMillis;
         String responseBody = "{\"ok\":true}";
 
@@ -42,12 +43,20 @@ public final class AiRequestTest {
                 @Override public void write(int b) throws IOException { write(new byte[]{(byte) b}, 0, 1); }
                 @Override public void write(byte[] b, int off, int len) throws IOException {
                     if (closed) throw new IOException("Socket closed");
+                    if (failWritesAfter >= 0 && writes >= failWritesAfter) throw new IOException("Broken pipe");
                     if (writes++ >= writesBeforeBlock) blockUntilClosed();
                 }
-                @Override public void close() throws IOException { if (blockOnClose) blockUntilClosed(); }
+                @Override public void close() throws IOException {
+                    if (blockOnClose) blockUntilClosed();
+                    if (closeReturnsAfterDisconnect) synchronized (gate) {
+                        while (!closed) { try { gate.wait(50); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); throw new InterruptedIOException(); } }
+                    }
+                    // 감시가 끊은 뒤에도 예외 없이 돌아오는 닫기다. 감시 확정과 정상 반환이 겹치는 순서를 만든다.
+                }
             };
         }
         @Override public int getResponseCode() throws IOException {
+            responseRead = true;
             if (blockOnResponse) blockUntilClosed();
             if (responseDelayMillis > 0) { try { Thread.sleep(responseDelayMillis); } catch (InterruptedException ex) { throw new InterruptedIOException(); } }
             return 200;
@@ -162,6 +171,24 @@ public final class AiRequestTest {
         expect(waiting.uploaded(ms(1_000)), "다 올림");
         expect(waiting.check(ms(1_550)) == AiRequest.RUNNING, "다 올린 뒤 550ms는 계속");
         expect(waiting.check(ms(1_601)) == AiRequest.TIMED_OUT, "다 올린 뒤 601ms는 응답 없음");
+        // 13. 감시가 먼저 끝냈으면 닫기가 정상으로 돌아와도 다 올림을 알리지 않고 응답도 읽지 않는다
+        FakeConnection racing = new FakeConnection(); racing.closeReturnsAfterDisconnect = true;
+        Recorder raced = new Recorder();
+        try { AiRequest.exchange(racing, SMALL_BODY, raced, FAST); throw new AssertionError("감시가 끝낸 요청이 받음으로 끝나면 안 됩니다"); }
+        catch (AiRequest.Stalled expected) { expect(!raced.events.contains("uploaded") && !racing.responseRead, "감시가 끝낸 요청은 다 올림·응답 읽기로 가지 않는다 " + raced.events + " 응답 읽음=" + racing.responseRead); }
+        noGuardLeft("닫기 경합");
+        // 14. 본문을 만드는 쪽(원음 파일 읽기)의 오류는 Local로 원래 오류를 담아 알리고 연결 오류로 보지 않게 한다
+        FileNotFoundException missing = new FileNotFoundException("원음-001.m4a (No such file or directory)");
+        Recorder localEvents = new Recorder();
+        try { AiRequest.exchange(new FakeConnection(), (out, wrote) -> { out.write(new byte[8192]); wrote.accept(8192); throw missing; }, localEvents, FAST); throw new AssertionError("파일 오류가 받음으로 끝나면 안 됩니다"); }
+        catch (AiRequest.Local expected) { expect(expected.getCause() == missing && expected.getMessage().equals(missing.getMessage()) && !localEvents.events.contains("uploaded"), "본문 쪽 파일 오류는 Local이 원래 오류를 담는다"); }
+        noGuardLeft("본문 쪽 오류");
+        // 15. 연결로 쓰다 난 오류는 Local이 아니라 원래 오류 그대로다
+        FakeConnection broken = new FakeConnection(); broken.failWritesAfter = 1;
+        try { AiRequest.exchange(broken, SMALL_BODY, new Recorder(), FAST); throw new AssertionError("쓰기 오류가 받음으로 끝나면 안 됩니다"); }
+        catch (AiRequest.Local wrong) { throw new AssertionError("연결 쓰기 오류를 본문 쪽 오류로 보면 안 됩니다"); }
+        catch (IOException expected) { expect(!(expected instanceof AiRequest.Stalled) && "Broken pipe".equals(expected.getMessage()), "연결 쓰기 오류는 원래 오류 그대로 알린다 " + expected); }
+        noGuardLeft("연결 쓰기 오류");
         System.out.println("PASS " + checks + " AiRequest checks");
     }
 }

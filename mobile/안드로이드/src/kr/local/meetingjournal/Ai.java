@@ -74,6 +74,8 @@ final class Ai {
     }
     AiRequest.Response exchange(HttpURLConnection connection,AiRequest.Body body,Call call)throws IOException {
         try{return AiRequest.exchange(connection,body,call,limits);}
+        catch(AiRequest.Local ex){throw (IOException)ex.getCause();}
+        // 원음 파일을 열거나 읽지 못한 오류처럼 본문을 만드는 쪽의 오류는 원래 오류 그대로 돌려, 연결 끊김으로 적지 않고 지금 오류 문구로 알린다.
         catch(AiRequest.Stalled ex){throw ex;}
         catch(IOException ex){
             if(!(ex instanceof SocketTimeoutException&&call.connected)&&!Thread.currentThread().isInterrupted())network=ex;

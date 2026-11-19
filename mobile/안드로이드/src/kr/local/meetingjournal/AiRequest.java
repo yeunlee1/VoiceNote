@@ -17,6 +17,8 @@ final class AiRequest {
     }
     static final class Stalled extends IOException {Stalled(){super("요청을 보내다 1분 넘게 멈춰 중단했습니다. 인터넷 연결을 확인한 뒤 다시 분석하세요. 저장된 자료는 유지됩니다.");}}
     static final class Response {final int status;final String body;Response(int status,String body){this.status=status;this.body=body;}}
+    static final class Local extends IOException {Local(IOException cause){super(cause.getMessage(),cause);}}
+    // 본문을 만드는 쪽(원음 파일 열기·읽기, 분석 중단 확인)에서 난 오류다. 연결로 쓰다 난 오류와 가르려고 원래 오류를 담아 알린다.
 
     static final int RUNNING=0,DONE=1,STALLED=2,TIMED_OUT=3;
 
@@ -36,6 +38,16 @@ final class AiRequest {
         synchronized int state(){return state;}
     }
 
+    private static final class Network extends OutputStream {
+        // 연결로 내보내는 쓰기다. 여기서 난 오류를 기억해 두어, 본문을 만드는 쪽의 오류와 가른다.
+        final OutputStream out;IOException failure;
+        Network(OutputStream out){this.out=out;}
+        @Override public void write(int b)throws IOException{try{out.write(b);}catch(IOException ex){failure=ex;throw ex;}}
+        @Override public void write(byte[] b,int off,int len)throws IOException{try{out.write(b,off,len);}catch(IOException ex){failure=ex;throw ex;}}
+        @Override public void flush()throws IOException{try{out.flush();}catch(IOException ex){failure=ex;throw ex;}}
+        @Override public void close()throws IOException{try{out.close();}catch(IOException ex){failure=ex;throw ex;}}
+    }
+
     static IOException failure(int state,IOException cause){
         IOException failure=state==STALLED?new Stalled():new SocketTimeoutException("응답 없음");
         if(cause!=null)failure.initCause(cause);return failure;
@@ -52,15 +64,21 @@ final class AiRequest {
         },limits.tickMillis,limits.tickMillis,TimeUnit.MILLISECONDS);
         IOException failed=null;Response response=null;
         try{
-            OutputStream out=connection.getOutputStream();
-            watch.progress(System.nanoTime());listener.connected();
-            body.write(out,sent->{watch.progress(System.nanoTime());listener.wrote(sent);});
+            Network out=new Network(connection.getOutputStream());
+            if(!watch.progress(System.nanoTime()))throw new IOException("감시가 요청을 끝냈습니다.");
+            listener.connected();
+            try{body.write(out,sent->{if(watch.progress(System.nanoTime()))listener.wrote(sent);});}
+            catch(IOException ex){if(ex!=out.failure&&watch.state()==RUNNING)throw new Local(ex);throw ex;}
+            // 연결로 쓰다 난 오류가 아니고 감시도 끝내지 않았으면 본문을 만드는 쪽(원음 파일·중단 확인)의 오류다.
             out.close();
-            watch.progress(System.nanoTime());
-            watch.uploaded(System.nanoTime());listener.uploaded();
+            if(!watch.uploaded(System.nanoTime()))throw new IOException("감시가 요청을 끝냈습니다.");
+            // 감시가 먼저 멈춤·응답 없음으로 확정했으면 닫기가 정상으로 돌아와도 다 올림을 알리거나 응답을 읽지 않는다. 아래 catch가 확정한 실패로 바꾼다.
+            listener.uploaded();
             int status=connection.getResponseCode();String text;
             try(InputStream in=status<400?connection.getInputStream():connection.getErrorStream()){text=in==null?"{}":read(in);}
             if(watch.complete())response=new Response(status,text);else failed=failure(watch.state(),null);
+        }catch(Local ex){
+            failed=ex;
         }catch(IOException ex){
             int state=watch.state();
             failed=state==STALLED||state==TIMED_OUT?failure(state,ex):ex;

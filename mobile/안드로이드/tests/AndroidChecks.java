@@ -1213,6 +1213,12 @@ public final class AndroidChecks extends Instrumentation {
             ActivityLog second=new ActivityLog("analysis",null);Ai again=new Ai(store,message->{});again.log=second;again.run(store.load("main",id));
             List<String> texts=lines(second,false);
             expect(texts.contains("받아 둔 전사 씀 · 조각 1/1")&&texts.contains("받아 둔 회의록 씀 · 구간 1/1")&&texts.stream().noneMatch(text->text.contains("요청 보냄")),"같은 회의를 새 일지로 다시 분석하면 받아 둔 전사·회의록을 쓰고 요청을 보내지 않는다 "+texts);
+            JSONObject lost=heardRecord(store,"합성 원음 없음");expect(new File(store.directory("main",lost.getString("id")),"원음-001.m4a").delete(),"시험용 원음을 지운다");
+            Ai.apiBase=fakeApi()+"local/";ActivityLog localLog=new ActivityLog("analysis",null);Ai reader=new Ai(store,message->{});reader.log=localLog;
+            // 위 요청 수 판정과 섞이지 않게 다른 경로로 보낸다. 본문을 쓰다 원음을 열지 못하므로 응답은 쓰지 않는다.
+            try{reader.run(lost);throw new AssertionError("원음이 없는데 분석이 끝나면 안 됩니다.");}
+            catch(FileNotFoundException expected){expect(lines(localLog,true).equals(Collections.singletonList("sendTranscript")),"원음 파일을 열지 못하면 보냄 줄 뒤에 연결 끊김을 적지 않고 원래 파일 오류로 끝난다 "+lines(localLog,false));}
+            finally{Ai.apiBase=fakeApi();}
             Store real=new Store(getTargetContext());String missing=UUID.randomUUID().toString();
             try{
                 showMain();launchService(analyzeIntent(missing,"합성-없는회의"));
