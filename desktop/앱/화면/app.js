@@ -62,6 +62,7 @@
       "desk-work", "recording-info", "people-preview", "history-search",
       "finish-choice", "finish-choice-note", "finish-minutes", "finish-transcript",
       "update-ask", "update-ask-version", "update-ask-current", "update-ask-yes", "update-ask-notes",
+      "activity-log", "detail-activity",
     ].map((id) => [id, $(id)]),
   );
   const Formats = window.MeetingFormats;
@@ -275,7 +276,43 @@
     renderActivity();
   }
 
-  function renderActivity() {}
+  let activityTimer = null;
+
+  function renderActivity() {
+    // Windows 일지는 늘 지금 불러온 회의의 것이라 진행 칸과 결과 칸에 같은 일지를 그린다.
+    if (!Activity) return;
+    const now = Date.now();
+    for (const box of [ui["activity-log"], ui["detail-activity"]]) {
+      const list = box.children[1] || null;
+      const atBottom = Boolean(list) && list.scrollTop + list.clientHeight >= list.scrollHeight - 4;
+      const kept = list ? list.scrollTop : 0;
+      Activity.render(box, state.activity, now, { limitOwner: "server", document });
+      const next = box.children[1] || null;
+      if (next && next !== list) next.scrollTop = atBottom || !list ? next.scrollHeight : kept;
+      // 새 줄이 생겨도 사용자가 목록 맨 아래를 보고 있을 때만 따라 내려가고, 위를 보고 있었으면 그 자리를 지킨다.
+    }
+    const open = Boolean(state.activity?.open);
+    if (open && !activityTimer) activityTimer = setInterval(tickActivity, 1000);
+    if (!open && activityTimer) {
+      clearInterval(activityTimer);
+      activityTimer = null;
+    }
+  }
+
+  function tickActivity() {
+    if (!Activity) return;
+    const now = Date.now();
+    for (const box of [ui["activity-log"], ui["detail-activity"]]) Activity.tick(box, state.activity, now, { limitOwner: "server" });
+  }
+
+  function meetingIdentity() {
+    return `${state.location}/${state.recordingId || state.meetingId || ""}`;
+  }
+
+  function clearActivity() {
+    state.activity = null;
+    renderActivity();
+  }
 
   const RECEIVED = { sendTranscript: "recvTranscript", sendSummary: "recvSummary", sendCompact: "recvCompact", sendRefine: "recvRefine" };
 
@@ -2408,6 +2445,7 @@
 
   function resetMeetingForm(resetDate = true) {
     // 새 회의 양식을 비우고 설정의 기본 출력 형식으로 시작한다. 회의명은 비워 두면 분석할 때 AI가 정한다.
+    clearActivity();
     ui.title.value = "";
     if (resetDate) ui.date.value = today();
     ui["output-format"].value = defaultFormat();
@@ -2519,6 +2557,7 @@
     state.historyBusy = true;
     cancelPendingImport();
     refresh();
+    const previousMeeting = meetingIdentity();
     try {
       const { meeting, versions, review, todos, todosUnreadable, me = null } = await api(`/api/meetings/${location}/${id}`);
       const parts = [];
@@ -2540,6 +2579,8 @@
       state.recordingStored = Boolean(state.recordingId);
       state.meetingId = state.recordingId ? null : meeting.meetingId || id;
       state.location = location;
+      if (meetingIdentity() !== previousMeeting) clearActivity();
+      // 결과 버전만 바꿔 연 같은 회의는 일지를 남기고, 다른 회의를 열었을 때만 지운다.
       state.projectName = meeting.projectName || "";
       state.recordingMetadata = { title: meeting.title, date: meeting.date, participants: meeting.participants, notes: meeting.notes || "",
         outputFormat: outputFormat(meeting.outputFormat), ...(state.meetingCustom ? { customFormat: state.meetingCustom } : {}) };

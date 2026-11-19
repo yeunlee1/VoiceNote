@@ -1051,3 +1051,107 @@ test('승계는 그 실행에만 쓰인다', async () => {
   assert.notEqual(state.activity.id, first);
   assert.deepEqual(activityLines(state), ['받아 둔 전사 씀 · 조각 1/1']);
 });
+
+// ── 진행 기록 화면: 진행 칸·결과 칸 그리기, 1초 타이머, 회의가 바뀔 때 지우기
+function fakeClock(start = new Date(2026, 10, 19, 20, 42, 30).getTime()) {
+  let now = start, next = 1;
+  class FakeDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [now])); }
+    static now() { return now; }
+  }
+  const timers = new Map(), cleared = [];
+  return { Date: FakeDate, timers, cleared, advance: ms => { now += ms; },
+    setInterval: fn => { const id = next++; timers.set(id, fn); return id; },
+    clearInterval: id => { cleared.push(id); timers.delete(id); } };
+}
+async function pendingSummary() {
+  const clock = fakeClock();
+  let release = null;
+  const view = fixture(body => new Promise(resolve => { release = () => resolve(successfulSummary(body)); }), {}, { Date: clock.Date, setInterval: clock.setInterval, clearInterval: clock.clearInterval });
+  view.state.keyConfigured = true;
+  view.ui.transcript.value = spoken;
+  const running = view.summarize(true);
+  await waitFor(() => release);
+  return { ...view, clock, running, release: () => release() };
+}
+const waitRow = box => box.children[1].children.at(-1);
+
+test('분석 중에는 진행 칸과 결과 칸에 일지와 기다림 줄이 보인다', async () => {
+  const view = await pendingSummary();
+  for (const id of ['activity-log', 'detail-activity']) {
+    assert.equal(view.ui[id].hidden, false, id);
+    assert.deepEqual(texts(waitRow(view.ui[id])), ['지금', '응답 기다리는 중 · 0:00 / 최대 5:00'], id);
+  }
+  view.release();
+  await view.running;
+});
+
+test('1초 타이머는 열린 요청이 있을 때만 돈다', async () => {
+  const view = await pendingSummary();
+  assert.equal(view.clock.timers.size, 1);
+  view.release();
+  await view.running;
+  assert.equal(view.clock.timers.size, 0);
+  assert.ok(view.clock.cleared.length >= 1);
+});
+
+test('tick은 기다림 줄 글만 바꾼다', async () => {
+  const view = await pendingSummary();
+  const list = view.ui['activity-log'].children[1];
+  const before = list.children.slice();
+  view.clock.advance(31_000);
+  view.tickActivity();
+  assert.deepEqual(list.children, before);
+  assert.equal(texts(list.children.at(-1))[1], '응답 기다리는 중 · 0:31 / 최대 5:00');
+  view.release();
+  await view.running;
+});
+
+test('5분이 지나도 화면은 끊지 않고 늦게 받으면 받음과 저장 줄이 된다', async () => {
+  const view = await pendingSummary();
+  view.clock.advance(303_000);
+  view.tickActivity();
+  assert.equal(texts(waitRow(view.ui['activity-log']))[1], '응답 기다리는 중 · 5:03 · 제한 시간이 지나면 서버가 실패로 알려 줌');
+  view.release();
+  await view.running;
+  assert.deepEqual(activityLines(view.state).slice(-2), ['회의록 정리 받음 · 구간 1/1', '회의록 저장함']);
+});
+
+const openedMeeting = recordingId => ({ meeting: { id: 'result-2', location: 'main', recordingId, title: '시험 회의', date: '2026-11-19', participants: '', transcript: spoken,
+  minutes: { overview: '요약', topics: [], decisions: [], actions: [], openQuestions: [] }, dailySequence: 1, audio: [], expectedParts: 0 }, versions: [] });
+async function analyzedThenOpen(loadedRecordingId) {
+  const view = fixture(null, { '/api/meetings/main/result-2': openedMeeting(loadedRecordingId) });
+  view.state.keyConfigured = true;
+  view.ui.transcript.value = spoken;
+  await view.summarize(true);
+  Object.assign(view.state, { location: 'main', recordingId: 'rec-a', meetingId: null });
+  const before = view.state.activity;
+  assert.ok(before);
+  await view.openMeeting('main', 'result-2');
+  return { ...view, before };
+}
+
+test('다른 회의를 열면 일지를 지운다', async () => {
+  const view = await analyzedThenOpen('rec-other');
+  assert.equal(view.state.activity, null);
+  assert.equal(view.ui['activity-log'].hidden, true);
+  assert.equal(view.ui['detail-activity'].hidden, true);
+});
+
+test('같은 회의의 다른 결과 버전을 열면 일지가 남는다', async () => {
+  const view = await analyzedThenOpen('rec-a');
+  assert.equal(view.state.activity, view.before);
+  assert.equal(view.ui['activity-log'].hidden, false);
+});
+
+test('새 회의를 시작하면 일지를 지운다', async () => {
+  const view = fixture();
+  view.state.keyConfigured = true;
+  view.ui.transcript.value = spoken;
+  await view.summarize(true);
+  assert.ok(view.state.activity);
+  view.resetMeetingForm();
+  assert.equal(view.state.activity, null);
+  assert.equal(view.ui['activity-log'].hidden, true);
+  assert.equal(view.ui['detail-activity'].hidden, true);
+});
