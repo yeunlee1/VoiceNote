@@ -37,7 +37,7 @@ public final class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView web,WebResourceRequest request){return true;}
             @Override public WebResourceResponse shouldInterceptRequest(WebView web,WebResourceRequest request){
                 Uri uri=request.getUrl();String file=uri.getPath();
-                if("app.meeting.local".equals(uri.getHost())&&("/index.html".equals(file)||"/app.js".equals(file)||"/flow.js".equals(file)||"/formats.js".equals(file)||"/todos.js".equals(file)||"/release-notes.js".equals(file)||"/app.css".equals(file))){try{return new WebResourceResponse(file.endsWith(".css")?"text/css":file.endsWith(".js")?"application/javascript":"text/html","UTF-8",getAssets().open(file.substring(1)));}catch(IOException ignored){}}
+                if("app.meeting.local".equals(uri.getHost())&&("/index.html".equals(file)||"/app.js".equals(file)||"/flow.js".equals(file)||"/formats.js".equals(file)||"/todos.js".equals(file)||"/release-notes.js".equals(file)||"/activity-log.js".equals(file)||"/app.css".equals(file))){try{return new WebResourceResponse(file.endsWith(".css")?"text/css":file.endsWith(".js")?"application/javascript":"text/html","UTF-8",getAssets().open(file.substring(1)));}catch(IOException ignored){}}
                 return new WebResourceResponse("text/plain","UTF-8",403,"Forbidden",Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));
             }});view.loadUrl("https://app.meeting.local/index.html");
         worker.submit(()->{if(!MeetingService.active&&!MeetingService.starting())AudioImport.cleanTemp(this);});
