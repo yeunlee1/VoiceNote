@@ -50,3 +50,19 @@ test('AI 워커 사용량 원장(종류·측정/미확인 건수·음성 시간)
   assert.equal(rows[1].note, '1건 사용량 미확인');
   assert.equal(rows[2].kind, '전사'); assert.equal(rows[2].total, '해당 없음', '초 단위 과금 전사는 토큰 해당 없음'); assert.equal(rows[2].note, '음성 25분');
 });
+
+test('조회 전에는 분석 멈춤으로 보지 않는다', () => {
+  assert.equal(Flow.analysisStopped({ id: 'm1', location: 'main', state: 'analyzing' }, undefined), false);
+});
+
+test('서비스가 분석하지 않는 analyzing 회의는 분석 멈춤이다', () => {
+  const entry = { id: 'm1', location: 'main', state: 'analyzing' };
+  const status = (active, meeting) => ({ active, meeting });
+  assert.equal(Flow.analysisStopped(entry, status(false, null)), true, '서비스가 쉬고 있음');
+  assert.equal(Flow.analysisStopped(entry, status(true, { id: 'm1', location: 'main', state: 'analyzing' })), false, '같은 회의를 분석 중');
+  assert.equal(Flow.analysisStopped(entry, status(true, { id: 'm1', location: 'main', state: 'recording' })), true, '같은 회의지만 분석 중이 아님');
+  assert.equal(Flow.analysisStopped(entry, status(true, { id: 'm2', location: 'main', state: 'analyzing' })), true, '다른 회의를 분석 중');
+  assert.equal(Flow.analysisStopped({ ...entry, state: 'complete' }, status(false, null)), false, '분석 중이 아닌 회의');
+  assert.equal(Flow.analysisStopped({ id: 'm1', state: 'analyzing' }, status(true, { id: 'm1', state: 'analyzing' })), false, '위치 생략은 main');
+  assert.equal(Flow.analysisStopped({ id: 'm1', state: 'analyzing' }, status(true, { id: 'm1', location: 'shared', state: 'analyzing' })), true, '위치가 다르면 다른 회의');
+});

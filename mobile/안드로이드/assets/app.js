@@ -1,6 +1,6 @@
 // 네이티브 녹음 상태와 보관함별 지난 회의 및 AI 설정을 연결한다.
 (() => {
-  const $ = id => document.getElementById(id), pending = new Map(), Flow = window.VoiceFlow, Todos = window.MeetingTodos;
+  const $ = id => document.getElementById(id), pending = new Map(), Flow = window.VoiceFlow, Todos = window.MeetingTodos, Activity = window.MeetingActivity || null;
   const state = { settings: {}, connection: { keyConfigured: false, keySource: 'none', models: [], summaryModel: '' }, active: false, recording: false, busy: false, opened: null, lastState: '', lastHistory: '', lastMeetingState: '', removeArmed: false, deleteArmed: false, opener: null,
     // 앱 업데이트 상태(네이티브가 알려 준 그대로), 한 번 누름으로 받은 뒤 설치까지 이어 갈지, 실행 중 여부와 마지막 오류다.
     update: null, updateIntent: false, updateRunning: false, updateError: '',
@@ -182,14 +182,17 @@
     if (state.draftFailed) throw new Error('회의 준비 내용을 저장하지 못했습니다. 잠시 뒤 다시 눌러 주세요.');
   }
   const stateLabels = { complete: '회의록', transcribed: '전사만', failed: '분석 실패', interrupted: '녹음 중단', saved: '음성 저장', analyzing: '분석 중', recording: '녹음 중' };
+  const STOPPED_MESSAGE = '앱이 분석 도중 닫혀 멈췄습니다. 다시 분석하면 받아 둔 전사부터 이어서 합니다.';
   async function history() {
     const data = await call('history'), entries = data.meetings, rows = [];
     if (data.skipped) rows.push(node('p', '읽지 못한 기록 ' + data.skipped + '개', 'hint'));
     if (!entries.length) rows.push(node('p', '보관된 회의가 없습니다.', 'empty'));
     for (const entry of entries) {
       const button = node('button'); button.type = 'button'; button.dataset.location = entry.location; button.dataset.id = entry.id; button.dataset.search = `${entry.title || '제목 미정 회의'} ${entry.date || ''} ${entry.projectName || ''}`.toLowerCase();
-      const label = entry.state !== 'complete' ? stateLabels[entry.state] : Flow.outputFormat(entry.outputFormat) === 'custom' && entry.customFormat?.name ? entry.customFormat.name : Flow.FORMAT_LABELS[Flow.outputFormat(entry.outputFormat)];
-      const status = node('span', null, 'state ' + (entry.state === 'failed' || entry.state === 'interrupted' ? 'failed' : ''));
+      const stopped = Flow.analysisStopped(entry, state.lastStatus);
+      // 앱이 분석 도중 닫혀 analyzing이 남은 회의는 「분석 중」 대신 「분석 멈춤」으로 보이고, 녹음 중단처럼 손볼 일로 강조한다.
+      const label = stopped ? '분석 멈춤' : entry.state !== 'complete' ? stateLabels[entry.state] : Flow.outputFormat(entry.outputFormat) === 'custom' && entry.customFormat?.name ? entry.customFormat.name : Flow.FORMAT_LABELS[Flow.outputFormat(entry.outputFormat)];
+      const status = node('span', null, 'state ' + (stopped || entry.state === 'failed' || entry.state === 'interrupted' ? 'failed' : ''));
       if (entry.mineOpen) status.append(node('span', `내 일 ${entry.mineOpen}`, 'mine-count'));
       // 최신 결과에서 내가 아직 안 끝낸 일의 수를 형식 이름 위에 둔다. 0이거나 내가 누구인지 모르면 네이티브가 주지 않는다.
       status.append(node('span', label || '보관'));
@@ -510,7 +513,8 @@
     const selected = data.resultId || record.resultId || resultId; state.opened = { location, id, ...(selected == null ? {} : { resultId: selected }) }; state.opener = opener || state.opener;
     $('meeting-date').textContent = `${record.date} · ${record.dailySequence}차 회의`;
     $('meeting-title').textContent = record.title || '회의';
-    $('meeting-status').textContent = record.message || '녹음 파일을 보관했습니다.';
+    $('meeting-status').textContent = Flow.analysisStopped({ state: record.state, id, location }, state.lastStatus) ? STOPPED_MESSAGE : record.message || '녹음 파일을 보관했습니다.';
+    // 앱이 분석 도중 닫혀 멈춘 회의는 보여 주는 안내만 바꾸고 회의 파일의 값은 그대로 둔다. 다시 분석하면 지금처럼 덮어쓴다.
     $('meeting-notes').textContent = record.notes || ''; $('meeting-notes-wrap').hidden = !record.notes;
     $('transcript').textContent = transcript;
     const format = Flow.outputFormat(record.outputFormat), custom = format === 'custom' ? record.customFormat || null : null, label = custom ? custom.name : Flow.FORMAT_LABELS[format === 'custom' ? 'meeting' : format];
@@ -534,6 +538,8 @@
     $('transcript-meta').textContent = transcript ? `전사 ${number(Array.from(transcript).length)}자 · 녹음에서 인식한 글을 그대로 보여 줍니다.` : '아직 전사문이 없습니다.';
     showTab(availableTab(tab));
     $('result').hidden = false; document.body.style.overflow = 'hidden'; $('main').inert = true; document.querySelector('.topbar').inert = true; document.querySelector('.dock').inert = true; $('result').scrollTop = 0; $('result').focus();
+    renderActivity(state.lastStatus);
+    // 결과 화면을 여는 순간 그 회의의 일지를 그린다. 다음 조회를 기다리면 1.5초 동안 빈 칸으로 보인다.
     lock();
   }
   function renderSections(host, sections, renderActions = null) {
@@ -698,12 +704,39 @@
     // 초점을 줄 때 브라우저가 스스로 스크롤하면 목록 끝의 줄이 아래쪽 탭에 가릴 수 있다. 스크롤 여백을 지키는 가까운 위치로만 옮긴다.
   }
 
+  let activityTimer = 0;
+  const activityOf = status => status && status.meeting && status.meeting.activity || null;
+  function renderActivity(status) {
+    // 서비스가 실어 보낸 이번 작업의 AI 요청 일지를 진행 칸에는 최근 4줄로, 같은 회의를 연 결과 화면에는 전부 그린다.
+    if (!Activity) return;
+    const log = activityOf(status), now = Date.now(), opened = state.opened;
+    const same = Boolean(log && opened && !$('result').hidden && opened.location === log.location && opened.id === log.meetingId);
+    for (const [id, shown, rows] of [['activity', log, 4], ['meeting-activity', same ? log : null, null]]) {
+      const box = $(id), list = box.children[1] || null;
+      const atBottom = Boolean(list) && list.scrollTop + list.clientHeight >= list.scrollHeight - 4, kept = list ? list.scrollTop : 0;
+      Activity.render(box, shown, now, { limitOwner: 'app', maxRows: rows, document });
+      const next = box.children[1] || null;
+      if (next && next !== list) next.scrollTop = atBottom || !list ? next.scrollHeight : kept;
+      // 새 줄이 생겨도 사용자가 목록 맨 아래를 보고 있을 때만 따라 내려가고, 위를 보고 있었으면 그 자리를 지킨다.
+    }
+    const open = Boolean(log && log.open);
+    if (open && !activityTimer) activityTimer = setInterval(tickActivity, 1000);
+    if (!open && activityTimer) { clearInterval(activityTimer); activityTimer = 0; }
+  }
+  function tickActivity() {
+    // 열린 요청이 있는 동안 1초마다 기다림 줄의 글만 고친다. 목록은 다시 그리지 않는다.
+    const log = activityOf(state.lastStatus), now = Date.now();
+    for (const id of ['activity', 'meeting-activity']) Activity.tick($(id), log, now, { limitOwner: 'app' });
+  }
+
   async function poll(force = false) {
     if (state.polling || (state.busy && !force)) return;
     state.polling = true;
     try {
       const status = await call('status'), meeting = status.meeting;
       if (state.busy && !force) return;
+      const previous = state.lastStatus; state.lastStatus = status; renderActivity(status);
+      // 목록의 「분석 멈춤」과 결과 화면 안내는 이 마지막 조회 결과로 판단한다.
       const analysis = state.analyzing && meeting.attemptId === state.analyzing.attemptId ? state.analyzing : null;
       const mine = !!state.importing && meeting.attemptId === state.importing, watching = !!state.lastState || mine || !!analysis;
       // 다시 분석·회의록 만들기·종료 뒤 고른 분석은 시도 번호로 따라간다. 첫 조회 전에 끝나도 그 끝 상태로 결과를 연다.
@@ -747,7 +780,8 @@
         }
         // 녹음 뒤 자동 분석이 체험 소진으로 멈췄으면 같은 안내와 함께 AI 설정을 연다.
         if (!state.active && watching && meeting.state === 'failed' && meeting.message === Flow.EXHAUSTED_MESSAGE && !$('settings').open) { message(meeting.message); openSettings(); }
-      }
+      } else if (previous && previous.active !== status.active) await history();
+      // 서비스가 일을 시작하거나 끝내면 목록의 「분석 멈춤」 판단이 바뀌므로 목록을 다시 그린다.
       if (analysis && !status.active && ['complete', 'failed', 'transcribed'].includes(meeting.state)) state.analyzing = null;
       if (!status.active && state.chosenMode && state.chosenMode.id === meeting.id && ['complete', 'transcribed'].includes(meeting.state)) state.chosenMode = null;
       // 고른 방식은 그 회의의 분석이 실패한 동안만 다시 분석에 이어 쓴다. 성공해 끝나면 지운다.
@@ -1086,7 +1120,8 @@
   task(async () => {
     const init = await call('init'); state.settings = init.settings || {}; state.connection = init.connection; state.active = !!init.connection.active;
     state.customFormat = init.customFormat || null; updateCustomOption();
-    loadEditor(); renderSettings(); renderConnection(); applyUpdate(init.update); await applyDraft(); await history(); await poll(true); setInterval(poll, 1500);
+    loadEditor(); renderSettings(); renderConnection(); applyUpdate(init.update); await applyDraft(); await poll(true); if (!state.lastHistory) await history(); setInterval(poll, 1500);
+    // 첫 목록을 그리기 전에 서비스 상태를 한 번 받아, 앱이 닫혀 멈춘 분석을 처음부터 「분석 멈춤」으로 보인다. 첫 조회가 목록을 이미 그렸으면 다시 그리지 않는다.
     // 새 버전 확인은 첫 화면을 기다리게 하지 않도록 마지막에 따로 시작한다. 이 요청을 모르는 이전 브리지에서는 조용히 넘어간다.
     call('update').then(applyUpdate).catch(() => {});
   });
