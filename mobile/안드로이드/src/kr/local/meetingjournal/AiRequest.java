@@ -74,6 +74,8 @@ final class AiRequest {
             if(!watch.uploaded(System.nanoTime()))throw new IOException("감시가 요청을 끝냈습니다.");
             // 감시가 먼저 멈춤·응답 없음으로 확정했으면 닫기가 정상으로 돌아와도 다 올림을 알리거나 응답을 읽지 않는다. 아래 catch가 확정한 실패로 바꾼다.
             listener.uploaded();
+            if(watch.state()!=RUNNING)throw new IOException("감시가 요청을 끝냈습니다.");
+            // 다 올림 통지(일지·알림 갱신)를 처리하는 사이 감시가 끝냈으면 응답을 읽지 않는다. 그 뒤에 끝내면 감시가 연결을 끊어 응답 읽기가 바로 실패한다.
             int status=connection.getResponseCode();String text;
             try(InputStream in=status<400?connection.getInputStream():connection.getErrorStream()){text=in==null?"{}":read(in);}
             if(watch.complete())response=new Response(status,text);else failed=failure(watch.state(),null);

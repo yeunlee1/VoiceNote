@@ -189,6 +189,21 @@ public final class AiRequestTest {
         catch (AiRequest.Local wrong) { throw new AssertionError("연결 쓰기 오류를 본문 쪽 오류로 보면 안 됩니다"); }
         catch (IOException expected) { expect(!(expected instanceof AiRequest.Stalled) && "Broken pipe".equals(expected.getMessage()), "연결 쓰기 오류는 원래 오류 그대로 알린다 " + expected); }
         noGuardLeft("연결 쓰기 오류");
+        // 16. 다 올림 통지를 처리하는 동안 감시가 응답 없음으로 끝내면 응답을 읽지 않는다
+        FakeConnection slowCallback = new FakeConnection();
+        List<String> slowEvents = new ArrayList<>();
+        AiRequest.Listener slow = new AiRequest.Listener() {
+            @Override public void connected() { slowEvents.add("connected"); }
+            @Override public void wrote(long sent) {}
+            @Override public void uploaded() {
+                slowEvents.add("uploaded");
+                synchronized (slowCallback.gate) { while (!slowCallback.closed) { try { slowCallback.gate.wait(50); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); return; } } }
+                // 감시가 응답 제한으로 연결을 끊을 때까지 통지가 돌아오지 않는 순서를 만든다.
+            }
+        };
+        try { AiRequest.exchange(slowCallback, SMALL_BODY, slow, FAST); throw new AssertionError("감시가 끝낸 요청이 받음으로 끝나면 안 됩니다"); }
+        catch (SocketTimeoutException expected) { expect(!slowCallback.responseRead, "다 올림 통지 중 감시가 끝낸 요청은 응답을 읽지 않는다 " + slowEvents + " 응답 읽음=" + slowCallback.responseRead); }
+        noGuardLeft("다 올림 통지 경합");
         System.out.println("PASS " + checks + " AiRequest checks");
     }
 }

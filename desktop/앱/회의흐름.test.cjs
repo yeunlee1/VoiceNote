@@ -1261,3 +1261,15 @@ test('녹음 등록에 실패하면 저장 실패 줄로 끝난다', async () =>
   assert.equal(activityLines(state).at(-1), '실패 · 저장하지 못함', activityLines(state).join(' | '));
   assert.equal(failureCount(state), 1);
 });
+
+test('저장 확인 응답 본문이 깨지면 성공 줄 없이 저장 실패 줄로 끝난다', async () => {
+  const { state, ui, summarize } = fixture(null, { '/api/meetings/main': () => new Response('저장 응답이 깨졌습니다', { status: 200, headers: { 'Content-Type': 'text/plain' } }) });
+  state.keyConfigured = true;
+  ui.transcript.value = spoken;
+  await summarize(true);
+  const lines = activityLines(state);
+  assert.equal(state.resultStored, false);
+  assert.ok(!lines.includes('회의록 저장함'), lines.join(' | '));
+  assert.equal(lines.at(-1), '실패 · 저장하지 못함', lines.join(' | '));
+  assert.equal(failureCount(state), 1, lines.join(' | '));
+});

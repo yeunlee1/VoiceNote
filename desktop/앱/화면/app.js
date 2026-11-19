@@ -2640,12 +2640,12 @@
     let stored = false;
     try {
       const saved = await api(`/api/meetings/${state.location}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(document) });
-      stored = true;
-      logActivity({ type: "savedMinutes" });
-      // 분석 흐름과 저장 단추가 같은 이 자리에서 실제 저장 결과를 일지에 남긴다. 저장 뒤 목록 갱신이 실패해도 저장 줄은 그대로다.
       state.dailySequence = saved.meeting?.dailySequence;
       state.resultStored = true;
       state.notesSaved = true;
+      stored = true;
+      logActivity({ type: "savedMinutes" });
+      // 분석 흐름과 저장 단추가 같은 이 자리에서, 화면이 저장 결과를 받아들인 뒤에만 저장 줄을 쓴다. 응답 본문이 깨져 받아들이지 못하면 아래 catch가 저장 실패 줄을 쓰고, 저장 뒤 목록 갱신만 실패하면 저장 줄은 그대로다.
       // 의견 반영으로 이어받은 수정본이 있으면 받아 오고, 이제 고칠 수 있으므로 할 일을 다시 그린다.
       setSavedTodos(saved.todos);
       renderMinutes();
