@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>진행 표시 시안</title>
+<!-- VoiceNote tm 44: 전사·요약처럼 오래 걸리는 작업 중 진행 표시 시안 5개를 Windows·휴대폰 화면으로 비교하는 시연 페이지 -->
+<style>
+:root {
+  color-scheme: light;
+  --paper: #f7f7f5;
+  --sheet: #ffffff;
+  --well: #f4f4f1;
+  --ink: #1a1d21;
+  --ink-soft: #3f454c;
+  --ink-faint: #5a6169;
+  --rule: rgba(22, 26, 30, 0.11);
+  --rule-strong: rgba(22, 26, 30, 0.24);
+  --teal: #0d6f68;
+  --teal-deep: #0a5a54;
+  --teal-wash: #e4f1ef;
+  --teal-wash-deep: #d3e8e4;
+  --rec: #b3261e;
+  --rec-deep: #8f1d17;
+  --rec-wash: #f9e7e3;
+  /* 기존 앱에 없는 색 하나: '평소보다 오래 걸림'에만 쓰는 황토색 */
+  --slow: #7a4f00;
+  --slow-wash: #fbf0d9;
+  --slow-line: #c78b16;
+  --radius-s: 6px;
+  --radius-m: 8px;
+  --radius-l: 12px;
+  --ease: cubic-bezier(0.23, 1, 0.32, 1);
+  font-family: "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); }
+body { -webkit-font-smoothing: antialiased; word-break: keep-all; overflow-wrap: anywhere; }
+h1, h2, h3, p, ul, figure { margin: 0; }
+button, select { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+.page { max-width: 1320px; margin: 0 auto; padding: 32px 24px 64px; }
+.page-head { display: grid; gap: 12px; margin-bottom: 24px; }
+.eyebrow { font-size: 12.5px; color: var(--ink-faint); letter-spacing: 0.02em; }
+.page-head h1 { font-size: 26px; line-height: 1.3; letter-spacing: -0.01em; }
+.lede { padding-left: 18px; color: var(--ink-soft); font-size: 14.5px; display: grid; gap: 2px; }
+.controls { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; margin: 4px -12px 0; background: rgba(247, 247, 245, 0.94); border-bottom: 1px solid var(--rule); backdrop-filter: blur(6px); }
+.controls .button { min-height: 36px; padding: 0 14px; border: 1px solid var(--rule-strong); border-radius: var(--radius-s); background: var(--sheet); font-size: 14px; cursor: pointer; }
+.controls .button:hover { background: var(--well); }
+.controls .button:active { transform: scale(0.97); }
+.controls label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink-soft); }
+.controls select { min-height: 36px; padding: 0 8px; border: 1px solid var(--rule-strong); border-radius: var(--radius-s); background: var(--sheet); }
+.sim-clock { margin-left: auto; font-size: 13px; color: var(--ink-faint); }
+.sim-clock b { color: var(--ink); }
+
+.concept { display: grid; gap: 16px; padding: 24px 0 28px; border-top: 1px solid var(--rule); }
+.concept-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; max-width: 860px; }
+.concept-head h2 { display: flex; align-items: center; gap: 10px; font-size: 19px; line-height: 1.35; }
+.tag { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--teal); color: #fff; font-size: 14px; font-weight: 700; flex: none; }
+.concept.now .tag { background: var(--ink-faint); }
+.notes { padding-left: 18px; font-size: 13.5px; color: var(--ink-soft); display: grid; gap: 1px; }
+.notes b { color: var(--ink); font-weight: 600; }
+.size { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 20px; vertical-align: 1px; }
+.size.s { background: var(--teal-wash); color: var(--teal-deep); }
+.size.m { background: var(--slow-wash); color: var(--slow); }
+.size.l { background: var(--rec-wash); color: var(--rec-deep); }
+
+.devices { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start; }
+@media (max-width: 1080px) { .devices { grid-template-columns: minmax(0, 1fr); } .phone { justify-self: center; } }
+figcaption { font-size: 12.5px; color: var(--ink-faint); margin-bottom: 6px; }
+
+/* Windows 창 틀 */
+.window { border: 1px solid var(--rule-strong); border-radius: 10px; overflow: hidden; background: var(--paper); box-shadow: 0 0 0 1px rgba(0,0,0,.02), 0 8px 24px -12px rgba(22,26,30,.18); }
+.titlebar { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 10px; background: #ecece8; font-size: 12px; color: var(--ink-soft); }
+.titlebar i { display: inline-block; width: 10px; height: 1.5px; margin-left: 14px; background: var(--ink-faint); vertical-align: middle; }
+.app { display: grid; grid-template-columns: 172px minmax(0, 1fr); min-height: 300px; }
+.sidebar { border-right: 1px solid var(--rule); padding: 12px 10px; display: grid; align-content: start; gap: 6px; }
+.sidebar .lab { font-size: 11.5px; color: var(--ink-faint); }
+.sidebar .row { height: 34px; border-radius: var(--radius-s); background: rgba(22,26,30,.04); }
+.sidebar .row:first-of-type { background: var(--teal-wash); }
+.desk { padding: 14px 18px 18px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.desk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.desk-title { font-size: 17px; font-weight: 700; }
+.stage { display: flex; gap: 12px; padding: 0; margin: 0; list-style: none; font-size: 12.5px; color: var(--ink-faint); }
+.stage li { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+@media (max-width: 640px) {
+  .page { padding: 20px 16px 48px; }
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { display: none; }
+  .desk { padding: 12px; }
+}
+.stage .mark { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--rule-strong); background: var(--sheet); }
+.stage .done { color: var(--ink-soft); }
+.stage .done .mark, .stage .cur .mark { background: var(--teal); border-color: var(--teal); }
+.stage .cur { color: var(--ink); font-weight: 700; }
+
+/* 휴대폰 틀 */
+.handset { width: min(340px, 100%);border: 10px solid #22272b; border-radius: 34px; background: var(--paper); overflow: hidden; box-shadow: 0 10px 28px -14px rgba(22,26,30,.35); }
+.statusbar-phone { display: flex; justify-content: space-between; padding: 6px 18px 2px; font-size: 11.5px; color: var(--ink-soft); }
+.phone-body { padding: 10px 14px 12px; display: grid; gap: 10px; min-height: 420px; align-content: start; }
+.phone-title { font-size: 17px; font-weight: 700; }
+.timer-big { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink-faint); }
+.dock { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--rule); background: var(--sheet); font-size: 11.5px; color: var(--ink-faint); text-align: center; }
+.dock span { padding: 9px 0 10px; }
+.dock .on { color: var(--teal-deep); font-weight: 700; }
+.notif { margin-top: 12px; width: min(340px, 100%);border-radius: 16px; background: var(--sheet); border: 1px solid var(--rule); padding: 10px 12px 12px; display: grid; gap: 4px; font-size: 13px; }
+.notif-app { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-faint); }
+.notif-app i { width: 16px; height: 16px; border-radius: 50%; background: var(--teal); }
+.notif b { font-size: 13.5px; }
+
+/* 지금 화면 */
+.legacy { padding: 12px 16px; border-left: 3px solid var(--teal); background: var(--teal-wash); color: var(--teal-deep); font-size: 14px; border-radius: 0 var(--radius-s) var(--radius-s) 0; }
+.legacy.phone-legacy { font-size: 13.5px; }
+
+/* 공통 조각 */
+.block { border: 1px solid var(--rule); border-radius: var(--radius-m); background: var(--sheet); padding: 12px 14px; display: grid; gap: 10px; }
+.headline { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.headline .what { font-size: 15px; font-weight: 600; }
+.headline .elapsed { font-size: 20px; font-weight: 600; color: var(--teal-deep); }
+.muted { color: var(--ink-faint); font-size: 12.5px; }
+.soft { color: var(--ink-soft); font-size: 13px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { min-height: 34px; padding: 0 12px; border-radius: var(--radius-s); border: 1px solid var(--rule-strong); background: var(--sheet); font-size: 13px; cursor: pointer; }
+.btn.primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--ink-soft); }
+.btn:active { transform: scale(0.97); }
+
+/* 요청 하나 안의 진행은 알 수 없으므로 '움직이고 있음'만 보이는 띠 */
+.activity { position: relative; height: 3px; border-radius: 3px; background: var(--teal-wash-deep); overflow: hidden; }
+.activity::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 34%; border-radius: 3px; background: var(--teal); animation: slide 1.4s var(--ease) infinite; }
+.activity.slow { background: #f0dfb6; }
+.activity.slow::after { background: var(--slow-line); }
+@keyframes slide { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
+.pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--teal); flex: none; animation: pulse 1.6s ease-in-out infinite; }
+.pulse.slow { background: var(--slow-line); }
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.82); } }
+
+/* A 단계 목록 */
+.steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
+.steps li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: 6px 0; }
+.steps .dot { width: 16px; height: 16px; margin-top: 3px; border-radius: 50%; border: 1.5px solid var(--rule-strong); background: var(--sheet); position: relative; }
+.steps .done .dot { background: var(--teal); border-color: var(--teal); }
+.steps .done .dot::after { content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.steps .cur .dot { border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-wash); }
+.steps .cur .dot::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--teal); animation: pulse 1.6s ease-in-out infinite; }
+.steps .cur.slow .dot { border-color: var(--slow-line); box-shadow: 0 0 0 3px var(--slow-wash); }
+.steps .cur.slow .dot::after { background: var(--slow-line); }
+.steps .fail .dot { border-color: var(--rec); background: var(--rec); }
+.steps .name { font-size: 14px; }
+.steps .done .name, .steps .todo .name { color: var(--ink-soft); }
+.steps .cur .name { font-weight: 600; }
+.steps .side { font-size: 12.5px; color: var(--ink-faint); text-align: right; }
+.steps .cur .side { color: var(--teal-deep); font-weight: 600; font-size: 13.5px; }
+.steps .cur.slow .side { color: var(--slow); }
+.steps .sub { grid-column: 2 / 4; display: grid; gap: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--rule); font-size: 12.5px; color: var(--ink-soft); background: var(--sheet); }
+.chip.done { background: var(--teal-wash); border-color: transparent; color: var(--teal-deep); }
+.chip.cur { border-color: var(--teal); color: var(--teal-deep); font-weight: 600; }
+.chip.slow { border-color: var(--slow-line); color: var(--slow); background: var(--slow-wash); }
+.chip.fail { border-color: var(--rec); color: var(--rec-deep); background: var(--rec-wash); }
+
+/* B 요청 일지 */
+.log { list-style: none; padding: 0; margin: 0; display: grid; gap: 0; font-size: 13px; }
+.log li { display: grid; grid-template-columns: 64px 14px minmax(0, 1fr); gap: 8px; padding: 5px 0; border-bottom: 1px dashed var(--rule); }
+.log li:last-child { border-bottom: 0; }
+.log .t { color: var(--ink-faint); }
+.log .k { width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: var(--rule-strong); }
+.log .send .k { background: var(--sheet); border: 1.5px solid var(--teal); }
+.log .recv .k { background: var(--teal); }
+.log .wait .k { background: var(--teal); animation: pulse 1.6s ease-in-out infinite; }
+.log .wait .m { font-weight: 600; color: var(--teal-deep); }
+.log .bad .k { background: var(--rec); }
+.log .bad .m { color: var(--rec-deep); font-weight: 600; }
+
+/* C 진행 막대 */
+.bar { height: 10px; border-radius: 999px; background: var(--well); border: 1px solid var(--rule); overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--teal); border-radius: 999px; transition: width .4s var(--ease); }
+.bar.slow > i { background: var(--slow-line); }
+.bar.fail > i { background: var(--rec); }
+.ticks { display: grid; grid-template-columns: 5fr 50fr 40fr 5fr; font-size: 11.5px; color: var(--ink-faint); }
+.ticks span { border-left: 1px solid var(--rule-strong); padding-left: 4px; white-space: nowrap; overflow: hidden; }
+.pct { font-size: 26px; font-weight: 700; color: var(--teal-deep); letter-spacing: -0.02em; }
+
+/* D 살아 있음과 오래 걸림 */
+.alive { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-m); background: var(--teal-wash); color: var(--teal-deep); font-size: 14px; }
+.alive.slow { background: var(--slow-wash); color: var(--slow); }
+.alive .grow { flex: 1; min-width: 0; }
+.alive b { font-weight: 700; }
+.watch { border: 1px solid var(--slow-line); border-left-width: 4px; border-radius: var(--radius-m); background: var(--slow-wash); color: var(--slow); padding: 12px 14px; display: grid; gap: 8px; font-size: 13.5px; }
+.watch strong { font-size: 14.5px; }
+.watch .btn { border-color: rgba(122, 79, 0, .35); background: #fffaf0; color: var(--slow); }
+.watch .btn.primary { background: var(--slow); border-color: var(--slow); color: #fff; }
+
+/* 실패(모든 시안 공통) */
+.failcard { border: 1px solid rgba(179, 38, 30, .35); border-left-width: 4px; border-radius: var(--radius-m); background: var(--rec-wash); color: var(--rec-deep); padding: 12px 14px; display: grid; gap: 8px; font-size: 13.5px; }
+.failcard strong { font-size: 14.5px; }
+.failcard .btn.primary { background: var(--rec); border-color: var(--rec); }
+
+/* E 결과 미리보기 */
+.preview { display: grid; gap: 6px; font-size: 13px; }
+.preview .line { color: var(--ink-soft); }
+.preview .line.new { color: var(--ink); }
+.preview .typing::after { content: "▍"; color: var(--teal); animation: blink 1s steps(1) infinite; }
+.skeleton { height: 10px; border-radius: 4px; background: linear-gradient(90deg, #ecece8, #f4f4f1, #ecece8); background-size: 200% 100%; animation: shimmer 1.6s linear infinite; }
+.sec-title { font-size: 12.5px; font-weight: 700; color: var(--ink-soft); margin-top: 4px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+.compare { padding-top: 24px; border-top: 1px solid var(--rule); display: grid; gap: 12px; }
+.compare h2 { font-size: 19px; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 760px; background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius-m); font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12.5px; color: var(--ink-faint); font-weight: 600; background: var(--well); }
+tr:last-child td { border-bottom: 0; }
+.foot { font-size: 12.5px; color: var(--ink-faint); padding-left: 18px; display: grid; gap: 2px; }
+
+.activity::after, .pulse, .steps .cur .dot::after, .log .wait .k, .preview .typing::after, .skeleton { animation-delay: var(--t, 0ms); }
+/* 시연 칸은 자주 다시 그려지므로 움직임을 같은 시계(--t)에 맞춰 이어 가게 함 */
+[data-render]:empty { display: none; }
+[data-render] { scroll-margin: 16px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .activity::after { animation: none; width: 100%; opacity: .35; }
+  .pulse, .steps .cur .dot::after, .log .wait .k { animation: none; }
+  .skeleton { animation: none; }
+  .preview .typing::after { animation: none; }
+  .bar > i { transition: none; }
+}
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="page-head">
+    <p class="eyebrow">VoiceNote · tm 44 · 2026-11-19 · 시안(실제 앱 아님)</p>
+    <h1>분석 중 진행 표시 시안 5개</h1>
+    <ul class="lede">
+      <li>지금은 분석 내내 글 한 줄이 그대로 남아, 멈췄는지 일하는지 알 수 없음</li>
+      <li>두 앱 모두 OpenAI 응답을 요청이 끝날 때 한꺼번에 받음. 그래서 요청 하나가 끝나기 전에는 OpenAI가 얼마나 했는지 알 수 없음</li>
+      <li>지금 방식으로도 보여 줄 수 있는 것: 지금 단계, 조각 번호, 요청을 보낸 뒤 지난 시간, 응답 대기 제한 5분</li>
+      <li>5분 제한은 지금 Windows에는 OpenAI 요청마다 있고, 휴대폰은 응답을 읽는 동안에만 있음. 휴대폰 음성 올리기에는 아직 제한이 없어 B안을 만들 때 함께 넣음</li>
+      <li>응답을 조금씩 받는 방식(스트리밍)으로 바꾸면 OpenAI가 요청을 받았다는 신호와 글이 실제로 늘어나는 모습까지 보임. 전사·회의록 둘 다 OpenAI가 지원함</li>
+      <li>진행률(예: 전사 37%)은 알 수 없는 값이라 지어내지 않음. 시안 C만 추정 막대를 쓰고 추정이라고 밝힘</li>
+      <li>시연은 3분짜리 분석을 6배 빠르게 돌림. 시간 숫자와 회의 내용은 예시이며, '상황'에서 오래 걸림·실패도 볼 수 있음</li>
+      <li>모형 안 단추 중 '계속 기다리기'와 '저장·분석 다시 시도'만 시연에서 동작함. 나머지 단추는 모양만 보여 줌</li>
+    </ul>
+    <div class="controls" role="group" aria-label="시연 조작">
+      <button class="button" id="play" type="button">멈춤</button>
+      <button class="button" id="restart" type="button">처음부터</button>
+      <label>상황
+        <select id="scenario">
+          <option value="normal">보통(3분)</option>
+          <option value="slow">회의록 정리가 오래 걸림</option>
+          <option value="fail">전사 중 5분 넘게 응답 없음(실패)</option>
+        </select>
+      </label>
+      <span class="sim-clock">시연 경과 <b class="num" id="sim-clock">0:00</b> · 6배속</span>
+    </div>
+  </header>
+
+  <section class="concept now" aria-labelledby="now-title">
+    <div class="concept-head">
+      <h2 id="now-title"><span class="tag">0</span>지금 화면(비교용)</h2>
+      <ul class="notes">
+        <li>Windows는 분석 내내 '음성 저장 완료. 전사와 회의록을 분석하고 있습니다…' 한 줄</li>
+        <li>휴대폰은 조각이 바뀔 때만 '회의록 분석 중 · 2 / 2'처럼 바뀌어, 한 조각이 1~2분 걸리면 그동안 그대로임</li>
+      </ul>
+    </div>
+    <div class="devices">
+      <figure><figcaption>Windows</figcaption><div class="window"><div class="titlebar"><span>VoiceNote</span><span><i></i><i></i><i></i></span></div>
+        <div class="app"><div class="sidebar"><span class="lab">지난 회의</span><span class="row"></span><span class="row"></span><span class="row"></span></div>
+        <div class="desk"><div class="desk-bar"><span class="desk-title">주간 회의</span><ol class="stage" data-stage></ol></div><div data-render="now-desk"></div></div></div></div></figure>
+      <figure class="phone"><figcaption>휴대폰</figcaption><div class="handset"><div class="statusbar-phone"><span>20:43</span><span>LTE · 82%</span></div>
+        <div class="phone-body"><span class="phone-title">새 회의</span><span class="timer-big num">00:00</span><div data-render="now-phone"></div></div>
+        <div class="dock"><span>회의 기록</span><span class="on">새 회의</span><span>설정</span></div></div></figure>
+    </div>
+  </section>
+
+  <section class="concept" aria-labelledby="a-title">
+    <div class="concept-head">
+      <h2 id="a-title"><span class="tag">A</span>단계 목록과 경과 시간</h2>
+      <ul class="notes">
+        <li><b>보이는 것</b>: 끝난 단계(걸린 시간), 지금 단계(조각 번호·지난 시간·보통 걸리는 시간), 남은 단계</li>
+        <li><b>멈춤 구분</b>: 시간이 계속 올라가고, 보통보다 길어지면 황토색으로 바뀌며 '5분이 지나면 알려 드림'이 나옴</li>
+        <li><b>한계</b>: 요청 하나 안에서는 '기다리는 중'만 알 수 있음. 보통 걸리는 시간은 이 기기의 지난 분석 시간을 재어 써야 해서 처음 몇 번은 비어 있음</li>
+        <li><b>만드는 크기</b> <span class="size s">작음~중간</span> Windows 화면은 단계와 조각 순서를 이미 앎. 휴대폰은 분석 서비스가 단계·조각·시작 시각을 화면과 알림에 넘기도록 바꿔야 함</li>
+      </ul>
+    </div>
+    <div class="devices">
+      <figure><figcaption>Windows</figcaption><div class="window"><div class="titlebar"><span>VoiceNote</span><span><i></i><i></i><i></i></span></div>
+        <div class="app"><div class="sidebar"><span class="lab">지난 회의</span><span class="row"></span><span class="row"></span><span class="row"></span></div>
+        <div class="desk"><div class="desk-bar"><span class="desk-title">주간 회의</span><ol class="stage" data-stage></ol></div><div data-render="a-desk"></div></div></div></div></figure>
+      <figure class="phone"><figcaption>휴대폰과 알림 줄</figcaption><div class="handset"><div class="statusbar-phone"><span>20:43</span><span>LTE · 82%</span></div>
+        <div class="phone-body"><span class="phone-title">새 회의</span><div data-render="a-phone"></div></div>
+        <div class="dock"><span>회의 기록</span><span class="on">새 회의</span><span>설정</span></div></div>
+        <div class="notif" data-render="a-notif"></div></figure>
+    </div>
+  </section>
+
+  <section class="concept" aria-labelledby="b-title">
+    <div class="concept-head">
+      <h2 id="b-title"><span class="tag">B</span>보냄·받음 일지</h2>
+      <ul class="notes">
+        <li><b>보이는 것</b>: '20:41:06 전사 요청 보냄', '20:41:40 전사 받음'처럼 앱과 OpenAI가 주고받은 일을 시각과 함께 한 줄씩, 맨 아래에 지금 기다리는 요청</li>
+        <li><b>멈춤 구분</b>: 마지막으로 주고받은 시각과, 지금 기다리는 요청의 지난 시간(최대 5분)이 따로 보여 무엇을 얼마나 기다리는지 바로 앎</li>
+        <li><b>한계</b>: 글이 많아 처음 쓰는 사람에게는 복잡할 수 있음</li>
+        <li><b>만드는 크기</b> <span class="size m">중간</span> 두 앱이 보냄·받음 기록을 일이 생긴 곳에서 남겨 화면에 넘겨야 함. 휴대폰은 음성 올리기 제한도 새로 둠</li>
+      </ul>
+    </div>
+    <div class="devices">
+      <figure><figcaption>Windows</figcaption><div class="window"><div class="titlebar"><span>VoiceNote</span><span><i></i><i></i><i></i></span></div>
+        <div class="app"><div class="sidebar"><span class="lab">지난 회의</span><span class="row"></span><span class="row"></span><span class="row"></span></div>
+        <div class="desk"><div class="desk-bar"><span class="desk-title">주간 회의</span><ol class="stage" data-stage></ol></div><div data-render="b-desk"></div></div></div></div></figure>
+      <figure class="phone"><figcaption>휴대폰</figcaption><div class="handset"><div class="statusbar-phone"><span>20:43</span><span>LTE · 82%</span></div>
+        <div class="phone-body"><span class="phone-title">새 회의</span><div data-render="b-phone"></div></div>
+        <div class="dock"><span>회의 기록</span><span class="on">새 회의</span><span>설정</span></div></div></figure>
+    </div>
+  </section>
+
+  <section class="concept" aria-labelledby="c-title">
+    <div class="concept-head">
+      <h2 id="c-title"><span class="tag">C</span>진행 막대와 남은 시간(추정)</h2>
+      <ul class="notes">
+        <li><b>보이는 것</b>: 전체 진행 막대 하나와 '약 1분 남음(추정)'</li>
+        <li><b>멈춤 구분</b>: 막대가 조금씩 차오름. 다만 요청 하나 안에서는 추정으로 채우는 것이라 실제 진행과 다를 수 있음</li>
+        <li><b>한계</b>: 추정이 틀리면 '거의 다 됐는데 안 끝남'처럼 더 답답할 수 있음. 오래 걸리면 남은 시간을 지우고 그 사실을 알림</li>
+        <li><b>만드는 크기</b> <span class="size m">중간</span> 단계별 비중과 지난 기록으로 추정식을 만들어야 함</li>
+      </ul>
+    </div>
+    <div class="devices">
+      <figure><figcaption>Windows</figcaption><div class="window"><div class="titlebar"><span>VoiceNote</span><span><i></i><i></i><i></i></span></div>
+        <div class="app"><div class="sidebar"><span class="lab">지난 회의</span><span class="row"></span><span class="row"></span><span class="row"></span></div>
+        <div class="desk"><div class="desk-bar"><span class="desk-title">주간 회의</span><ol class="stage" data-stage></ol></div><div data-render="c-desk"></div></div></div></div></figure>
+      <figure class="phone"><figcaption>휴대폰과 알림 줄</figcaption><div class="handset"><div class="statusbar-phone"><span>20:43</span><span>LTE · 82%</span></div>
+        <div class="phone-body"><span class="phone-title">새 회의</span><div data-render="c-phone"></div></div>
+        <div class="dock"><span>회의 기록</span><span class="on">새 회의</span><span>설정</span></div></div>
+        <div class="notif" data-render="c-notif"></div></figure>
+    </div>
+  </section>
+
+  <section class="concept" aria-labelledby="d-title">
+    <div class="concept-head">
+      <h2 id="d-title"><span class="tag">D</span>살아 있음 표시와 오래 걸림 안내</h2>
+      <ul class="notes">
+        <li><b>보이는 것</b>: 한 줄로 '작동 중 · 회의록 정리 2/2 · 1:12'와 깜빡이는 점, 오른쪽에 '최대 5:00'</li>
+        <li><b>멈춤 구분</b>: 최대 대기 시간이 늘 보여 끝없이 기다리지 않는다는 것을 앎. 보통 걸리는 시간의 두 배가 지나면 '평소보다 오래 걸립니다'와 '계속 기다리기·분석 취소' 단추가 나옴</li>
+        <li><b>한계</b>: 지금 몇 번째 단계인지 말고는 자세한 정보가 적음</li>
+        <li><b>만드는 크기</b> <span class="size s">작음~중간</span> 분석 취소는 이미 있음. 5분 제한은 휴대폰 음성 올리기에 새로 둬야 함. 단계별 보통 시간과 안내 카드를 더함</li>
+      </ul>
+    </div>
+    <div class="devices">
+      <figure><figcaption>Windows</figcaption><div class="window"><div class="titlebar"><span>VoiceNote</span><span><i></i><i></i><i></i></span></div>
+        <div class="app"><div class="sidebar"><span class="lab">지난 회의</span><span class="row"></span><span class="row"></span><span class="row"></span></div>
+        <div class="desk"><div class="desk-bar"><span class="desk-title">주간 회의</span><ol class="stage" data-stage></ol></div><div data-render="d-desk"></div><div data-render="d-desk-watch"></div></div></div></div></figure>
+      <figure class="phone"><figcaption>휴대폰과 알림 줄</figcaption><div class="handset"><div class="statusbar-phone"><span>20:43</span><span>LTE · 82%</span></div>
+        <div class="phone-body"><span class="phone-title">새 회의</span><div data-render="d-phone"></div><div data-render="d-phone-watch"></div></div>
+        <div class="dock"><span>회의 기록</span><span class="on">새 회의</span><span>설정</span></div></div>
+        <div class="notif" data-render="d-notif"></div></figure>
+    </div>
+  </section>
+
+  <section class="concept" aria-labelledby="e-title">
+    <div class="concept-head">
+      <h2 id="e-title"><span class="tag">E</span>결과가 차오르는 미리보기</h2>
+      <ul class="notes">
+        <li><b>보이는 것</b>: 전사문이 조각마다 나타나고, 회의록 칸이 빈 줄에서 내용으로 채워짐</li>
+        <li><b>멈춤 구분</b>: 글자가 실제로 늘어나므로 가장 확실함. 응답을 조금씩 받는 방식(스트리밍)이면 요청 하나 안에서도 글이 차오름</li>
+        <li><b>한계</b>: 정리 중인 회의록이 반쯤 보였다가 마지막에 바뀔 수 있음. 회의록은 정해진 JSON 형식으로 받는 중이라, 반쯤 온 내용을 읽기 좋게 보여 주려면 추가 작업이 필요함</li>
+        <li><b>만드는 크기</b> <span class="size l">큼</span> 두 앱이 OpenAI 응답을 조금씩 받아 화면에 넘기도록 바꿔야 함. 지금 쓰는 전사 모델(gpt-transcribe)과 회의록 요청 방식 모두 OpenAI 문서상 스트리밍을 지원함. 스트리밍 없이 조각이 끝날 때마다만 보이면 '중간'</li>
+      </ul>
+    </div>
+    <div class="devices">
+      <figure><figcaption>Windows</figcaption><div class="window"><div class="titlebar"><span>VoiceNote</span><span><i></i><i></i><i></i></span></div>
+        <div class="app"><div class="sidebar"><span class="lab">지난 회의</span><span class="row"></span><span class="row"></span><span class="row"></span></div>
+        <div class="desk"><div class="desk-bar"><span class="desk-title">주간 회의</span><ol class="stage" data-stage></ol></div><div data-render="e-desk"></div></div></div></div></figure>
+      <figure class="phone"><figcaption>휴대폰</figcaption><div class="handset"><div class="statusbar-phone"><span>20:43</span><span>LTE · 82%</span></div>
+        <div class="phone-body"><span class="phone-title">새 회의</span><div data-render="e-phone"></div></div>
+        <div class="dock"><span>회의 기록</span><span class="on">새 회의</span><span>설정</span></div></div></figure>
+    </div>
+  </section>
+
+  <section class="compare" aria-labelledby="cmp-title">
+    <h2 id="cmp-title">한눈에 비교</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>시안</th><th>멈췄는지 알 수 있나</th><th>얼마나 남았나</th><th>처음 보는 사람</th><th>만드는 크기</th></tr></thead>
+        <tbody>
+          <tr><td>A 단계 목록과 경과 시간</td><td>시간이 올라가고, 길어지면 색이 바뀜</td><td>남은 단계 수로 짐작</td><td>쉬움</td><td>작음~중간</td></tr>
+          <tr><td>B 보냄·받음 일지</td><td>마지막으로 오간 시각이 보여 가장 정확함</td><td>보이지 않음</td><td>글이 많음</td><td>중간</td></tr>
+          <tr><td>C 진행 막대와 남은 시간</td><td>막대가 차오르지만 추정</td><td>추정 시간이 보임(틀릴 수 있음)</td><td>가장 익숙함</td><td>중간</td></tr>
+          <tr><td>D 살아 있음과 오래 걸림</td><td>점이 깜빡이고 최대 대기 시간이 보임. 너무 길면 직접 알려 줌</td><td>최대 대기 시간만 보임</td><td>쉬움</td><td>작음~중간</td></tr>
+          <tr><td>E 결과가 차오르는 미리보기</td><td>글이 실제로 늘어나 가장 확실함</td><td>보이지 않음</td><td>보는 재미가 있음</td><td>큼(스트리밍)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="foot">
+      <li>시안끼리 섞을 수 있음(예: A의 단계 목록 + D의 오래 걸림 안내 + 휴대폰 알림 줄)</li>
+      <li>화면 읽기 프로그램에는 상태 알림 한 곳만 두고, 단계가 바뀌거나 오래 걸림·실패일 때만 읽어 줌(초 단위 시간은 읽지 않음). 이 시안 페이지에는 넣지 않음</li>
+      <li>회의 내용과 이름은 모두 합성 예시임</li>
+    </ul>
+  </section>
+</main>
+
+<script>
+// 3분짜리 분석 한 번을 흉내 내는 시연 시계다. 다섯 시안이 같은 시점의 같은 상태를 그린다.
+(function () {
+  'use strict';
+  const SPEED = 6;
+  const STEPS = [
+    { name: '음성 저장', unit: '', parts: 1, typical: [3, 10] },
+    { name: '전사', unit: '조각', parts: 3, typical: [20, 40] },
+    { name: '회의록 정리', unit: '구간', parts: 2, typical: [30, 50] },
+    { name: '결과 저장', unit: '', parts: 1, typical: [2, 10] },
+  ];
+  const WEIGHT = [0.05, 0.5, 0.4, 0.05];
+  const base = [
+    { step: 0, part: 1, dur: 6 }, { step: 1, part: 1, dur: 34 }, { step: 1, part: 2, dur: 30 }, { step: 1, part: 3, dur: 20 },
+    { step: 2, part: 1, dur: 45 }, { step: 2, part: 2, dur: 35 }, { step: 3, part: 1, dur: 10 },
+  ];
+  const SCENARIOS = {
+    normal: base,
+    slow: base.map(s => (s.step === 2 && s.part === 2 ? { ...s, dur: 260 } : s)),
+    fail: [base[0], base[1], { step: 1, part: 2, dur: 300, fail: true }],
+  };
+  const LINES = [
+    ['김민수: 이번 주 배포는 금요일 오후로 잡겠습니다.', '박서연: 안내문은 목요일까지 초안을 올릴게요.'],
+    ['이도현: 테스트 서버는 수요일에 열어 두겠습니다.', '최유진: 고객 문의는 제가 모아서 공유하겠습니다.'],
+    ['김민수: 그럼 금요일 오전에 최종 점검합시다.', '박서연: 점검 목록도 같이 만들어 둘게요.'],
+  ];
+  const SUMMARY = [
+    { title: '핵심 요약', items: ['금요일 오후에 배포함', '금요일 오전에 최종 점검함'] },
+    { title: '다음 할 일', items: ['안내문 초안 · 박서연 · 목요일', '테스트 서버 열기 · 이도현 · 수요일', '고객 문의 모으기 · 최유진'] },
+  ];
+  const CHARS = [2310, 2045, 1380];
+
+  let scenario = 'normal', sim = 0, playing = true, last = performance.now(), dismissed = false;
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const mmss = s => { s = Math.max(0, Math.floor(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  const words = s => { s = Math.max(0, Math.floor(s)); const m = Math.floor(s / 60), r = s % 60; return m ? (r ? `${m}분 ${r}초` : `${m}분`) : `${r}초`; };
+  const clock = s => { const t = 20 * 3600 + 41 * 60 + Math.floor(s); return `${String(Math.floor(t / 3600)).padStart(2, '0')}:${String(Math.floor(t / 60) % 60).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
+  const typical = step => `보통 ${STEPS[step].typical[0]}~${STEPS[step].typical[1]}초`;
+  const partText = seg => STEPS[seg.step].parts > 1 ? ` ${seg.part}/${STEPS[seg.step].parts}` : '';
+
+  // 시연 시각 sim에서 끝난 일, 지금 일, 실패, 주고받은 일지를 계산한다.
+  function evaluate() {
+    const segs = SCENARIOS[scenario];
+    const done = [], events = [];
+    let t = 0, current = null, failed = null;
+    for (const seg of segs) {
+      const start = t, end = t + seg.dur;
+      if (sim < start) break;
+      events.push({ at: start, kind: 'send', seg });
+      if (sim >= end) {
+        if (seg.fail) { failed = { seg, start, end }; events.push({ at: end, kind: 'bad', seg }); break; }
+        events.push({ at: end, kind: 'recv', seg });
+        done.push({ seg, start, end });
+        t = end;
+        continue;
+      }
+      current = { seg, start, elapsed: sim - start };
+      break;
+    }
+    const finished = !current && !failed && done.length === segs.length;
+    const slow = Boolean(current) && current.elapsed > STEPS[current.seg.step].typical[1];
+    const watchdog = Boolean(current) && current.elapsed > STEPS[current.seg.step].typical[1] * 2;
+    const stepState = STEPS.map((step, i) => {
+      const mine = done.filter(d => d.seg.step === i);
+      const spent = mine.reduce((sum, d) => sum + (d.end - d.start), 0) + (current && current.seg.step === i ? current.elapsed : 0) + (failed && failed.seg.step === i ? failed.end - failed.start : 0);
+      const state = failed && failed.seg.step === i ? 'fail' : current && current.seg.step === i ? 'cur' : mine.length === step.parts ? 'done' : 'todo';
+      return { ...step, index: i, state, spent, partsDone: mine.length };
+    });
+    let progress = 0;
+    stepState.forEach((s, i) => { progress += WEIGHT[i] * (s.partsDone / s.parts); });
+    if (current) {
+      const s = STEPS[current.seg.step], share = WEIGHT[current.seg.step] / s.parts, mid = (s.typical[0] + s.typical[1]) / 2;
+      progress += share * 0.9 * (1 - Math.exp(-current.elapsed / mid));
+    }
+    if (finished) progress = 1;
+    let remaining = 0;
+    if (current) {
+      const segsLeft = SCENARIOS.normal.filter(seg => seg.step > current.seg.step || (seg.step === current.seg.step && seg.part > current.seg.part));
+      remaining = segsLeft.reduce((sum, seg) => sum + (STEPS[seg.step].typical[0] + STEPS[seg.step].typical[1]) / 2, 0)
+        + Math.max(0, (STEPS[current.seg.step].typical[0] + STEPS[current.seg.step].typical[1]) / 2 - current.elapsed);
+    }
+    return { done, events, current, failed, finished, slow, watchdog, steps: stepState, progress, remaining };
+  }
+
+  const stageList = st => {
+    const cur = st.finished ? 3 : 2;
+    return ['준비', '녹음', '분석', '완료'].map((n, i) => `<li class="${i < cur || (st.finished && i === 3) ? 'done' : i === cur ? 'cur' : ''}"><span class="mark"></span>${n}</li>`).join('');
+  };
+  const finishedCard = () => `<div class="block"><div class="headline"><span class="what">회의록 저장 완료</span><span class="elapsed num">3:00</span></div><p class="soft">‘회의록 보기’에서 결과를 열 수 있습니다. 걸린 시간 3분.</p></div>`;
+  const failCard = st => `<div class="failcard"><strong>전사 조각 2/3에서 멈췄습니다</strong><span>OpenAI가 ${words(st.failed.end - st.failed.start)} 동안 응답하지 않아 실패로 처리했습니다. 원음과 받아 둔 전사 조각 1개는 그대로 있습니다.</span><div class="actions"><button class="btn primary" type="button" data-retry>저장·분석 다시 시도</button><span class="muted">다시 하면 받아 둔 조각 1은 다시 보내지 않고 조각 2부터 합니다.</span></div></div>`;
+
+  function renderNow(st) {
+    const desk = st.finished ? '회의록 저장 완료. ‘지난 회의’에서 다시 열 수 있습니다.' : st.failed ? '음성은 저장되어 있습니다. AI 응답 시간이 초과됐습니다. 다시 시도하면 비용이 발생할 수 있습니다.' : st.current && st.current.seg.step === 0 ? `음성 저장 중 · 1/3개` : '음성 저장 완료. 전사와 회의록을 분석하고 있습니다…';
+    const phone = st.finished ? '회의록 저장 완료' : st.failed ? 'AI 서버 응답이 늦어 중단했습니다. 잠시 후 지난 회의에서 다시 분석하세요. 녹음은 저장되어 있습니다.' : st.current ? (st.current.seg.step === 1 ? `음성을 글로 변환 중 · ${st.current.seg.part} / 3` : st.current.seg.step === 2 ? `GPT-6.1 Sol (기본) 회의록 분석 중 · ${st.current.seg.part} / 2` : '처리 중') : '처리 중';
+    return { desk: `<p class="legacy">${esc(desk)}</p>`, phone: `<p class="legacy phone-legacy">${esc(phone)}</p>` };
+  }
+
+  function renderA(st) {
+    if (st.finished) return { desk: finishedCard(), phone: finishedCard(), notif: notif('회의록 저장 완료', '눌러서 결과 보기', null) };
+    const rows = st.steps.map(s => {
+      const cur = st.current && st.current.seg.step === s.index;
+      const slowCls = cur && st.slow ? ' slow' : '';
+      let side = '';
+      if (s.state === 'done') side = `<span class="num">${mmss(s.spent)}</span>`;
+      if (s.state === 'cur') side = `<span class="num">${mmss(st.current.elapsed)}</span>`;
+      if (s.state === 'fail') side = '멈춤';
+      let sub = '';
+      if (cur && s.parts > 1) {
+        const chips = Array.from({ length: s.parts }, (_, k) => {
+          const n = k + 1, doneChip = n < st.current.seg.part, curChip = n === st.current.seg.part;
+          return `<span class="chip ${doneChip ? 'done' : curChip ? (st.slow ? 'slow' : 'cur') : ''}">${s.unit} ${n}${doneChip ? ' ✓' : ''}</span>`;
+        }).join('');
+        sub = `<div class="sub"><div class="chips">${chips}</div><div class="activity${st.slow ? ' slow' : ''}" aria-hidden="true"></div><span class="muted">${st.slow ? `평소보다 오래 걸리고 있습니다 · ${typical(s.index)} · 5분이 지나도 응답이 없으면 알려 드림` : `OpenAI 응답 기다리는 중 · ${typical(s.index)}`}</span></div>`;
+      } else if (cur) {
+        sub = `<div class="sub"><div class="activity" aria-hidden="true"></div></div>`;
+      }
+      return `<li class="${s.state}${slowCls}"><span class="dot"></span><span class="name">${s.name}${cur ? partText(st.current.seg) : s.state === 'fail' ? partText(st.failed.seg) : ''}</span><span class="side">${side}</span>${sub}</li>`;
+    }).join('');
+    const total = st.failed ? st.failed.end : sim;
+    const desk = st.failed ? `<div class="block"><ol class="steps">${rows}</ol></div>${failCard(st)}` :
+      `<div class="block"><div class="headline"><span class="what">분석 중 · 전체 ${mmss(total)}</span><button class="btn quiet" type="button">분석 취소</button></div><ol class="steps">${rows}</ol></div>`;
+    const curStep = st.current ? STEPS[st.current.seg.step] : null;
+    const phoneRows = st.steps.map(s => `<span class="chip ${s.state === 'done' ? 'done' : s.state === 'cur' ? (st.slow ? 'slow' : 'cur') : s.state === 'fail' ? 'fail' : ''}">${s.name}${s.state === 'done' ? ' ✓' : ''}</span>`).join('');
+    const phone = st.failed ? `<div class="chips">${phoneRows}</div>${failCard(st)}` :
+      `<div class="block"><div class="headline"><span class="what">${curStep.name}${partText(st.current.seg)}</span><span class="elapsed num">${mmss(st.current.elapsed)}</span></div><div class="activity${st.slow ? ' slow' : ''}" aria-hidden="true"></div><span class="muted">${st.slow ? '평소보다 오래 걸리고 있습니다 · 최대 5분' : typical(st.current.seg.step)} · 전체 ${mmss(sim)}</span><div class="chips">${phoneRows}</div></div>`;
+    const n = st.failed ? notif('분석을 마치지 못했습니다', '전사 조각 2/3 · 눌러서 다시 시도', null, true) :
+      notif(`${curStep.name}${partText(st.current.seg)} 중`, `${words(st.current.elapsed)} 지남 · ${st.slow ? '평소보다 오래 걸림' : typical(st.current.seg.step)}`, 'busy');
+    return { desk, phone, notif: n };
+  }
+
+  function eventText(e) {
+    const s = e.seg, p = partText(s);
+    if (e.kind === 'send') return s.step === 1 ? `전사 요청 보냄 · 조각${p} · 4.1MB` : s.step === 2 ? `회의록 정리 요청 보냄 · 구간${p}` : '';
+    // 음성 저장과 회의록 저장은 앱 안의 일이라 끝났을 때 한 줄만 남김
+    if (e.kind === 'recv') return s.step === 0 ? '음성 저장함 · 3개' : s.step === 1 ? `전사 받음 · 조각${p} · ${CHARS[s.part - 1].toLocaleString('ko-KR')}자` : s.step === 2 ? `회의록 정리 받음 · 구간${p}` : '회의록 저장함';
+    return `응답 없음 · 전사 조각${p} · ${words(s.dur)} 기다린 뒤 멈춤`;
+  }
+  function renderB(st) {
+    const items = st.events.map(e => ({ at: e.at, cls: e.kind === 'send' ? 'send' : e.kind === 'recv' ? 'recv' : 'bad', text: eventText(e) })).filter(it => it.text);
+    const hasEvents = items.length > 0;
+    const lastAt = hasEvents ? items[items.length - 1].at : 0;
+    const waiting = Boolean(st.current) && st.current.seg.step !== 0;
+    if (waiting) items.push({ at: null, cls: 'wait', text: `응답 기다리는 중 · ${mmss(st.current.elapsed)} / 최대 5:00` });
+    // 기다림 줄은 일이 생긴 시각이 아니므로 시각 대신 '지금'을 쓰고, 마지막 기록 시각은 실제로 일어난 줄에서만 구함
+    const row = it => `<li class="${it.cls}"><span class="t num">${it.at === null ? '지금' : clock(it.at)}</span><span class="k"></span><span class="m">${esc(it.text)}</span></li>`;
+    const deskItems = items.slice(-7).map(row).join('');
+    const phoneItems = items.slice(-4).map(row).join('');
+    const head = st.finished ? '회의록 저장 완료' : st.failed ? '분석을 마치지 못했습니다' : '분석 중 · 주고받은 일';
+    const hint = waiting ? '<span class="muted">OpenAI는 일을 다 마친 뒤 한꺼번에 답을 보내서, 기다리는 동안에는 시간만 올라갑니다.</span>' : '';
+    const desk = `<div class="block"><div class="headline"><span class="what">${head}</span>${hasEvents ? `<span class="muted num">마지막 기록 ${clock(lastAt)}</span>` : ''}</div><ol class="log" aria-label="AI 요청 기록">${deskItems}</ol>${hint}</div>${st.failed ? failCard(st) : ''}`;
+    const phone = `<div class="block"><span class="what">${head}</span><ol class="log" aria-label="AI 요청 기록">${phoneItems}</ol>${hint}</div>${st.failed ? failCard(st) : ''}`;
+    return { desk, phone };
+  }
+
+  function renderC(st) {
+    const pct = Math.min(100, Math.floor(st.progress * 100));
+    const cls = st.failed ? ' fail' : st.slow ? ' slow' : '';
+    const remain = st.finished ? '완료' : st.failed ? '멈춤' : st.slow ? '남은 시간을 알 수 없음 · 평소보다 오래 걸림' : `약 ${Math.max(1, Math.round(st.remaining / 30) / 2)}분 남음(추정)`;
+    const what = st.finished ? '회의록 저장 완료' : st.failed ? '전사 조각 2/3에서 멈춤' : `${STEPS[st.current.seg.step].name}${partText(st.current.seg)} 중`;
+    const bar = `<div class="bar${cls}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="전체 진행"><i style="width:${pct}%"></i></div>`;
+    const desk = `<div class="block"><div class="headline"><span class="what">${what}</span><span class="pct num">${pct}%</span></div>${bar}<div class="ticks"><span>저장</span><span>전사</span><span>회의록 정리</span><span>끝</span></div><span class="muted">${remain} · 전체 ${mmss(st.failed ? st.failed.end : sim)}</span></div>${st.failed ? failCard(st) : ''}`;
+    const phone = `<div class="block"><div class="headline"><span class="what">${what}</span><span class="pct num">${pct}%</span></div>${bar}<span class="muted">${remain}</span></div>${st.failed ? failCard(st) : ''}`;
+    const n = st.finished ? notif('회의록 저장 완료', '눌러서 결과 보기', null) : st.failed ? notif('분석을 마치지 못했습니다', '전사 조각 2/3 · 눌러서 다시 시도', null, true) : notif(`${what} · ${pct}%`, remain, pct);
+    return { desk, phone, notif: n };
+  }
+
+  function renderD(st) {
+    if (st.finished) return { desk: finishedCard(), phone: finishedCard(), notif: notif('회의록 저장 완료', '눌러서 결과 보기', null) };
+    if (st.failed) return { desk: failCard(st), phone: failCard(st), notif: notif('분석을 마치지 못했습니다', '전사 조각 2/3 · 눌러서 다시 시도', null, true) };
+    const s = STEPS[st.current.seg.step];
+    const line = `<div class="alive${st.slow ? ' slow' : ''}"><span class="pulse${st.slow ? ' slow' : ''}" aria-hidden="true"></span><span class="grow"><b>작동 중</b> · ${s.name}${partText(st.current.seg)} · <span class="num">${mmss(st.current.elapsed)}</span></span><span class="muted num">최대 5:00</span></div>`;
+    const watch = st.watchdog && !dismissed ? `<div class="watch"><strong>평소보다 오래 걸리고 있습니다</strong><span>보통 ${s.typical[0]}~${s.typical[1]}초 걸리는 단계입니다. 인터넷이나 OpenAI 응답이 느릴 수 있습니다.</span><span>5분이 지나도 응답이 없으면 실패로 알리고 다시 시도할 수 있게 합니다. 원음과 받아 둔 전사는 그대로 있습니다.</span><div class="actions"><button class="btn primary" type="button" data-dismiss>계속 기다리기</button><button class="btn" type="button">분석 취소</button></div></div>` : '';
+    const desk = `<div class="block">${line}<span class="muted">전체 ${mmss(sim)} · 다음: ${st.steps.filter(x => x.state === 'todo').map(x => x.name).join(' → ') || '없음'}</span></div>`;
+    const phone = line;
+    const n = notif(`작동 중 · ${s.name}${partText(st.current.seg)}`, `${words(st.current.elapsed)} 지남${st.watchdog ? ' · 평소보다 오래 걸림' : ''}`, 'busy');
+    return { desk, phone, watch, notif: n };
+  }
+
+  function renderE(st) {
+    const tDone = st.done.filter(d => d.seg.step === 1).length;
+    const curT = st.current && st.current.seg.step === 1 ? st.current : null;
+    const lines = [];
+    LINES.forEach((pair, i) => {
+      if (i < tDone) pair.forEach(l => lines.push({ text: l, cls: 'line' }));
+      else if (curT && i === tDone) {
+        const shown = Math.min(pair.length, Math.floor(curT.elapsed / 12));
+        pair.slice(0, shown).forEach(l => lines.push({ text: l, cls: 'line new' }));
+        lines.push({ text: '', cls: 'line typing' });
+      }
+    });
+    const transcript = lines.length ? lines.slice(-6).map(l => `<span class="${l.cls}">${esc(l.text)}</span>`).join('') : '<span class="muted">음성을 저장하고 있습니다. 곧 전사문이 나타납니다.</span>';
+    const sDone = st.done.filter(d => d.seg.step === 2).length;
+    const curS = st.current && st.current.seg.step === 2 ? st.current : null;
+    const summary = SUMMARY.map((sec, i) => {
+      const ready = st.finished || i < sDone;
+      const typingNow = curS && i === sDone;
+      const body = ready ? sec.items.map(it => `<span class="line">· ${esc(it)}</span>`).join('')
+        : typingNow ? sec.items.slice(0, Math.min(sec.items.length, Math.floor(curS.elapsed / 10))).map(it => `<span class="line new">· ${esc(it)}</span>`).join('') + '<span class="line typing"></span>'
+          : '<div class="skeleton"></div><div class="skeleton" style="width:70%"></div>';
+      return `<span class="sec-title">${sec.title}</span>${body}`;
+    }).join('');
+    const status = st.finished ? '회의록 저장 완료' : st.failed ? '전사 조각 2/3에서 멈춤' : `${STEPS[st.current.seg.step].name}${partText(st.current.seg)} · ${mmss(st.current.elapsed)}`;
+    const desk = `<div class="block"><div class="headline"><span class="what">${status}</span>${st.finished || st.failed ? '' : '<span class="muted">글이 들어오는 대로 보여 줌</span>'}</div><div class="cols"><div class="preview"><span class="sec-title">전사문</span>${transcript}</div><div class="preview">${summary}</div></div></div>${st.failed ? failCard(st) : ''}`;
+    const phone = `<div class="block"><span class="what">${status}</span><div class="preview"><span class="sec-title">전사문</span>${transcript}</div></div>${st.failed ? failCard(st) : ''}`;
+    return { desk, phone };
+  }
+
+  function notif(title, text, bar, failed) {
+    const barHtml = bar === null || bar === undefined ? '' : bar === 'busy' ? '<div class="activity" aria-hidden="true"></div>' : `<div class="bar"><i style="width:${bar}%"></i></div>`;
+    return `<span class="notif-app"><i></i>VoiceNote · 알림</span><b${failed ? ' style="color:var(--rec-deep)"' : ''}>${esc(title)}</b><span class="soft">${esc(text)}</span>${barHtml}`;
+  }
+
+  const slots = {};
+  document.querySelectorAll('[data-render]').forEach(el => { slots[el.dataset.render] = el; });
+  const stages = document.querySelectorAll('[data-stage]');
+  const cache = {};
+  function put(key, html) {
+    if (!slots[key] || cache[key] === html) return;
+    cache[key] = html;
+    slots[key].style.setProperty('--t', `${-Math.round(performance.now())}ms`);
+    // 자주 다시 그리는 칸의 움직임이 매번 처음부터 시작하지 않게, 새로 그린 막대·점도 같은 시계 위치에서 이어 가게 함
+    slots[key].innerHTML = html;
+  }
+  function render() {
+    const st = evaluate();
+    $('sim-clock').textContent = mmss(sim);
+    const stageHtml = stageList(st);
+    stages.forEach(el => { if (el.innerHTML !== stageHtml) el.innerHTML = stageHtml; });
+    const now = renderNow(st); put('now-desk', now.desk); put('now-phone', now.phone);
+    const a = renderA(st); put('a-desk', a.desk); put('a-phone', a.phone); put('a-notif', a.notif);
+    const b = renderB(st); put('b-desk', b.desk); put('b-phone', b.phone);
+    const c = renderC(st); put('c-desk', c.desk); put('c-phone', c.phone); put('c-notif', c.notif);
+    const d = renderD(st); put('d-desk', d.desk); put('d-phone', d.phone); put('d-notif', d.notif); put('d-desk-watch', d.watch || ''); put('d-phone-watch', d.watch || '');
+    const e = renderE(st); put('e-desk', e.desk); put('e-phone', e.phone);
+  }
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const step = Math.min(250, Math.max(0, now - last));
+    // 첫 프레임 시각이 스크립트 시작보다 앞서면 시연 시간이 0보다 작아져 그릴 단계가 없었음. 음수를 막고, 창을 가렸다 돌아올 때 크게 건너뛰지 않게 한 번에 0.25초까지만 셈
+    last = now;
+    if (playing) {
+      sim += (step / 1000) * SPEED;
+      const total = SCENARIOS[scenario].reduce((sum, s) => sum + s.dur, 0);
+      if (sim > total + 20) sim = total + 20;
+    }
+    render();
+  }
+  $('play').addEventListener('click', () => { playing = !playing; $('play').textContent = playing ? '멈춤' : '재생'; });
+  $('restart').addEventListener('click', () => { sim = 0; dismissed = false; playing = true; $('play').textContent = '멈춤'; });
+  $('scenario').addEventListener('change', event => { scenario = event.target.value; sim = scenario === 'slow' ? 150 : scenario === 'fail' ? 250 : 0; dismissed = false; playing = true; $('play').textContent = '멈춤'; });
+  document.addEventListener('click', event => {
+    if (event.target.closest('[data-dismiss]')) dismissed = true;
+    if (event.target.closest('[data-retry]')) {
+      const slot = event.target.closest('[data-render]');
+      scenario = 'normal'; $('scenario').value = 'normal'; sim = 40; dismissed = false; playing = true; $('play').textContent = '멈춤';
+      if (slot) { slot.tabIndex = -1; slot.focus(); }
+      // 단추가 다시 그려져 사라지므로, 키보드 초점을 다시 그려도 남아 있는 그 모형 칸으로 옮겨 보던 자리에서 잃지 않게 함
+    }
+    // 다시 시도는 받아 둔 조각 1을 건너뛰고 조각 2부터 다시 하는 모습을 보여 줌(보통 상황의 40초 지점)
+  });
+  // 화면 확인용: 주소 끝에 #t=초&s=상황 을 붙이면 그 시점에서 멈춘 화면을 보여 준다(예: #t=120&s=normal).
+  const hash = new URLSearchParams(location.hash.slice(1));
+  if (hash.has('s') && SCENARIOS[hash.get('s')]) { scenario = hash.get('s'); $('scenario').value = scenario; }
+  if (hash.has('t')) { sim = Math.max(0, Number(hash.get('t')) || 0);playing = false; $('play').textContent = '재생'; }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
