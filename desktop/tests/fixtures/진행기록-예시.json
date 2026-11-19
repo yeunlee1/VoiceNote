@@ -1,0 +1,51 @@
+{
+  "lines": [
+    { "event": { "type": "saveAudio", "part": 1, "total": 3 }, "text": "음성 저장함 · 1/3개" },
+    { "event": { "type": "splitImport", "total": 2 }, "text": "녹음 파일 나눔 · 2개" },
+    { "event": { "type": "reuseTranscript", "part": 1, "total": 3 }, "text": "받아 둔 전사 씀 · 조각 1/3" },
+    { "event": { "type": "reuseMinutes", "part": "2-1", "total": 2 }, "text": "받아 둔 회의록 씀 · 구간 2-1/2" },
+    { "event": { "type": "sendTranscript", "part": 1, "total": 3, "bytes": 4299161 }, "text": "전사 요청 보냄 · 조각 1/3 · 4.1MB" },
+    { "event": { "type": "sendTranscript", "part": 2, "total": 2, "bytes": 10 }, "text": "전사 요청 보냄 · 조각 2/2 · 0.1MB" },
+    { "event": { "type": "recvTranscript", "part": 1, "total": 3, "chars": 2310 }, "text": "전사 받음 · 조각 1/3 · 2,310자" },
+    { "event": { "type": "recvTranscript", "part": 1, "total": 1, "chars": 0 }, "text": "전사 받음 · 조각 1/1 · 0자" },
+    { "event": { "type": "sendSummary", "part": 1, "total": 2 }, "text": "회의록 정리 요청 보냄 · 구간 1/2" },
+    { "event": { "type": "recvSummary", "part": "2-1", "total": 2 }, "text": "회의록 정리 받음 · 구간 2-1/2" },
+    { "event": { "type": "splitLimit", "part": 2 }, "text": "길이 한도에 닿아 나눠 다시 보냄 · 구간 2" },
+    { "event": { "type": "sendCompact" }, "text": "회의록 줄이기 요청 보냄" },
+    { "event": { "type": "recvCompact" }, "text": "회의록 줄이기 받음" },
+    { "event": { "type": "compactUnused" }, "text": "줄이기 결과를 못 써 원래 길이로 저장" },
+    { "event": { "type": "sendRefine", "part": 1, "total": 1 }, "text": "의견 반영 요청 보냄 · 구간 1/1" },
+    { "event": { "type": "recvRefine", "part": 1, "total": 1 }, "text": "의견 반영 받음 · 구간 1/1" },
+    { "event": { "type": "timeout" }, "text": "응답 없음 · 5분 기다린 뒤 멈춤" },
+    { "event": { "type": "uploadStall" }, "text": "음성 올리기 멈춤 · 1분 넘게 못 보냄" },
+    { "event": { "type": "requestStall" }, "text": "요청 보내기 멈춤 · 1분 넘게 못 보냄" },
+    { "event": { "type": "disconnected" }, "text": "실패 · 연결 끊김" },
+    { "event": { "type": "apiError", "status": 429 }, "text": "실패 · OpenAI 오류 429" },
+    { "event": { "type": "badFormat" }, "text": "실패 · 응답 형식 오류" },
+    { "event": { "type": "saveFailed" }, "text": "실패 · 저장하지 못함" },
+    { "event": { "type": "failed", "reason": "AI 요청에 실패했습니다. HTTP 500" }, "text": "실패 · AI 요청에 실패했습니다" },
+    { "event": { "type": "failed", "reason": "길이 1.5MB를 넘었습니다. 다시 하세요." }, "text": "실패 · 길이 1.5MB를 넘었습니다" },
+    { "event": { "type": "failed", "reason": "가나다라마가나다라마가나다라마가나다라마가나다라마가나다라마가나다라마가나다라마가나다라마" }, "text": "실패 · 가나다라마가나다라마가나다라마가나다라마가나다라마가나다라마가나다라마가나다라…" },
+    { "event": { "type": "failed", "reason": "   " }, "text": "실패 · 알 수 없는 오류" },
+    { "event": { "type": "failed" }, "text": "실패 · 알 수 없는 오류" },
+    { "event": { "type": "canceled" }, "text": "분석 취소함" },
+    { "event": { "type": "savedTranscript" }, "text": "전사 저장함" },
+    { "event": { "type": "savedMinutes" }, "text": "회의록 저장함" }
+  ],
+  "labels": [
+    { "event": { "type": "sendTranscript", "part": 1, "total": 3, "bytes": 100 }, "label": "전사 · 조각 1/3" },
+    { "event": { "type": "sendSummary", "part": "2-1", "total": 2 }, "label": "회의록 정리 · 구간 2-1/2" },
+    { "event": { "type": "sendCompact" }, "label": "회의록 줄이기" },
+    { "event": { "type": "sendRefine", "part": 1, "total": 1 }, "label": "의견 반영 · 구간 1/1" }
+  ],
+  "waiting": [
+    { "open": { "phase": "upload", "sent": 2202010, "size": 4299161 }, "elapsedSeconds": 5, "limitOwner": "app", "text": "음성 올리는 중 · 2.1/4.1MB" },
+    { "open": { "phase": "upload", "sent": 0, "size": 10 }, "elapsedSeconds": 1, "limitOwner": "app", "text": "음성 올리는 중 · 0.0/0.1MB" },
+    { "open": { "phase": "wait" }, "elapsedSeconds": 42, "limitOwner": "server", "text": "응답 기다리는 중 · 0:42 / 최대 5:00" },
+    { "open": { "phase": "wait" }, "elapsedSeconds": 300, "limitOwner": "server", "text": "응답 기다리는 중 · 5:00 / 최대 5:00" },
+    { "open": { "phase": "wait" }, "elapsedSeconds": 303, "limitOwner": "server", "text": "응답 기다리는 중 · 5:03 · 제한 시간이 지나면 서버가 실패로 알려 줌" },
+    { "open": { "phase": "wait" }, "elapsedSeconds": 303, "limitOwner": "app", "text": "응답 기다리는 중 · 5:03" },
+    { "open": { "phase": "wait" }, "elapsedSeconds": 3725, "limitOwner": "server", "text": "응답 기다리는 중 · 62:05 · 제한 시간이 지나면 서버가 실패로 알려 줌" },
+    { "open": { "phase": "wait", "waitSinceOffsetSeconds": 20 }, "elapsedSeconds": 62, "limitOwner": "app", "text": "응답 기다리는 중 · 0:42 / 최대 5:00" }
+  ]
+}
