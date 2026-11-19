@@ -7,13 +7,13 @@ const sourceDir = path.join(android, 'src', 'kr', 'local', 'meetingjournal');
 const source = name => path.join(sourceDir, `${name}.java`);
 const allSources = () => fs.readdirSync(sourceDir).filter(name => name.endsWith('.java')).map(name => path.join(sourceDir, name));
 
-function run(name, sources, classpath, fixtures = []) {
+function run(name, sources, classpath, fixtures = [], javaOptions = {}) {
   const output = fs.mkdtempSync(path.join(os.tmpdir(), 'vn-jvm-'));
   try {
     const args = fixtures.map(([file, as]) => { const target = path.join(output, as); fs.copyFileSync(file, target); return target; });
     // 공통 예시는 한글 없는 이름으로 임시 폴더에 복사해 넘긴다. Java 도구는 한글이 든 인자를 받지 않는다.
     javac(['-encoding', 'UTF-8', '-nowarn', '-d', output, ...(classpath ? ['-cp', classpath] : []), ...sources, path.join(android, 'tests', `${name}.java`)]);
-    java(['-Dfile.encoding=UTF-8', '-cp', [output, classpath].filter(Boolean).join(path.delimiter), `kr.local.meetingjournal.${name}`, ...args]);
+    java(['-Dfile.encoding=UTF-8', '-cp', [output, classpath].filter(Boolean).join(path.delimiter), `kr.local.meetingjournal.${name}`, ...args], javaOptions);
   } finally {
     fs.rmSync(output, { recursive: true, force: true });
   }
@@ -22,6 +22,8 @@ function run(name, sources, classpath, fixtures = []) {
 // 아래 넷은 java.*만 쓰므로 해당 소스만으로 돈다.
 const plain = { SettingsFileTest: ['JsonText', 'CustomFormat', 'SettingsFile'], TextChunksTest: ['TextChunks'], TrialAccessTest: ['TrialAccess'], AiUsageTest: ['AiUsage', 'AiModels'], UpdateRulesTest: ['JsonText', 'UpdateRules'] };
 for (const [name, sources] of Object.entries(plain)) test(`JVM 시험 ${name}`, () => run(name, sources.map(source)));
+// 요청 감시도 java.*만 쓴다. 고장 나 요청이 멈추면 시험 전체가 끝나지 않으므로 90초 제한을 둔다.
+test('JVM 시험 AiRequestTest', () => run('AiRequestTest', [source('AiRequest')], null, [], { timeout: 90_000 }));
 // 아래 셋은 android.jar 스텁으로 컴파일하고, 실행 경로는 java.*만 쓰는 정적 메서드다.
 for (const name of ['AiResponseModelTest', 'AiFeedbackTest', 'CopyFilesTest', 'TextFileNameTest', 'AudioImportTest']) test(`JVM 시험 ${name}`, () => run(name, allSources(), androidJar));
 // 아래 둘은 데스크톱과 같은 공통 예시로 항목 규칙과 회의 문서를 대조한다. org.json을 거치지 않는 Map·List 경로를 PC에서 돌린다.
