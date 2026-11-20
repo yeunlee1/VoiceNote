@@ -29,11 +29,16 @@ const watchdog = setInterval(() => {
 }, 1000);
 meeting.server.once('close', () => clearInterval(watchdog));
 meeting.server.listen(0, '127.0.0.1', () => {
+  const partial = `${readyFile}.${process.pid}.tmp`;
   try {
     const ready = { url: `http://127.0.0.1:${meeting.server.address().port}/#${meeting.token}`, pid: process.pid };
-    fs.writeFileSync(readyFile, JSON.stringify(ready), { flag: 'wx', mode: 0o600 });
+    fs.writeFileSync(partial, JSON.stringify(ready), { flag: 'wx', mode: 0o600 });
+    if (fs.existsSync(readyFile)) throw new Error('준비 파일이 이미 있습니다.');
+    fs.renameSync(partial, readyFile);
+    // 다 쓴 임시 파일을 준비 파일 이름으로 옮긴다. 창과 시험은 준비 파일이 보이자마자 읽으므로 내용이 빈 준비 파일이 보이면 안 된다.
     meeting.setReadyFile(readyFile);
   } catch {
+    fs.rmSync(partial, { force: true });
     meeting.server.close();
   }
 });
