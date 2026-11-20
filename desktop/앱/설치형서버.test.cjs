@@ -250,6 +250,26 @@ test('링크를 만들 수 없는 드라이브에서도 준비 파일을 내놓�
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+test('링크를 만들 수 없는 드라이브에서도 먼저 있던 준비 파일은 덮지 않고 서버를 끝낸다', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meeting-ready-'));
+  const readyFile = path.join(root, 'ready.json');
+  const child = serverWith([
+    "const fs = require('node:fs');",
+    "const target = process.argv[process.argv.indexOf('--ready-file') + 1];",
+    "fs.linkSync = function () { const error = new Error('링크 없음'); error.code = 'EPERM'; throw error; };",
+    'const open = fs.openSync;',
+    "fs.openSync = function (file, ...rest) { if (String(file).startsWith(target + '.') && !fs.existsSync(target)) fs.writeFileSync(target, '기존'); return open.call(fs, file, ...rest); };",
+  ], root, readyFile);
+  try {
+    const [code] = await exitWithin(child, 8000);
+    assert.equal(code, 0, '서버가 준비 파일을 덮지 않고 끝나야 함');
+    assert.equal(fs.readFileSync(readyFile, 'utf8'), '기존');
+    assert.deepEqual(tempLeft(root, readyFile), []);
+  } finally {
+    if (child.exitCode === null) { child.kill(); await gone(child.pid, 5000); }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 test('이미 있던 임시 파일은 지우지 않고 서버를 끝낸다', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meeting-ready-'));
   const readyFile = path.join(root, 'ready.json');
