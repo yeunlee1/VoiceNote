@@ -103,26 +103,38 @@ async function gone(pid, ms) {
 test('준비 파일은 쓰기가 느려도 다 쓴 뒤에만 그 이름으로 보인다', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meeting-ready-'));
   const hook = path.join(root, '느린쓰기.cjs');
+  const flag = path.join(root, '쓰는중.flag');
   fs.writeFileSync(hook, [
     "const fs = require('node:fs');",
     "const at = process.argv.indexOf('--ready-file'), target = at > 0 ? process.argv[at + 1] : null;",
+    `const flag = ${JSON.stringify(flag)};`,
     'const write = fs.writeFileSync;',
     'fs.writeFileSync = function (file, data, options) {',
-    '  if (target && String(file) === target) {',
+    '  const name = String(file);',
+    '  if (target && name === target) {',
     "    fs.closeSync(fs.openSync(file, 'wx'));",
-    '    for (const until = Date.now() + 400; Date.now() < until;);',
+    '    for (const until = Date.now() + 1000; Date.now() < until;);',
     "    return write.call(fs, file, data, { ...(options && typeof options === 'object' ? options : {}), flag: 'w' });",
+    '  }',
+    "  if (target && name.startsWith(target + '.') && name.endsWith('.tmp')) {",
+    "    write.call(fs, flag, '1');",
+    '    for (const until = Date.now() + 1000; Date.now() < until;);',
     '  }',
     '  return write.apply(fs, arguments);',
     '};',
   ].join('\n'));
-  // 준비 파일 이름으로 바로 쓰면 빈 파일부터 만들고 0.4초 뒤에 내용을 쓰게 해, 바쁜 PC에서 생긴 빈 준비 파일을 매번 재현한다.
+  // 준비 파일 이름으로 바로 쓰면 빈 파일부터 만들고 1초 뒤에 내용을 쓰게 해, 바쁜 PC에서 생긴 빈 준비 파일을 매번 재현한다.
+  // 임시 파일에 쓸 때는 쓰는중 표시를 남기고 1초 기다려, 그동안 준비 파일 이름이 보이지 않는지 본다.
   const readyFile = path.join(root, 'ready.json');
   const child = spawn(process.execPath, ['--require', hook, path.join(__dirname, '설치형서버.cjs'), '--data-root', root, '--ready-file', readyFile, '--parent-pid', String(process.pid)], { windowsHide: true });
   try {
-    for (const started = Date.now(); !fs.existsSync(readyFile); await new Promise(resolve => setImmediate(resolve)))
+    let readyWhileWriting = null;
+    for (const started = Date.now(); !fs.existsSync(readyFile); await new Promise(resolve => setImmediate(resolve))) {
+      if (readyWhileWriting === null && fs.existsSync(flag)) readyWhileWriting = fs.existsSync(readyFile);
       if (child.exitCode !== null || Date.now() - started > 15000) throw new Error('준비 파일이 생기지 않음');
+    }
     const ready = JSON.parse(fs.readFileSync(readyFile, 'utf8'));
+    assert.notEqual(readyWhileWriting, true, '임시 파일을 쓰는 동안 준비 파일 이름이 보임');
     assert.match(ready.url, /^http:\/\/127\.0\.0\.1:\d+\/#/);
     assert.equal(ready.pid, child.pid);
   } finally {
@@ -169,6 +181,80 @@ test('시험 도우미는 준비 파일을 끝내 읽지 못하면 띄운 서버
     assert.match(error.message, /서버 시작 시간 초과/);
   } finally {
     if (pid) try { process.kill(pid); } catch {}
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+function serverWith(hookLines, root, readyFile) {
+  // 훅을 먼저 불러온 설치형 서버를 띄운다. 훅은 준비 파일을 내놓는 순간의 경합을 흉내 낸다.
+  const hook = path.join(root, '경합.cjs');
+  fs.writeFileSync(hook, hookLines.join('\n'));
+  return spawn(process.execPath, ['--require', hook, path.join(__dirname, '설치형서버.cjs'), '--data-root', root, '--ready-file', readyFile, '--parent-pid', String(process.pid)], { windowsHide: true });
+}
+const tempLeft = (root, readyFile) => fs.readdirSync(root).filter(name => name.startsWith(`${path.basename(readyFile)}.`) && name.endsWith('.tmp'));
+const exitWithin = (child, ms) => Promise.race([once(child, 'exit'), new Promise(resolve => setTimeout(() => resolve(['시간 초과']), ms))]);
+test('준비 파일을 내놓기 직전에 같은 이름이 생기면 덮지 않고 서버를 끝낸다', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meeting-ready-'));
+  const readyFile = path.join(root, 'ready.json');
+  const child = serverWith([
+    "const fs = require('node:fs');",
+    "const target = process.argv[process.argv.indexOf('--ready-file') + 1];",
+    "for (const name of ['renameSync', 'linkSync', 'copyFileSync']) {",
+    '  const original = fs[name];',
+    '  fs[name] = function (from, to, ...rest) {',
+    "    if (String(to) === target && !fs.existsSync(target)) fs.writeFileSync(target, '기존');",
+    '    return original.call(fs, from, to, ...rest);',
+    '  };',
+    '}',
+  ], root, readyFile);
+  try {
+    const [code] = await exitWithin(child, 8000);
+    assert.equal(code, 0, '서버가 준비 파일을 덮지 않고 끝나야 함');
+    assert.equal(fs.readFileSync(readyFile, 'utf8'), '기존');
+    assert.deepEqual(tempLeft(root, readyFile), []);
+  } finally {
+    if (child.exitCode === null) { child.kill(); await gone(child.pid, 5000); }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+test('링크를 만들 수 없는 드라이브에서도 준비 파일을 내놓고 임시 파일을 남기지 않는다', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meeting-ready-'));
+  const readyFile = path.join(root, 'ready.json');
+  const child = serverWith([
+    "const fs = require('node:fs');",
+    "fs.linkSync = function () { const error = new Error('링크 없음'); error.code = 'EPERM'; throw error; };",
+  ], root, readyFile);
+  try {
+    for (const started = Date.now(); !fs.existsSync(readyFile); await new Promise(resolve => setTimeout(resolve, 20)))
+      if (child.exitCode !== null || Date.now() - started > 15000) throw new Error('준비 파일이 생기지 않음');
+    assert.equal(JSON.parse(fs.readFileSync(readyFile, 'utf8')).pid, child.pid);
+    for (const until = Date.now() + 2000; tempLeft(root, readyFile).length && Date.now() < until; await new Promise(resolve => setTimeout(resolve, 20)));
+    assert.deepEqual(tempLeft(root, readyFile), []);
+    assert.equal(child.exitCode, null, '서버는 계속 돌아야 함');
+  } finally {
+    if (child.exitCode === null) { child.kill(); await gone(child.pid, 5000); }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+test('이미 있던 임시 파일은 지우지 않고 서버를 끝낸다', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meeting-ready-'));
+  const readyFile = path.join(root, 'ready.json');
+  const child = serverWith([
+    "const fs = require('node:fs');",
+    "const target = process.argv[process.argv.indexOf('--ready-file') + 1];",
+    'const write = fs.writeFileSync;',
+    'fs.writeFileSync = function (file, ...rest) {',
+    '  const name = String(file);',
+    "  if (name.startsWith(target + '.') && name.endsWith('.tmp') && !fs.existsSync(name)) write.call(fs, name, '남의 임시');",
+    '  return write.call(fs, file, ...rest);',
+    '};',
+  ], root, readyFile);
+  try {
+    const [code] = await exitWithin(child, 8000);
+    assert.equal(code, 0, '서버가 실패를 알리고 끝나야 함');
+    assert.deepEqual(tempLeft(root, readyFile).map(name => fs.readFileSync(path.join(root, name), 'utf8')), ['남의 임시']);
+    assert.equal(fs.existsSync(readyFile), false);
+  } finally {
+    if (child.exitCode === null) { child.kill(); await gone(child.pid, 5000); }
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
