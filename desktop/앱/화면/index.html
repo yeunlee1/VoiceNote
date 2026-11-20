@@ -11,6 +11,7 @@
 <script src="./formats.js" defer></script>
 <script src="./release-notes.js" defer></script>
 <script src="./todos.js" defer></script>
+<script src="./activity-log.js" defer></script>
 <script src="./app.js" defer></script>
 </head>
 <body>
@@ -110,6 +111,7 @@
     </div>
         <div class="progress-block">
           <p id="workflow-status" class="workflow-status" role="status" aria-live="polite">‘회의 시작’을 누르면 바로 녹음합니다.</p>
+          <div id="activity-log" class="activity-log" hidden></div>
           <div class="button-row">
             <button id="retry-analysis" class="button button-outline" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-retry"/></svg>저장·분석 다시 시도</button>
             <button id="cancel-ai" class="button button-quiet" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-cancel"/></svg>분석 취소</button>
@@ -147,6 +149,7 @@
       </div>
     </div>
     <p id="result-status" class="fine-print" role="status"></p>
+    <div id="detail-activity" class="activity-log" hidden></div>
     <section id="panel-mine" class="result-panel mine" role="tabpanel" aria-labelledby="tab-mine" hidden></section>
     <section id="panel-minutes" class="result-panel" role="tabpanel" aria-labelledby="tab-minutes">
       <p id="archive-status" class="fine-print" role="status">분석이 끝나면 지난 회의에 자동 저장됩니다.</p>

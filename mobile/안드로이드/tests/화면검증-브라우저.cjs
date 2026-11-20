@@ -12,7 +12,7 @@ function serve() {
   const server = http.createServer((req, res) => {
     const name = path.basename(new URL(req.url, 'http://x').pathname);
     const file = path.join(assets, name);
-    if (!['index.html', 'app.js', 'flow.js', 'formats.js', 'todos.js', 'release-notes.js', 'app.css'].includes(name)) { res.writeHead(404); res.end(); return; }
+    if (!['index.html', 'app.js', 'flow.js', 'formats.js', 'todos.js', 'release-notes.js', 'activity-log.js', 'app.css'].includes(name)) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'Content-Type': types[path.extname(name)] }); if(name==='app.js'){res.end(fs.readFileSync(file,'utf8').replace('  window.receive =','  window.__settingsBridgeForTest = call;\n  window.receive ='));}else fs.createReadStream(file).pipe(res);
   });
   return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));

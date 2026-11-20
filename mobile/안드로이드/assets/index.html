@@ -11,6 +11,7 @@
 <script src="todos.js" defer></script>
 <script src="flow.js" defer></script>
 <script src="release-notes.js" defer></script>
+<script src="activity-log.js" defer></script>
 <script src="app.js" defer></script>
 </head>
 <body>
@@ -54,6 +55,7 @@
     </ol>
     <p id="record-state" class="visually-hidden">회의 준비 전</p>
     <p id="workflow" class="status" role="status" aria-live="polite">키를 등록하면 바로 회의를 시작할 수 있습니다.</p>
+    <div id="activity" class="activity-log" hidden></div>
     <button id="prepare" class="prepare" type="button" aria-expanded="true" aria-controls="prep" hidden><span>회의 준비</span><span id="prepare-hint" class="prepare-hint"></span></button>
     <div id="prep" class="prep">
       <div class="field"><label for="title">회의명</label><small id="title-hint" class="field-note">선택 · 비워 두면 AI가 회의 내용을 보고 정합니다</small><input id="title" maxlength="160" placeholder="선택" aria-describedby="title-hint" autocomplete="off"></div>
@@ -107,6 +109,7 @@
     <p id="meeting-date" class="meta"></p>
     <h2 id="meeting-title"></h2>
     <p id="meeting-status" class="status-line"></p>
+    <div id="meeting-activity" class="activity-log" hidden></div>
     <span id="refined-badge" class="refined-badge" hidden>의견 반영본</span>
     <label id="version-wrap" class="field" hidden>결과 버전<select id="result-version"></select></label>
     <div class="result-tabs" role="tablist" aria-label="회의 결과">

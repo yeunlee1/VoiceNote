@@ -60,6 +60,8 @@ try {
   $utf8=New-Object Text.UTF8Encoding($false)
   $manifest=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'AndroidManifest.xml'))
   if($DebugBuild){$manifest=$manifest.Replace('<application ','<application android:debuggable="true" ').Replace('</manifest>','<instrumentation android:name="kr.local.meetingjournal.AndroidChecks" android:targetPackage="kr.local.meetingjournal" /></manifest>')}
+  if($DebugBuild){$manifest=$manifest.Replace('android:usesCleartextTraffic="false"','android:usesCleartextTraffic="true"');if(-not $manifest.Contains('android:usesCleartextTraffic="true"')){throw '검증용 빌드의 cleartext 설정을 바꾸지 못했습니다.'}}
+  # 검증용 빌드만 기기 시험의 가짜 OpenAI(http://127.0.0.1)에 평문으로 붙게 한다. 설치본은 그대로 꺼 둔다.
   [IO.File]::WriteAllText((Join-Path $stage 'AndroidManifest.xml'),$manifest,$utf8)
   $sources=@(Get-ChildItem -LiteralPath (Join-Path $sourceLink 'src') -Recurse -Filter '*.java' | ForEach-Object {$_.FullName})
   if($DebugBuild){$sources+=Join-Path $sourceLink 'tests\AndroidChecks.java'}

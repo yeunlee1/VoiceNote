@@ -43,7 +43,8 @@ test('서비스의 회의 종료는 hold면 분석을 시작하지 않고, 없�
 test('서비스는 분석 요청의 방식과 시도 번호를 받아 상태에 싣는다', () => {
   assert.match(service, /attemptId=\(refining\|\|"analyze"\.equals\(action\)\)\?intent\.getStringExtra\("attemptId"\):null;/);
   assert.match(service, /analyze\(mode\(intent\.getStringExtra\("mode"\)\)\)/);
-  assert.match(service, /analyze\(mode\(fields\.optString\("mode",null\)\)\)/);
+  assert.match(service, /analyze\(mode\(fields\.optString\("mode",null\)\),activity\)/);
+  // 불러오기는 녹음 파일을 나눈 줄이 든 일지를 분석에 그대로 넘긴다.
 });
 
 test('전사까지만은 요약 없이 transcribed 상태를 저장한 뒤 체험을 확정한다', () => {
