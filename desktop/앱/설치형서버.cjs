@@ -33,8 +33,10 @@ function publishReady(partial, file) {
   try { fs.linkSync(partial, file); }
   catch (error) {
     if (error.code === 'EEXIST') throw error;
-    fs.writeFileSync(file, fs.readFileSync(partial), { flag: 'wx', mode: 0o600 });
-    // 링크를 만들 수 없는 드라이브면 예전처럼 준비 파일을 새로 만들어 쓴다. 이미 있으면 'wx'가 실패해 덮지 않는다.
+    if (fs.existsSync(file)) throw Object.assign(new Error('준비 파일이 이미 있습니다.'), { code: 'EEXIST' });
+    fs.renameSync(partial, file);
+    // 링크를 만들 수 없는 드라이브면 이름 바꾸기로 한 번에 내놓는다. 이름 바꾸기는 있는 파일을 덮으므로 바로 앞에서 한 번 더 확인한다. 창이 만든 고유한 이름이라 그 사이에 같은 이름이 생길 일은 없다.
+    return;
   }
   try { fs.rmSync(partial, { force: true }); } catch {}
   // 준비 파일은 이미 내놓았으므로 임시 이름을 지우지 못해도 서버는 그대로 둔다.
@@ -44,8 +46,10 @@ meeting.server.listen(0, '127.0.0.1', () => {
   let created = false;
   try {
     const ready = { url: `http://127.0.0.1:${meeting.server.address().port}/#${meeting.token}`, pid: process.pid };
-    fs.writeFileSync(partial, JSON.stringify(ready), { flag: 'wx', mode: 0o600 });
+    const fd = fs.openSync(partial, 'wx', 0o600);
     created = true;
+    // 임시 파일을 연 순간부터 이번 실행의 것으로 보고, 쓰다가 실패해도 아래에서 지운다.
+    try { fs.writeFileSync(fd, JSON.stringify(ready)); } finally { fs.closeSync(fd); }
     publishReady(partial, readyFile);
     meeting.setReadyFile(readyFile);
   } catch {

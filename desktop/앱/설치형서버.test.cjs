@@ -103,38 +103,42 @@ async function gone(pid, ms) {
 test('준비 파일은 쓰기가 느려도 다 쓴 뒤에만 그 이름으로 보인다', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meeting-ready-'));
   const hook = path.join(root, '느린쓰기.cjs');
-  const flag = path.join(root, '쓰는중.flag');
+  const flag = path.join(root, '쓰는중.flag'), ack = path.join(root, '확인함.flag');
   fs.writeFileSync(hook, [
     "const fs = require('node:fs');",
-    "const at = process.argv.indexOf('--ready-file'), target = at > 0 ? process.argv[at + 1] : null;",
-    `const flag = ${JSON.stringify(flag)};`,
-    'const write = fs.writeFileSync;',
+    "const target = process.argv[process.argv.indexOf('--ready-file') + 1];",
+    `const flag = ${JSON.stringify(flag)}, ack = ${JSON.stringify(ack)};`,
+    "const isTemp = name => name.startsWith(target + '.') && name.endsWith('.tmp');",
+    'const temps = new Set(), open = fs.openSync, write = fs.writeFileSync;',
+    'fs.openSync = function (file, ...rest) { const fd = open.call(fs, file, ...rest); if (isTemp(String(file))) temps.add(fd); return fd; };',
     'fs.writeFileSync = function (file, data, options) {',
-    '  const name = String(file);',
-    '  if (target && name === target) {',
-    "    fs.closeSync(fs.openSync(file, 'wx'));",
+    "  if (typeof file === 'number' ? temps.has(file) : isTemp(String(file))) {",
+    "    write.call(fs, flag, '1');",
+    '    for (const until = Date.now() + 10000; !fs.existsSync(ack) && Date.now() < until;);',
+    "  } else if (typeof file !== 'number' && String(file) === target) {",
+    "    fs.closeSync(open.call(fs, file, 'wx'));",
     '    for (const until = Date.now() + 1000; Date.now() < until;);',
     "    return write.call(fs, file, data, { ...(options && typeof options === 'object' ? options : {}), flag: 'w' });",
-    '  }',
-    "  if (target && name.startsWith(target + '.') && name.endsWith('.tmp')) {",
-    "    write.call(fs, flag, '1');",
-    '    for (const until = Date.now() + 1000; Date.now() < until;);',
     '  }',
     '  return write.apply(fs, arguments);',
     '};',
   ].join('\n'));
   // 준비 파일 이름으로 바로 쓰면 빈 파일부터 만들고 1초 뒤에 내용을 쓰게 해, 바쁜 PC에서 생긴 빈 준비 파일을 매번 재현한다.
-  // 임시 파일에 쓸 때는 쓰는중 표시를 남기고 1초 기다려, 그동안 준비 파일 이름이 보이지 않는지 본다.
+  // 임시 파일에 쓸 때는 쓰는중 표시를 남기고 시험이 확인함 표시를 남길 때까지 멈춰, 그동안 준비 파일 이름이 보이지 않는지 본다.
   const readyFile = path.join(root, 'ready.json');
   const child = spawn(process.execPath, ['--require', hook, path.join(__dirname, '설치형서버.cjs'), '--data-root', root, '--ready-file', readyFile, '--parent-pid', String(process.pid)], { windowsHide: true });
   try {
-    let readyWhileWriting = null;
+    let flagSeen = false;
     for (const started = Date.now(); !fs.existsSync(readyFile); await new Promise(resolve => setImmediate(resolve))) {
-      if (readyWhileWriting === null && fs.existsSync(flag)) readyWhileWriting = fs.existsSync(readyFile);
+      if (!flagSeen && fs.existsSync(flag)) {
+        flagSeen = true;
+        assert.equal(fs.existsSync(readyFile), false, '임시 파일을 쓰는 동안 준비 파일 이름이 보임');
+        fs.writeFileSync(ack, '1');
+      }
       if (child.exitCode !== null || Date.now() - started > 15000) throw new Error('준비 파일이 생기지 않음');
     }
     const ready = JSON.parse(fs.readFileSync(readyFile, 'utf8'));
-    assert.notEqual(readyWhileWriting, true, '임시 파일을 쓰는 동안 준비 파일 이름이 보임');
+    assert.equal(flagSeen, true, '임시 파일에 먼저 다 쓰지 않음');
     assert.match(ready.url, /^http:\/\/127\.0\.0\.1:\d+\/#/);
     assert.equal(ready.pid, child.pid);
   } finally {
@@ -221,10 +225,21 @@ test('링크를 만들 수 없는 드라이브에서도 준비 파일을 내놓�
   const readyFile = path.join(root, 'ready.json');
   const child = serverWith([
     "const fs = require('node:fs');",
+    "const target = process.argv[process.argv.indexOf('--ready-file') + 1];",
     "fs.linkSync = function () { const error = new Error('링크 없음'); error.code = 'EPERM'; throw error; };",
+    'const open = fs.openSync, write = fs.writeFileSync;',
+    'fs.writeFileSync = function (file, data, options) {',
+    "  if (typeof file !== 'number' && String(file) === target) {",
+    "    fs.closeSync(open.call(fs, file, 'wx'));",
+    '    for (const until = Date.now() + 1000; Date.now() < until;);',
+    "    return write.call(fs, file, data, { ...(options && typeof options === 'object' ? options : {}), flag: 'w' });",
+    '  }',
+    '  return write.apply(fs, arguments);',
+    '};',
   ], root, readyFile);
+  // 대체 경로가 준비 파일 이름에 바로 쓰면 빈 파일부터 보이게 해, 그 경로에서도 빈 준비 파일이 보이지 않는지 본다.
   try {
-    for (const started = Date.now(); !fs.existsSync(readyFile); await new Promise(resolve => setTimeout(resolve, 20)))
+    for (const started = Date.now(); !fs.existsSync(readyFile); await new Promise(resolve => setImmediate(resolve)))
       if (child.exitCode !== null || Date.now() - started > 15000) throw new Error('준비 파일이 생기지 않음');
     assert.equal(JSON.parse(fs.readFileSync(readyFile, 'utf8')).pid, child.pid);
     for (const until = Date.now() + 2000; tempLeft(root, readyFile).length && Date.now() < until; await new Promise(resolve => setTimeout(resolve, 20)));
@@ -241,17 +256,46 @@ test('이미 있던 임시 파일은 지우지 않고 서버를 끝낸다', asyn
   const child = serverWith([
     "const fs = require('node:fs');",
     "const target = process.argv[process.argv.indexOf('--ready-file') + 1];",
-    'const write = fs.writeFileSync;',
-    'fs.writeFileSync = function (file, ...rest) {',
-    '  const name = String(file);',
-    "  if (name.startsWith(target + '.') && name.endsWith('.tmp') && !fs.existsSync(name)) write.call(fs, name, '남의 임시');",
-    '  return write.call(fs, file, ...rest);',
-    '};',
+    "const isTemp = name => name.startsWith(target + '.') && name.endsWith('.tmp');",
+    'const open = fs.openSync, write = fs.writeFileSync;',
+    "const plant = name => { if (isTemp(name) && !fs.existsSync(name)) write.call(fs, name, '남의 임시'); };",
+    'fs.openSync = function (file, ...rest) { plant(String(file)); return open.call(fs, file, ...rest); };',
+    "fs.writeFileSync = function (file, ...rest) { if (typeof file !== 'number') plant(String(file)); return write.call(fs, file, ...rest); };",
   ], root, readyFile);
   try {
     const [code] = await exitWithin(child, 8000);
     assert.equal(code, 0, '서버가 실패를 알리고 끝나야 함');
     assert.deepEqual(tempLeft(root, readyFile).map(name => fs.readFileSync(path.join(root, name), 'utf8')), ['남의 임시']);
+    assert.equal(fs.existsSync(readyFile), false);
+  } finally {
+    if (child.exitCode === null) { child.kill(); await gone(child.pid, 5000); }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+test('임시 파일을 만든 뒤 쓰기에 실패하면 그 임시 파일을 지우고 서버를 끝낸다', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meeting-ready-'));
+  const readyFile = path.join(root, 'ready.json');
+  const child = serverWith([
+    "const fs = require('node:fs');",
+    "const target = process.argv[process.argv.indexOf('--ready-file') + 1];",
+    "const isTemp = name => name.startsWith(target + '.') && name.endsWith('.tmp');",
+    'const temps = new Set(), open = fs.openSync, write = fs.writeFileSync, writeSync = fs.writeSync;',
+    "const full = () => Object.assign(new Error('디스크 공간 없음'), { code: 'ENOSPC' });",
+    'fs.openSync = function (file, ...rest) { const fd = open.call(fs, file, ...rest); if (isTemp(String(file))) temps.add(fd); return fd; };',
+    "fs.writeSync = function (fd, ...rest) { if (temps.has(fd)) { writeSync.call(fs, fd, '{'); throw full(); } return writeSync.call(fs, fd, ...rest); };",
+    'fs.writeFileSync = function (file, ...rest) {',
+    "  if (typeof file === 'number' ? temps.has(file) : isTemp(String(file))) {",
+    "    if (typeof file === 'number') writeSync.call(fs, file, '{'); else write.call(fs, file, '{');",
+    '    throw full();',
+    '  }',
+    '  return write.call(fs, file, ...rest);',
+    '};',
+  ], root, readyFile);
+  // 임시 파일에 한 글자를 쓴 뒤 디스크가 꽉 찬 것처럼 실패시켜, 덜 쓴 임시 파일이 남지 않는지 본다.
+  try {
+    const [code] = await exitWithin(child, 8000);
+    assert.equal(code, 0, '서버가 실패를 알리고 끝나야 함');
+    assert.deepEqual(tempLeft(root, readyFile), []);
     assert.equal(fs.existsSync(readyFile), false);
   } finally {
     if (child.exitCode === null) { child.kill(); await gone(child.pid, 5000); }
