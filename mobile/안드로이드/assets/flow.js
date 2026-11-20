@@ -123,7 +123,16 @@
       fine: ['available', 'downloading', 'ready', 'confirming'].includes(u.status),
     };
   }
-  const api = { NOTES_LIMIT, EXHAUSTED_MESSAGE, canAnalyze, accessText, FORMAT_LABELS, outputFormat, actionLine, minutesSections, startBlockers, canStart, usageRows, tokens, updateView };
+  function analysisStopped(entry, status) {
+    // 회의 파일에 analyzing이 남았는데 서비스가 그 회의를 분석하고 있지 않으면, 앱이 분석 도중 닫혀 멈춘 것으로 본다.
+    // 서비스 상태를 아직 한 번도 조회하지 않았으면 판단하지 않는다. 회의 파일 값은 바꾸지 않고 보여 주는 글만 바꾼다.
+    if (!status || !entry || entry.state !== 'analyzing') return false;
+    const meeting = status.meeting;
+    const running = Boolean(status.active && meeting && meeting.state === 'analyzing' && meeting.id === entry.id
+      && (meeting.location || 'main') === (entry.location || 'main'));
+    return !running;
+  }
+  const api = { NOTES_LIMIT, EXHAUSTED_MESSAGE, canAnalyze, accessText, FORMAT_LABELS, outputFormat, actionLine, minutesSections, startBlockers, canStart, usageRows, tokens, updateView, analysisStopped };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.VoiceFlow = api;
 })(typeof window === 'object' ? window : globalThis);

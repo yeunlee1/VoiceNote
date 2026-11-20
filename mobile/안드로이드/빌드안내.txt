@@ -1,4 +1,4 @@
-﻿안드로이드 빌드 (VoiceNote 1.7.0, versionCode 9)
+﻿안드로이드 빌드 (VoiceNote 1.8.0, versionCode 10)
 
 Windows 앱과 같은 요약 요청 양식을 쓰는 Android 네이티브 앱입니다. WebView는 APK 안의 화면을 표시하고 녹음, API 통신, 기록 보관·공유, 설정 파일과 폴더 선택은 Java 코드가 처리합니다. 프로젝트를 고르지 않고 회의를 시작하며, 이전 프로젝트 1~3의 기록은 원래 위치에서 함께 읽습니다. 이전 자료를 지우거나 옮기지 않습니다.
 
@@ -16,7 +16,7 @@ Windows 앱과 같은 요약 요청 양식을 쓰는 Android 네이티브 앱입
   .\mobile\안드로이드\빌드.ps1 -DebugBuild
   .\mobile\안드로이드\빌드.ps1
 
-첫 명령은 검증용, 두 번째는 release APK를 공용 기본 키 없이 만듭니다. 시도마다 다른 OutputRoot를 지정합니다. 내부 결과 이름은 VoiceNote-android-test.apk 또는 VoiceNote-android.apk이며, 날짜와 1.7.0이 든 한글 이름으로도 복사합니다.
+첫 명령은 검증용, 두 번째는 release APK를 공용 기본 키 없이 만듭니다. 시도마다 다른 OutputRoot를 지정합니다. 내부 결과 이름은 VoiceNote-android-test.apk 또는 VoiceNote-android.apk이며, 날짜와 1.8.0이 든 한글 이름으로도 복사합니다.
 
 앱 안 업데이트(1.5.0부터)는 깃허브 최신 릴리즈의 VoiceNote-<버전>-update.json을 이 앱의 서명 인증서로 확인한 뒤 APK를 받아 PackageInstaller 세션으로 넘깁니다. 마지막 설치는 사람이 휴대폰 설치 화면에서 누르고, 처음 한 번 VoiceNote의 '이 출처 허용'을 켜야 합니다. 그래서 릴리즈마다 versionCode를 올리고 이전 버전과 같은 개인 서명 키로 서명해야 하며, 업데이트 목록은 .github\업데이트목록.ps1이 같은 키로 서명합니다. REQUEST_INSTALL_PACKAGES 권한과 UpdateReceiver가 이 기능에 쓰입니다. 사용자 전달은 이 산출물 경로가 아니라 루트 배포준비.ps1로 배포\최신과 배포\VoiceNote-배포.zip을 갱신하는 별도 단계입니다.
 
@@ -46,13 +46,24 @@ DefaultKeyFile의 기본값은 빈값이므로 지정하지 않으면 키가 들
 
 설정 파일은 voicenote-settings, version 2로 요약 모델·기본 출력 형식·내 형식만 옮깁니다. Android는 저장 위치를 내보내지 않고 Windows 파일의 저장 위치도 적용하지 않습니다. API 키·체험 기록·회의 자료는 포함하지 않습니다. 128KiB 이하 UTF-8 파일을 먼저 검증하고 미리보기에서 확인한 토큰으로 적용합니다. 취소하면 유지하고 저장 중 실패하면 이전 설정을 복구합니다. 1판 프로젝트 설정 파일은 이유를 알리고 거절합니다.
 
+분석 중 AI 요청 기록(1.8.0부터)
+
+- Ai가 OpenAI 요청마다 보냄·받음·실패를 시각과 함께 진행 기록(ActivityLog)에 남기고, MeetingService가 화면 상태와 알림으로 내보냄
+- 화면은 새 회의 진행 칸에 기다리는 줄을 포함해 최대 4줄, 분석 중인 회의를 연 결과 화면에 보관된 기록 최대 30줄과 기다리는 줄을 보이고 기다리는 줄의 지난 시간을 1초마다 올림
+- 알림은 열린 요청의 이름과 올라가는 시간을 보임(음성을 올리는 중은 요청을 보낸 때부터, 응답을 기다리는 중은 다 올린 때부터 셈)
+- 요청 감시(AiRequest)는 음성 올리기가 60초 넘게 진행되지 않거나 다 올린 뒤 응답이 5분 넘게 없으면 연결을 끊고 실패로 남김
+- 앱이 분석 도중 끝나 analyzing이 남은 회의는 목록에 '분석 멈춤'으로 보이고, 결과 화면은 앱이 분석 도중 닫혀 멈췄다는 이유와 다시 분석하면 받아 둔 전사부터 이어서 한다는 안내를 보임
+- 기록은 회의 파일에 저장하지 않음
+
 검증
 
 - node --test mobile/안드로이드/tests/*.test.cjs
 - node mobile/안드로이드/tests/화면검증-브라우저.cjs <캡처폴더>
-- JVM 단독 시험 12종은 TextChunksTest·TrialAccessTest·AiUsageTest·UpdateRulesTest·AiResponseModelTest·SettingsFileTest·AiFeedbackTest·CopyFilesTest·TextFileNameTest·AudioImportTest·MinutesItemsTest·MeetingDocumentTest입니다. 새 DebugBuild의 stage-debug/classes와 android-36/android.jar를 classpath로 따로 컴파일해 실행합니다. android.jar의 org.json은 JVM에서 Stub 예외가 나므로 Store·Ai 저장 동작은 기기 시험이 맡습니다.
+- JVM 단독 시험 14종은 TextChunksTest·TrialAccessTest·AiUsageTest·UpdateRulesTest·AiResponseModelTest·SettingsFileTest·AiFeedbackTest·CopyFilesTest·TextFileNameTest·AudioImportTest·MinutesItemsTest·MeetingDocumentTest·AiRequestTest·ActivityLogTest입니다. 새 DebugBuild의 stage-debug/classes와 android-36/android.jar를 classpath로 따로 컴파일해 실행합니다. android.jar의 org.json은 JVM에서 Stub 예외가 나므로 Store·Ai 저장 동작은 기기 시험이 맡습니다.
 - MinutesItemsTest·MeetingDocumentTest는 desktop/tests/fixtures의 공통 예시(회의결과-항목-예시.json·회의문서-예시.json)를 한글 없는 임시 경로로 복사해 받음
   - DebugBuild는 같은 두 예시를 minutes-items-cases.json·meeting-document-cases.json 자산으로 넣어 AndroidChecks가 기기에서도 대조함
+- ActivityLogTest는 desktop/tests/fixtures/진행기록-예시.json을 activity-cases.json으로 받아 화면 모듈과 같은 줄 문구인지 대조함
+- 진행 기록·요청 감시·알림 시간은 node mobile/안드로이드/tests/진행기록기기시험.cjs <검증용 APK> <결과폴더> [기준 검증용 APK]로 가짜 OpenAI를 써서 가상기기에서 봄
 - AndroidChecks는 DebugBuild에만 들어갑니다. 검증 전용 가상기기에 설치한 뒤 다음을 실행합니다.
 
   adb -s emulator-5554 install -r <검증용 APK>

@@ -10,7 +10,7 @@ module.exports = async ({ viewport, load, tap, evaluate, until, wait, shot, chec
     await viewport(width, height);
     await load('?update=available');
     check(`${width}px 켜서 새 버전이 확인되면 업데이트할지 묻는 창을 연다`, await until(asked));
-    check(`${width}px 묻는 창에 새 버전과 지금 버전, 묻는 말을 보인다`, (await text('update-ask-version')) === '1.7.1' && (await text('update-ask-current')) === '1.7.0' && /업데이트하시겠습니까/.test(await text('update-ask-question')));
+    check(`${width}px 묻는 창에 새 버전과 지금 버전, 묻는 말을 보인다`, (await text('update-ask-version')) === '1.8.1' && (await text('update-ask-current')) === '1.8.0' && /업데이트하시겠습니까/.test(await text('update-ask-question')));
     check(`${width}px 묻는 창 가로 넘침 없음`, await evaluate(fits));
     check(`${width}px 묻는 창의 단추는 누르기 충분히 크다`, await evaluate(big));
     await shot(`업데이트묻기-${width}.png`);

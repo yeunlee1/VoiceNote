@@ -22,7 +22,9 @@ public final class AndroidChecks extends Instrumentation {
     String probe="";
     static volatile String lastAuth;
     static final List<String> auths=new ArrayList<>();
-    @Override public void onCreate(Bundle args){super.onCreate(args);probe=args==null?"":args.getString("probe","");start();}
+    String apiUrl="";
+    // 진행 기록 기기 시험에서 실행기가 띄운 가짜 OpenAI 주소(http://127.0.0.1:<port>/v1/)다. 다른 시험은 쓰지 않는다.
+    @Override public void onCreate(Bundle args){super.onCreate(args);probe=args==null?"":args.getString("probe","");apiUrl=args==null?"":args.getString("apiUrl","");start();}
     static void expect(boolean value,String label){if(!value)throw new AssertionError(label);checks++;}
     static JSONObject item(String text,String... details)throws Exception{JSONArray list=new JSONArray();for(String detail:details)list.put(detail);return new JSONObject().put("text",text).put("details",list);}
     static JSONObject minutes()throws Exception{return new JSONObject().put("suggestedTitle","표준 문서 구현 준비").put("overview",new JSONArray().put(item("전체 방향","제조지시서를 먼저 구현함")).put(item("주요 결정","기존 DB 사용"))).put("topics",new JSONArray().put(new JSONObject().put("title","문서 연결").put("points",new JSONArray().put(item("생산 중 문서를 반복해서 확인하므로 이동을 단순하게 함"))))).put("decisions",new JSONArray().put(item("기존 DB 활용"))).put("actions",new JSONArray().put(new JSONObject().put("task","화면 기획").put("owner",JSONObject.NULL).put("due",JSONObject.NULL))).put("openQuestions",new JSONArray().put(item("탭 방식은 미정")));}
@@ -588,12 +590,12 @@ public final class AndroidChecks extends Instrumentation {
         expect(new JSONObject(requests.get(before+1)).getJSONArray("input").getJSONObject(1).getString("content").equals(Store.custom(custom).instruction()),"내 형식 지시를 줄이기 지침 바로 다음에 넣는다");
         JSONObject named=store.create(new JSONObject().put("date","2099-01-07").put("title","이름 힌트").put("participants","김과장, <이대리>"));
         File audio=new File(store.directory("main",named.getString("id")),"원음-시험.m4a");Store.write(audio,"시험 원음");
-        before=requests.size();replies.add("{\"text\":\"전사\"}");new Ai(store,message->{}).transcribe(named,audio);
+        before=requests.size();replies.add("{\"text\":\"전사\"}");new Ai(store,message->{}).transcribe(named,audio,1,1);
         String multipart=requests.get(before);
         expect(multipart.contains("name=\"keywords[]\"\r\n\r\n김과장\r\n")&&multipart.contains("name=\"keywords[]\"\r\n\r\n이대리\r\n")&&multipart.indexOf("name=\"languages[]\"")<multipart.indexOf("name=\"keywords[]\"")&&multipart.indexOf("name=\"keywords[]\"")<multipart.indexOf("name=\"response_format\""),"참석자 이름을 전사 힌트로 보낸다");
         JSONObject anonymous=store.create(new JSONObject().put("date","2099-01-07").put("title","힌트 없음"));
         File silent=new File(store.directory("main",anonymous.getString("id")),"원음-시험.m4a");Store.write(silent,"시험 원음");
-        before=requests.size();replies.add("{\"text\":\"전사\"}");new Ai(store,message->{}).transcribe(anonymous,silent);
+        before=requests.size();replies.add("{\"text\":\"전사\"}");new Ai(store,message->{}).transcribe(anonymous,silent,1,1);
         expect(!requests.get(before).contains("keywords[]"),"참석자가 없으면 힌트를 보내지 않는다");
     }
     static void templateCacheChecks(Store store)throws Exception{
@@ -605,10 +607,10 @@ public final class AndroidChecks extends Instrumentation {
         String original=assets.get("summary-meeting.json");JSONObject changed=new JSONObject(original);changed.getJSONArray("input").getJSONObject(0).put("content","새 기준으로 전사만 요약하세요.");assets.put("summary-meeting.json",changed.toString());replies.add(completed());
         new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0);expect(requests.size()==before+2,"일반 지시문 내용이 바뀌면 이전 캐시를 쓰지 않는다");
         assets.put("summary-meeting.json",original);replies.add(completed());
-        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인");
-        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인");expect(requests.size()==before+3,"같은 의견과 지시문의 성공 캐시를 재사용한다");
+        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인",1,1);
+        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인",1,1);expect(requests.size()==before+3,"같은 의견과 지시문의 성공 캐시를 재사용한다");
         JSONObject feedback=new JSONObject(assets.get("summary-feedback.json"));feedback.put("content","의견은 전사에서 다시 확인하세요.");assets.put("summary-feedback.json",feedback.toString());replies.add(completed());
-        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인");expect(requests.size()==before+4,"의견 지시문 내용이 바뀌면 이전 캐시를 쓰지 않는다");
+        new Ai(store,message->{},source).section(record,"같은 전사",null,dir,0,"결정을 확인",1,1);expect(requests.size()==before+4,"의견 지시문 내용이 바뀌면 이전 캐시를 쓰지 않는다");
         JSONArray messages=new JSONObject(requests.get(before+3)).getJSONArray("input");expect(messages.getJSONObject(messages.length()-2).getString("content").equals("의견은 전사에서 다시 확인하세요."),"변경한 실제 의견 지시문으로 요청한다");
     }
     static void itemChecks(Store store)throws Exception{
@@ -1141,9 +1143,152 @@ public final class AndroidChecks extends Instrumentation {
         store.saveTodos("main",legacyId,legacyResult,new JSONObject().put("finalized",false).put("items",new JSONArray().put(todoItem("화면 기획","김민수",false))));
         expect(legacyWriter.copyResult("main",legacyId,legacyResult).getJSONArray("written").length()==2&&legacyTarget.listFiles().length==4,"지문 없는 옛 사본도 할 일을 고치면 새 파일로 쓴다");
     }
+    // ── 진행 기록 기기 시험: 실행기(진행기록기기시험.cjs)가 띄운 가짜 OpenAI를 adb reverse로 잇고 apiUrl로 넘긴다. 실제 OpenAI는 부르지 않는다.
+    String fakeApi(){
+        if(!apiUrl.endsWith("/v1/"))throw new IllegalArgumentException("apiUrl은 /v1/로 끝나는 주소여야 합니다: "+apiUrl);
+        return apiUrl;
+    }
+    static final AiRequest.Listener QUIET=new AiRequest.Listener(){public void connected(){}public void wrote(long sent){}public void uploaded(){}};
+    static long since(long started){return (System.nanoTime()-started)/1_000_000;}
+    HttpURLConnection fakePost(String route,boolean chunked)throws IOException{
+        HttpURLConnection connection=(HttpURLConnection)new URL(fakeApi()+route).openConnection();
+        connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setConnectTimeout(5000);connection.setReadTimeout(30000);
+        if(chunked)connection.setChunkedStreamingMode(65536);else connection.setFixedLengthStreamingMode(2);
+        return connection;
+    }
+    static List<String> lines(ActivityLog log,boolean types){List<String> out=new ArrayList<>();for(ActivityLog.Entry entry:log.entries())out.add(types?entry.type:entry.text);return out;}
+    static final String ACTIVITY_TEXT="(document.getElementById('activity')||{}).textContent||''";
+    static final String LAST_ROW="(()=>{const rows=document.querySelectorAll('#activity .activity-list .activity-text');return rows.length?rows[rows.length-1].textContent:''})()";
+    String screenText(MainActivity screen,String js)throws Exception{
+        // 화면 스레드에서 WebView 글을 읽어 기다린다. 읽지 못하면 null이다.
+        java.util.concurrent.CountDownLatch done=new java.util.concurrent.CountDownLatch(1);String[] value={null};
+        runOnMainSync(()->screen.readForTest(js,result->{value[0]=result;done.countDown();}));
+        if(!done.await(5,java.util.concurrent.TimeUnit.SECONDS)||value[0]==null)return null;
+        Object parsed=new JSONTokener(value[0]).nextValue();return parsed instanceof String?(String)parsed:null;
+    }
+    boolean screenShows(MainActivity screen,String js,java.util.function.Predicate<String> ready,long millis)throws Exception{
+        long deadline=System.currentTimeMillis()+millis;
+        do{String text=screenText(screen,js);if(text!=null&&ready.test(text))return true;Thread.sleep(300);}while(System.currentTimeMillis()<deadline);
+        return false;
+    }
+    static JSONObject waitActivity(String meetingId,java.util.function.Predicate<JSONObject> ready,long millis)throws Exception{
+        // 서비스가 화면 상태에 실은 이 회의의 일지가 조건에 맞을 때까지 기다린다. 제한 시간이 지나면 null이다.
+        long deadline=System.currentTimeMillis()+millis;
+        do{JSONObject log=new JSONObject(MeetingService.snapshot==null?"{}":MeetingService.snapshot).optJSONObject("activity");
+            if(log!=null&&meetingId.equals(log.optString("meetingId"))&&ready.test(log))return log;Thread.sleep(50);}while(System.currentTimeMillis()<deadline);
+        return null;
+    }
+    static boolean requestIs(JSONObject log,String labelStart,String phase){JSONObject open=log.optJSONObject("open");return open!=null&&open.optString("label").startsWith(labelStart)&&phase.equals(open.optString("phase"));}
+    void mark(String name){
+        // 실행기가 알림 화면을 찍을 때를 알 수 있게 진행 표지를 보낸다(am instrument -r 출력의 INSTRUMENTATION_STATUS: mark=…).
+        Bundle status=new Bundle();status.putString("mark",name);sendStatus(2,status);
+    }
+    static void largeAudio(Store store,String id,int bytes)throws IOException{
+        // 올리기 진행이 화면에 보이도록 합성 원음을 늘린다. 가짜 서버가 받으므로 실제 소리가 아니어도 된다.
+        try(OutputStream out=new FileOutputStream(new File(store.directory("main",id),"원음-001.m4a"))){byte[] chunk=new byte[65536];for(int i=0;i<bytes/chunk.length;i++)out.write(chunk);}
+    }
+    android.content.Intent analyzeIntent(String id,String attempt){
+        return new android.content.Intent(getTargetContext(),MeetingService.class).setAction("analyze").putExtra("location","main").putExtra("id",id).putExtra("mode","minutes").putExtra("attemptId",attempt);
+    }
+    MainActivity openScreen(){
+        // 새 화면 인스턴스를 띄워 받는다. 앞 작업을 지우고 시작해 이미 떠 있는 화면 때문에 기다림이 끝나지 않는 일을 막는다.
+        MainActivity screen=(MainActivity)startActivitySync(new android.content.Intent(getTargetContext(),MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK|android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK));
+        mainShown=true;return screen;
+    }
+    void activityChecks()throws Exception{
+        // 요청 감시를 실제 연결로 확인하고, 가짜 OpenAI로 끝까지 분석한 일지와 다시 분석한 일지, 일지 없는 서비스 실패를 본다.
+        String previousBase=Ai.apiBase,previousKey=Store.sessionKey;
+        try{
+            Ai.apiBase=fakeApi();Store.sessionKey="sk-test-00000000000000000000";
+            AiRequest.Limits quick=new AiRequest.Limits(2000,4000,100);
+            long started=System.nanoTime();
+            try{AiRequest.exchange(fakePost("stall",true),(out,wrote)->{byte[] chunk=new byte[65536];long sent=0;for(int i=0;i<1024;i++){out.write(chunk);sent+=chunk.length;wrote.accept(sent);}},QUIET,quick);throw new AssertionError("본문을 읽지 않는 상대에게 64MB를 다 보내면 안 됩니다.");}
+            catch(AiRequest.Stalled expected){expect(since(started)<8000,"본문을 읽지 않는 가짜 서버로 64MB를 올리면 8초 안에 올리기 멈춤으로 풀린다("+since(started)+"ms)");}
+            started=System.nanoTime();
+            try{AiRequest.exchange(fakePost("silent",false),(out,wrote)->{out.write("{}".getBytes(StandardCharsets.UTF_8));wrote.accept(2);},QUIET,quick);throw new AssertionError("답하지 않는 상대의 요청이 끝나면 안 됩니다.");}
+            catch(SocketTimeoutException expected){expect(since(started)<8000,"답하지 않는 가짜 서버는 8초 안에 응답 없음으로 풀린다("+since(started)+"ms)");}
+            Store store=new Store(testContext());JSONObject record=heardRecord(store,"합성 진행 기록");String id=record.getString("id");
+            ActivityLog first=new ActivityLog("analysis",null);Ai ai=new Ai(store,message->{});ai.log=first;ai.run(record);
+            expect(lines(first,true).equals(Arrays.asList("sendTranscript","recvTranscript","sendSummary","recvSummary","savedMinutes"))&&new JSONObject(first.json()).isNull("open"),"가짜 OpenAI로 끝까지 분석하면 보냄·받음·저장 줄이 순서대로 남고 열린 요청이 없다 "+lines(first,false));
+            ActivityLog second=new ActivityLog("analysis",null);Ai again=new Ai(store,message->{});again.log=second;again.run(store.load("main",id));
+            List<String> texts=lines(second,false);
+            expect(texts.contains("받아 둔 전사 씀 · 조각 1/1")&&texts.contains("받아 둔 회의록 씀 · 구간 1/1")&&texts.stream().noneMatch(text->text.contains("요청 보냄")),"같은 회의를 새 일지로 다시 분석하면 받아 둔 전사·회의록을 쓰고 요청을 보내지 않는다 "+texts);
+            JSONObject lost=heardRecord(store,"합성 원음 없음");expect(new File(store.directory("main",lost.getString("id")),"원음-001.m4a").delete(),"시험용 원음을 지운다");
+            Ai.apiBase=fakeApi()+"local/";ActivityLog localLog=new ActivityLog("analysis",null);Ai reader=new Ai(store,message->{});reader.log=localLog;
+            // 위 요청 수 판정과 섞이지 않게 다른 경로로 보낸다. 본문을 쓰다 원음을 열지 못하므로 응답은 쓰지 않는다.
+            try{reader.run(lost);throw new AssertionError("원음이 없는데 분석이 끝나면 안 됩니다.");}
+            catch(FileNotFoundException expected){expect(lines(localLog,true).equals(Collections.singletonList("sendTranscript")),"원음 파일을 열지 못하면 보냄 줄 뒤에 연결 끊김을 적지 않고 원래 파일 오류로 끝난다 "+lines(localLog,false));}
+            finally{Ai.apiBase=fakeApi();}
+            Store real=new Store(getTargetContext());String missing=UUID.randomUUID().toString();
+            try{
+                showMain();launchService(analyzeIntent(missing,"합성-없는회의"));
+                JSONObject event=waitState(missing,"failed",15000);
+                expect("failed".equals(event.optString("state"))&&!MeetingService.active&&!event.has("activity"),"없는 회의 ID로 시작한 분석 서비스는 일지 없이 실패 상태로 끝난다 "+event);
+                // 가짜 OpenAI 요청 수는 실행기가 이 probe 앞뒤로 세어, 위 첫 분석의 전사·회의록 한 번씩 말고는 없었는지 확인한다.
+            }finally{deleteTree(real.directory("main",missing));MeetingService.startingAt=0;}
+            // 서비스 실패 처리가 없는 회의 번호로 빈 회의정보를 남기므로 시험이 지운다.
+        }finally{Ai.apiBase=previousBase;Store.sessionKey=previousKey;}
+    }
+    void activityServiceChecks()throws Exception{
+        // 화면을 띄운 채 서비스 분석을 돌려, 진행 칸의 기다림 줄·화면을 다시 만든 뒤의 같은 일지·끝난 뒤 마지막 줄을 본다. 실행기는 표지마다 알림 화면을 찍는다.
+        android.content.Context context=getTargetContext();Store store=new Store(context);String previousBase=Ai.apiBase,previousKey=Store.sessionKey;
+        try{
+            Ai.apiBase=fakeApi();Store.sessionKey="sk-test-00000000000000000000";
+            MainActivity screen=openScreen();
+            JSONObject record=heardRecord(store,"합성 진행 화면");String id=record.getString("id");largeAudio(store,id,24*1024*1024);
+            // adb reverse가 앞부분을 버퍼에 담아 작은 파일은 순식간에 올라가므로, 실행기가 천천히 읽는 동안 올리기 단계가 보이도록 크게 만든다.
+            launchService(analyzeIntent(id,"합성-진행화면"));
+            JSONObject opened=waitActivity(id,log->requestIs(log,"전사","upload")||requestIs(log,"전사","wait"),60000);
+            expect(opened!=null,"분석 서비스가 전사 요청을 열린 요청으로 화면 상태의 일지에 싣는다");
+            if(requestIs(opened,"전사","upload")){
+                if(waitActivity(id,log->requestIs(log,"전사","upload")&&log.optJSONObject("open").optLong("sent")>0,10000)!=null)mark("upload");
+                mark(screenShows(screen,ACTIVITY_TEXT,text->text.contains("음성 올리는 중"),8000)?"upload-shown":"upload-not-seen");
+                // 올리기가 몇 초 만에 끝나면 1.5초 조회 사이에 지나갈 수 있어 판정하지 않고 표지로만 남긴다. 올리기 문구는 Node 시험이 확인한다.
+            }
+            // 올리기가 순식간에 끝나 열자마자 기다림이면 올리기 표지는 없다. 아래 기다림 판정은 언제나 한다.
+            JSONObject waiting=waitActivity(id,log->requestIs(log,"전사","wait"),60000);
+            expect(waiting!=null,"분석 서비스가 기다리는 전사 요청을 화면 상태의 일지에 싣는다");mark("wait-transcript");
+            expect(screenShows(screen,ACTIVITY_TEXT,text->text.contains("응답 기다리는 중"),8000),"화면 진행 칸에 「응답 기다리는 중」 줄이 보인다");
+            String logId=waiting.getString("id");int pid=android.os.Process.myPid();
+            Instrumentation.ActivityMonitor monitor=addMonitor(MainActivity.class.getName(),null,false);
+            runOnMainSync(screen::recreate);
+            MainActivity fresh=(MainActivity)waitForMonitorWithTimeout(monitor,15000);removeMonitor(monitor);
+            expect(fresh!=null&&fresh!=screen,"분석 중 화면을 다시 만들면 새 화면 인스턴스가 생긴다");
+            JSONObject now=new JSONObject(MeetingService.snapshot).optJSONObject("activity");JSONArray entries=now==null?null:now.optJSONArray("entries");
+            String last=entries==null||entries.length()==0?"":entries.getJSONObject(entries.length()-1).optString("text");
+            expect(android.os.Process.myPid()==pid&&now!=null&&logId.equals(now.optString("id"))&&!last.isEmpty()&&screenShows(fresh,ACTIVITY_TEXT,text->text.contains(last),8000),"다시 만든 화면도 같은 프로세스의 같은 일지(마지막 줄 "+last+")를 보인다");
+            if(waitActivity(id,log->requestIs(log,"회의록 정리","wait"),60000)!=null)mark("wait-summary");
+            JSONObject done=waitState(id,"complete",120000);
+            expect("complete".equals(done.optString("state")),"분석 서비스가 회의록까지 끝낸다 "+done.optString("state"));
+            expect(screenShows(fresh,LAST_ROW,"회의록 저장함"::equals,8000),"분석이 끝나면 화면 진행 칸의 마지막 줄이 「회의록 저장함」이다");
+            mark("finished");
+        }finally{Ai.apiBase=previousBase;Store.sessionKey=previousKey;MeetingService.startingAt=0;}
+    }
+    void activityFinishedChecks()throws Exception{
+        // 서비스는 앞 화면에서 시작해야 해서 화면을 띄워 시작한 뒤 바로 닫는다. 분석이 끝난 다음 화면을 처음부터 다시 열어 첫 조회에 끝난 일지가 보이는지 본다.
+        android.content.Context context=getTargetContext();Store store=new Store(context);String previousBase=Ai.apiBase,previousKey=Store.sessionKey;
+        try{
+            Ai.apiBase=fakeApi();Store.sessionKey="sk-test-00000000000000000000";
+            JSONObject record=heardRecord(store,"합성 끝난 기록");String id=record.getString("id");
+            MainActivity starter=openScreen();
+            launchService(analyzeIntent(id,"합성-끝난기록"));
+            long deadline=System.currentTimeMillis()+5000;while(MeetingService.startingAt!=0&&System.currentTimeMillis()<deadline)Thread.sleep(20);
+            runOnMainSync(starter::finish);
+            deadline=System.currentTimeMillis()+5000;while(!starter.isDestroyed()&&System.currentTimeMillis()<deadline)Thread.sleep(20);
+            expect(starter.isDestroyed(),"서비스를 시작한 화면을 닫는다");
+            JSONObject done=waitState(id,"complete",60000);
+            expect("complete".equals(done.optString("state"))&&done.optJSONObject("activity")!=null,"분석 서비스가 회의록까지 끝내고 일지를 화면 상태에 남긴다");
+            MainActivity fresh=openScreen();
+            expect(screenShows(fresh,LAST_ROW,"회의록 저장함"::equals,10000),"분석이 끝난 뒤 처음 연 화면의 첫 조회에 끝난 일지(회의록 저장함)가 보인다");
+        }finally{Ai.apiBase=previousBase;Store.sessionKey=previousKey;MeetingService.startingAt=0;}
+    }
     @Override public void onStart(){Bundle result=new Bundle();try{
         // 기기 시험 중에는 업데이트 확인이 실제 깃허브나 아래 AI 모의 응답에 닿지 않게 한다.
         Updates.opener=url->{throw new IOException("기기 시험 중에는 업데이트를 확인하지 않습니다.");};
+        if(probe.equals("activity")){activityChecks();result.putString("stream","PASS "+checks+" activity checks\n");finish(-1,result);return;}
+        if(probe.equals("activityService")){activityServiceChecks();result.putString("stream","PASS "+checks+" activity service checks\n");finish(-1,result);return;}
+        if(probe.equals("activityFinished")){activityFinishedChecks();result.putString("stream","PASS "+checks+" activity finished checks\n");finish(-1,result);return;}
+        // 진행 기록 probe 셋은 가짜 OpenAI(apiUrl)를 쓰므로 아래 https 모의 응답을 걸기 전에, 일반 회귀 분기보다 먼저 처리한다.
         if(probe.equals("u-e2e")){updateEndToEnd();return;}
         if(probe.equals("samples")){sampleFiles();result.putString("stream","PASS "+checks+" sample files\n");finish(-1,result);return;}
         // 문서 선택 창 확인용 합성 파일만 만들고 끝낸다. 시험 결과를 바꾸지 않는다.

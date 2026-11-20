@@ -72,11 +72,13 @@ test('Android 원본은 줄이기 단계와 이름 힌트를 분석과 의견 �
   const source = fs.readFileSync(path.join(root, 'src/kr/local/meetingjournal/Ai.java'), 'utf8');
   assert.match(source, /previous=shorten\(record,previous,dir,null\);/);
   assert.match(source, /previous=shorten\(work,previous,dir,feedback\);/);
-  assert.match(source, /JSONObject answer=new JSONObject\(minutesText\(record,body\)\);\s*MinutesItems\.checkResponse\(answer,true\);\s*JSONObject merged=mergeCompact\(minutes,MinutesItems\.prune\(withoutForeignScript\(answer\)\)\);/);
+  assert.match(source, /JSONObject answer=checked\(requestMinutes\(record,body,"sendCompact",null\),true\);\s*JSONObject merged=mergeCompact\(minutes,MinutesItems\.prune\(withoutForeignScript\(answer\)\)\);/);
+  assert.match(source, /JSONObject minutes=new JSONObject\(raw\);MinutesItems\.checkResponse\(minutes,compact\);return minutes;/);
+  // checked는 받은 글을 JSON으로 읽고 응답 틀부터 확인한다. 줄이기·구간 요약 모두 이 확인을 거친 뒤 글자를 정리한다.
   // Android 9 이하는 정규식의 Is 접두사 문자 체계를 읽지 못하므로 쓰지 않는다.
   const rules = fs.readFileSync(path.join(root, 'src/kr/local/meetingjournal/SummaryRules.java'), 'utf8');
   assert.doesNotMatch(rules, /\\p\{Is|\\p\{(sc|script)=/i);
-  assert.match(source, /JSONObject minutes=new JSONObject\(minutesText\(record,body\)\);MinutesItems\.checkResponse\(minutes,false\);\s*minutes=MinutesItems\.prune\(withoutForeignScript\(minutes\)\);/);
+  assert.match(source, /JSONObject minutes=checked\(requestMinutes\(record,body,feedback!=null\?"sendRefine":"sendSummary",where\),false\);\s*minutes=MinutesItems\.prune\(withoutForeignScript\(minutes\)\);/);
   // 응답 틀 확인 → 일본어·중국어 글자 정리 → 빈 값 정리 순서를 데스크톱 서버와 같게 지킨다.
   assert.match(source, /SummaryRules\.participantKeywords\(record\.optString\("participants"\)\)/);
   const build = fs.readFileSync(path.join(root, '빌드.ps1'), 'utf8');

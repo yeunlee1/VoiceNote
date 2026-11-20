@@ -60,6 +60,8 @@ try {
   $utf8=New-Object Text.UTF8Encoding($false)
   $manifest=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'AndroidManifest.xml'))
   if($DebugBuild){$manifest=$manifest.Replace('<application ','<application android:debuggable="true" ').Replace('</manifest>','<instrumentation android:name="kr.local.meetingjournal.AndroidChecks" android:targetPackage="kr.local.meetingjournal" /></manifest>')}
+  if($DebugBuild){$manifest=$manifest.Replace('android:usesCleartextTraffic="false"','android:usesCleartextTraffic="true"');if(-not $manifest.Contains('android:usesCleartextTraffic="true"')){throw '검증용 빌드의 cleartext 설정을 바꾸지 못했습니다.'}}
+  # 검증용 빌드만 기기 시험의 가짜 OpenAI(http://127.0.0.1)에 평문으로 붙게 한다. 설치본은 그대로 꺼 둔다.
   [IO.File]::WriteAllText((Join-Path $stage 'AndroidManifest.xml'),$manifest,$utf8)
   $sources=@(Get-ChildItem -LiteralPath (Join-Path $sourceLink 'src') -Recurse -Filter '*.java' | ForEach-Object {$_.FullName})
   if($DebugBuild){$sources+=Join-Path $sourceLink 'tests\AndroidChecks.java'}
@@ -106,7 +108,7 @@ try {
   if($entries -notcontains 'assets/summary-compact.json'){throw 'APK에 결과 줄이기 지시문(summary-compact.json)이 없습니다.'}
   '의견 반영 지시문 포함: 예'
   "공용 기본 키 포함: $(if($entries -contains 'assets/default.key'){'예'}else{'아니요'})"
-  $korean=Join-Path $OutputRoot $(if($DebugBuild){((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.7.0-안드로이드-검증용.apk')}else{((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.7.0-안드로이드-설치본.apk')})
+  $korean=Join-Path $OutputRoot $(if($DebugBuild){((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.8.0-안드로이드-검증용.apk')}else{((Get-Date -Format 'yyyy-MM-dd')+'-VoiceNote-1.8.0-안드로이드-설치본.apk')})
   Copy-Item -LiteralPath (Join-Path $OutputRoot (Split-Path $output -Leaf)) -Destination $korean -Force
   Get-Item -LiteralPath $korean | Select-Object FullName,Length
 } finally {
